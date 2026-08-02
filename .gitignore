@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+transcripts/
+transcription_state.json
+transcription_state.json.corrupt
+tertius.log
+
+# transcripts and uploaded media never belong in the repo
+_uploads/
+*.srt
+*.txt
+!requirements.txt
