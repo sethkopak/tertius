@@ -17,6 +17,13 @@ from typing import Iterable
 
 from .config import STATE_FILENAME
 
+# What to do with a file when its turn comes.
+MODE_TRANSCRIBE = "transcribe"  # normal: Whisper writes the transcript
+MODE_ALIGN = "align"  # timestamp the supplied text instead
+MODE_SKIP = "skip"  # leave it alone
+MODE_UNDECIDED = "undecided"  # no text found; waiting on the user
+MODES = (MODE_TRANSCRIBE, MODE_ALIGN, MODE_SKIP, MODE_UNDECIDED)
+
 PENDING = "pending"
 IN_PROGRESS = "in_progress"
 DONE = "done"
@@ -135,10 +142,34 @@ class StateStore:
             self._data["options"] = dict(options)
             self._flush()
 
+    def find_reference_text(self, audio_path: str | os.PathLike) -> str | None:
+        """The text file that goes with this audio, matched by name.
+
+        `VolA01.mp3` pairs with `VolA01.txt` sitting beside it. Case-insensitive,
+        because Windows users do not think about that and should not have to.
+        """
+        audio = Path(audio_path)
+        exact = audio.with_suffix(".txt")
+        if exact.is_file():
+            return str(exact)
+        stem = audio.stem.lower()
+        try:
+            for candidate in audio.parent.iterdir():
+                if (
+                    candidate.is_file()
+                    and candidate.suffix.lower() == ".txt"
+                    and candidate.stem.lower() == stem
+                ):
+                    return str(candidate)
+        except OSError:
+            pass
+        return None
+
     def add_files(
         self,
         paths: Iterable[str | os.PathLike],
         base_dir: str | os.PathLike | None = None,
+        match_reference_text: bool = False,
     ) -> list[str]:
         """Register files as pending. Already-known files keep their status.
 
@@ -155,10 +186,22 @@ class StateStore:
                 key = _key(raw)
                 if key in self._data["files"]:
                     continue
+                reference = (
+                    self.find_reference_text(key) if match_reference_text else None
+                )
+                if not match_reference_text:
+                    mode = MODE_TRANSCRIBE
+                elif reference:
+                    mode = MODE_ALIGN
+                else:
+                    # No text found: the user decides, rather than us guessing.
+                    mode = MODE_UNDECIDED
                 self._data["files"][key] = {
                     "path": key,
                     "name": Path(key).name,
                     "subdir": _relative_dir(Path(key), root),
+                    "mode": mode,
+                    "reference_text": reference,
                     "status": PENDING,
                     "added_at": _now(),
                     "started_at": None,
@@ -172,6 +215,46 @@ class StateStore:
             if added:
                 self._flush()
         return added
+
+    def set_mode(self, path, mode: str, reference_text: str | None = None) -> dict:
+        """Choose what happens to one file: transcribe, align, or skip."""
+        if mode not in MODES:
+            raise ValueError(f"unknown mode: {mode!r}")
+        fields = {"mode": mode}
+        if mode == MODE_ALIGN:
+            if reference_text is None:
+                reference_text = (self.get(path) or {}).get("reference_text")
+            if not reference_text:
+                raise ValueError("aligning needs a text file")
+            fields["reference_text"] = str(reference_text)
+        elif reference_text is not None:
+            fields["reference_text"] = str(reference_text) or None
+        return self._update(path, **fields)
+
+    def files_needing_a_decision(self) -> list[str]:
+        with self._lock:
+            return [
+                key
+                for key, entry in self._data["files"].items()
+                if entry.get("mode") == MODE_UNDECIDED
+                and entry.get("status") in (PENDING, IN_PROGRESS)
+            ]
+
+    def rematch_reference_texts(self) -> int:
+        """Re-check for text files, for when they are added after queueing."""
+        found = 0
+        with self._lock:
+            for key, entry in self._data["files"].items():
+                if entry.get("mode") != MODE_UNDECIDED:
+                    continue
+                reference = self.find_reference_text(key)
+                if reference:
+                    entry["mode"] = MODE_ALIGN
+                    entry["reference_text"] = reference
+                    found += 1
+            if found:
+                self._flush()
+        return found
 
     def remove_file(self, path: str | os.PathLike) -> bool:
         with self._lock:

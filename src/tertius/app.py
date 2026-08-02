@@ -19,6 +19,7 @@ from flask import Flask, jsonify, render_template, request, send_file
 from .config import (
     COMPUTE_TYPES,
     DEVICES,
+    GRANULARITIES,
     MODEL_SIZES,
     OUTPUT_FORMATS,
     UPLOAD_DIRNAME,
@@ -62,6 +63,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             devices=DEVICES,
             compute_types=COMPUTE_TYPES,
             formats=OUTPUT_FORMATS,
+            granularities=GRANULARITIES,
             default_output_dir=str(manager.output_dir or out),
         )
 
@@ -168,8 +170,70 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         base_dir = (body.get("base_dir") or "").strip() or None
         if base_dir and not Path(base_dir).expanduser().is_dir():
             return _error(f"not a directory: {base_dir}", 400)
-        added = store.add_files(paths, base_dir=base_dir)
-        return jsonify({"added": len(added), "status": manager.status()})
+        match_text = bool(body.get("match_reference_text"))
+        added = store.add_files(
+            paths, base_dir=base_dir, match_reference_text=match_text
+        )
+        status = manager.status()
+        return jsonify(
+            {
+                "added": len(added),
+                "matched_text": sum(
+                    1 for f in status["files"] if f.get("mode") == "align"
+                ),
+                "needs_choice": len(store.files_needing_a_decision()),
+                "status": status,
+            }
+        )
+
+    @app.post("/api/queue/mode")
+    def api_queue_mode():
+        """Set one file to align / transcribe / skip, or attach a text file."""
+        body = request.get_json(silent=True) or {}
+        store = manager.store
+        if store is None:
+            return _error("no output directory attached", 409)
+        if manager.is_running():
+            return _error("cannot change the queue while a job is running", 409)
+        path = body.get("path")
+        mode = body.get("mode")
+        reference = (body.get("reference_text") or "").strip() or None
+        if not path or not mode:
+            return _error("path and mode are required")
+        if store.get(path) is None:
+            return _error("file is not in the queue", 404)
+        if reference and not Path(reference).expanduser().is_file():
+            return _error(f"text file not found: {reference}", 404)
+        try:
+            entry = store.set_mode(path, mode, reference_text=reference)
+        except ValueError as exc:
+            return _error(str(exc))
+        return jsonify({"file": entry, "status": manager.status()})
+
+    @app.post("/api/queue/rematch-text")
+    def api_queue_rematch_text():
+        """Look again for text files, after some have been added."""
+        store = manager.store
+        if store is None:
+            return _error("no output directory attached", 409)
+        found = store.rematch_reference_texts()
+        return jsonify({"matched": found, "status": manager.status()})
+
+    @app.post("/api/queue/decide-all")
+    def api_queue_decide_all():
+        """Answer every outstanding "no text file" question in one go."""
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode")
+        store = manager.store
+        if store is None:
+            return _error("no output directory attached", 409)
+        if mode not in ("transcribe", "skip"):
+            return _error("mode must be transcribe or skip")
+        changed = 0
+        for path in store.files_needing_a_decision():
+            store.set_mode(path, mode)
+            changed += 1
+        return jsonify({"changed": changed, "status": manager.status()})
 
     @app.post("/api/upload")
     def api_upload():

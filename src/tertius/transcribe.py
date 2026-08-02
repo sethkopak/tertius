@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -35,10 +35,21 @@ class Segment:
 
 
 @dataclass
+class TimedWord:
+    """One word with its timing - what aligning supplied text needs."""
+
+    word: str
+    start: float
+    end: float
+
+
+@dataclass
 class TranscriptionResult:
     segments: list[Segment]
     language: str | None = None
     duration: float | None = None
+    words: list[TimedWord] = field(default_factory=list)
+    alignment: dict | None = None  # set when supplied text was timestamped
 
 
 def format_timestamp(seconds: float, separator: str = ",") -> str:
@@ -388,25 +399,98 @@ class WhisperTranscriber:
         job start rather than part-way through a queue."""
         _ = self.model
 
-    def transcribe(self, path: str | Path) -> TranscriptionResult:
+    def transcribe(
+        self, path: str | Path, word_timestamps: bool = False
+    ) -> TranscriptionResult:
         segments_iter, info = self.model.transcribe(
             str(path),
             language=self.options.language,
             beam_size=self.options.beam_size,
             vad_filter=self.options.vad_filter,
+            word_timestamps=word_timestamps,
         )
         # faster-whisper returns a generator; consuming it is what does the work.
-        segments = [
-            Segment(start=s.start, end=s.end, text=s.text) for s in segments_iter
-        ]
+        segments = []
+        words: list[TimedWord] = []
+        for segment in segments_iter:
+            segments.append(
+                Segment(start=segment.start, end=segment.end, text=segment.text)
+            )
+            for word in getattr(segment, "words", None) or ():
+                words.append(
+                    TimedWord(
+                        word=word.word, start=word.start, end=word.end
+                    )
+                )
         return TranscriptionResult(
             segments=segments,
             language=getattr(info, "language", None),
             duration=getattr(info, "duration", None),
+            words=words,
         )
 
     def unload(self) -> None:
         self._model = None
+
+
+def align_file(
+    transcriber: WhisperTranscriber,
+    source: str | Path,
+    output_dir: str | Path,
+    reference_path: str | Path,
+    granularity: str = "auto",
+) -> tuple[list[str], TranscriptionResult]:
+    """Timestamp the supplied text instead of writing a fresh transcript."""
+    from .alignment import align, render_srt, render_timestamped_text
+
+    source = Path(source)
+    reference_path = Path(reference_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"file not found: {source}")
+    if not reference_path.is_file():
+        raise FileNotFoundError(f"text file not found: {reference_path}")
+
+    reference_text = reference_path.read_text(encoding="utf-8", errors="replace")
+    result = transcriber.transcribe(source, word_timestamps=True)
+    if not result.words:
+        raise RuntimeError(
+            "the model returned no word timings, so the text cannot be aligned"
+        )
+
+    alignment = align(reference_text, result.words, granularity)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    renderers = {"txt": render_timestamped_text, "srt": render_srt}
+    written: list[str] = []
+    for fmt in transcriber.options.formats:
+        render = renderers.get(fmt)
+        if render is None:
+            continue
+        target = output_dir / f"{source.stem}.{fmt}"
+        # Never write over the very text we were given.
+        if target.resolve() == reference_path.resolve():
+            target = output_dir / f"{source.stem}.timestamped.{fmt}"
+            log.warning(
+                "output would overwrite the supplied text; writing %s instead",
+                target.name,
+            )
+        tmp = target.with_name(target.name + ".partial")
+        tmp.write_text(render(alignment), encoding="utf-8")
+        tmp.replace(target)
+        written.append(str(target))
+
+    summary = alignment.summary()
+    log.info(
+        "aligned %s: %d chunk(s) by %s, %d timed, %d left untimed",
+        source.name,
+        summary["chunks"],
+        summary["granularity"],
+        summary["timed"],
+        summary["unmatched"],
+    )
+    result.alignment = summary
+    return written, result
 
 
 def transcribe_file(

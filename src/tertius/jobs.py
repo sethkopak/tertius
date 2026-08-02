@@ -16,8 +16,15 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .config import STATE_FILENAME, TranscriptionOptions
-from .state import DONE, SKIPPED, StateStore
-from .transcribe import WhisperTranscriber, transcribe_file
+from .state import (
+    DONE,
+    MODE_ALIGN,
+    MODE_SKIP,
+    MODE_TRANSCRIBE,
+    SKIPPED,
+    StateStore,
+)
+from .transcribe import WhisperTranscriber, align_file, transcribe_file
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +57,11 @@ class JobManager:
         transcriber_factory: Callable[[TranscriptionOptions], WhisperTranscriber]
         | None = None,
         transcribe_fn: Callable = transcribe_file,
+        align_fn: Callable = align_file,
     ):
         self._transcriber_factory = transcriber_factory or WhisperTranscriber
         self._transcribe_fn = transcribe_fn
+        self._align_fn = align_fn
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -181,6 +190,18 @@ class JobManager:
             pending = self._store.pending_files()
             if not pending:
                 raise JobError("nothing to transcribe — queue has no pending files")
+
+            # Files with no matching text file need an answer first, or the run
+            # would quietly do the opposite of what was wanted.
+            undecided = self._store.files_needing_a_decision()
+            if undecided:
+                names = ", ".join(Path(p).name for p in undecided[:3])
+                more = f" and {len(undecided) - 3} more" if len(undecided) > 3 else ""
+                raise JobError(
+                    f"{len(undecided)} file(s) have no matching text file and no "
+                    f"choice made yet ({names}{more}). For each one, add a text "
+                    f"file, or set it to transcribe normally, or skip it."
+                )
 
             summary = self._store.summary()
             self._run = self._empty_run()
@@ -315,6 +336,15 @@ class JobManager:
                 if not pending:
                     break
                 path = pending[0]
+
+                # Files the user marked "skip" are taken out of the queue's way
+                # without being touched.
+                if (store.get(path) or {}).get("mode") == MODE_SKIP:
+                    store.mark_skipped(path)
+                    log.info("skipping %s (set to skip)", path)
+                    with self._lock:
+                        self._run["skipped"] += 1
+                    continue
                 with self._lock:
                     self._current_file = path
                 entry = store.mark_in_progress(path)
@@ -324,10 +354,20 @@ class JobManager:
                 # so `A/talk.mp3` and `B/talk.mp3` do not collide on one name.
                 subdir = (entry or {}).get("subdir") or ""
                 target_dir = Path(output_dir) / subdir if subdir else output_dir
+                mode = (entry or {}).get("mode") or MODE_TRANSCRIBE
                 try:
-                    outputs, result = self._transcribe_fn(
-                        transcriber, path, target_dir
-                    )
+                    if mode == MODE_ALIGN:
+                        outputs, result = self._align_fn(
+                            transcriber,
+                            path,
+                            target_dir,
+                            entry["reference_text"],
+                            options.alignment_granularity,
+                        )
+                    else:
+                        outputs, result = self._transcribe_fn(
+                            transcriber, path, target_dir
+                        )
                 except Exception as exc:  # one bad file must not stop the batch
                     log.exception("failed: %s", path)
                     message = f"{type(exc).__name__}: {exc}"

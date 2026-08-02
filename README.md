@@ -297,6 +297,54 @@ lecture1.mp3  ->  lecture1.txt
 Also in the output directory: `transcription_state.json` (the queue), and
 `tertius.log` (per-file start/end plus errors, mirrored to the console).
 
+## Timestamping text you already have
+
+If you already have the words — a script, a chapter, a prepared reading — Tertius
+can put timestamps on *your* text instead of writing its own transcript. Your
+wording is kept exactly as written; only timings are added.
+
+Tick **Timestamp my own text**, then pick how finely to timestamp:
+
+| Option | What you get |
+| --- | --- |
+| **Auto** | Paragraphs if your text has them, sentences otherwise. |
+| **Per Paragraph** | One timestamp per blank-line-separated block. |
+| **Per Sentence** | One timestamp per sentence — more precise, more lines. |
+
+**Text files are matched by name.** `VolA01.mp3` pairs with `VolA01.txt` sitting
+beside it (case-insensitive). Near misses are not matched: `VolA01.mp3` will never
+grab `VolA02.txt`.
+
+**Text that isn't spoken is left alone.** Title pages, page numbers, copyright
+lines and footnotes find no match in the audio, so they are kept exactly as
+written with no timestamp rather than being forced onto a time. In a real run, a
+reading with four front-matter blocks and a footnote produced 15 timed paragraphs
+and 5 untimed ones, all text intact.
+
+**If there's no matching text file**, Tertius says so rather than guessing. The
+queue shows those files as **no text found**, and a banner lists them. For each
+one you can:
+
+- add the `.txt` beside the audio and press **Check again**, or
+- set it to **transcribe** normally, or
+- **skip** it entirely.
+
+There are bulk buttons for the last two. A job will not start while any file is
+still undecided — the whole point of asking is that it does not quietly do the
+opposite of what you wanted.
+
+Output goes to the normal `.txt` / `.srt` files: the `.txt` is your text with
+`[HH:MM:SS.mmm]` in front of each timed chunk, and the `.srt` is subtitles
+carrying your wording. If an output would land on the very text file you supplied,
+it is written as `<name>.timestamped.txt` instead so your source can't be
+overwritten.
+
+Alignment works by transcribing the audio for word-level timings and matching your
+text against it, so it tolerates the model mishearing a word here and there — it
+only needs enough anchor words to place each chunk. A timestamp that would run
+backwards (from a repeated phrase matching the wrong place) is dropped rather than
+emitted wrong.
+
 ### Folder structure is mirrored
 
 Scanning a folder reproduces its layout under the output directory:
@@ -328,6 +376,9 @@ straight into the output directory with no subfolder, as before.
 | `POST` | `/api/job/cancel` | Stop after the current file. |
 | `POST` | `/api/job/retry-failed` | Move `failed` back to `pending`. |
 | `POST` | `/api/queue/remove` | `{path}` → drop a file from the queue (not while running). |
+| `POST` | `/api/queue/mode` | `{path, mode, reference_text?}` → align / transcribe / skip one file. |
+| `POST` | `/api/queue/rematch-text` | Look again for `.txt` files added after queueing. |
+| `POST` | `/api/queue/decide-all` | `{mode}` → answer every outstanding "no text file" at once. |
 | `GET` | `/api/transcript?name=…&download=1` | Fetch a transcript from the output dir. |
 | `GET` | `/api/system?device=…&compute_type=…` | Machine capabilities + a verdict per model. |
 | `POST` | `/api/browse-folder` | Open the OS folder picker on this machine, return the path. |

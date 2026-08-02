@@ -85,6 +85,19 @@
         {% for c in compute_types %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
       </select>
     </div>
+    <div class="row">
+      <label class="inline"
+             title="Instead of writing a fresh transcript, take text you already have and add timestamps to it. Your wording is kept exactly; only timings are added.">
+        <input type="checkbox" id="opt-use-text"> Timestamp my own text</label>
+      <span id="alignment-options" hidden>
+        <label for="opt-granularity" title="How finely to timestamp your text">Timestamp</label>
+        <select id="opt-granularity"
+                title="Auto — paragraphs if your text has them, sentences otherwise.&#10;Per Paragraph — one timestamp per blank-line-separated block.&#10;Per Sentence — one timestamp per sentence (more precise, more lines).">
+          {% for g in granularities %}<option value="{{ g }}">{% if g == 'auto' %}Auto{% elif g == 'paragraph' %}Per Paragraph{% else %}Per Sentence{% endif %}</option>{% endfor %}
+        </select>
+        <span class="note dim">Text files are matched by name: <code>VolA01.mp3</code> → <code>VolA01.txt</code></span>
+      </span>
+    </div>
     <p class="note" id="model-warning"></p>
 
     <div class="card inner" id="model-info" hidden>
@@ -158,6 +171,19 @@
     <p class="note" id="job-error"></p>
   </section>
 
+  <section class="card warn-card" id="text-missing-banner" hidden>
+    <strong>Some files have no matching text file.</strong>
+    <span id="text-missing-detail"></span>
+    <div class="row">
+      <button id="btn-rematch-text"
+              title="Look again — use this after adding the missing .txt files next to the audio">Check again</button>
+      <button id="btn-all-transcribe"
+              title="Transcribe all of these normally instead of timestamping supplied text">Transcribe them normally</button>
+      <button id="btn-all-skip"
+              title="Leave all of these out of the run entirely">Skip them all</button>
+    </div>
+  </section>
+
   <section class="card">
     <h2>Queue</h2>
     <div class="counts" id="counts"></div>
@@ -166,6 +192,7 @@
         <tr>
           <th title="Input file name — hover a row to see its full path">File</th>
           <th title="pending: waiting · in_progress: being transcribed now · done: finished · failed: errored, see Detail · skipped: was already done">Status</th>
+          <th title="What will happen to this file: timestamp your supplied text, transcribe it normally, or skip it">Mode</th>
           <th title="Detected language and audio duration, or the error message if it failed">Detail</th>
           <th title="Click to open a finished transcript">Transcripts</th>
           <th></th>

@@ -29,8 +29,38 @@ function collectOptions() {
     compute_type: $('opt-compute').value,
     language: $('opt-language').value.trim() || null,
     formats,
+    use_reference_text: $('opt-use-text').checked,
+    alignment_granularity: $('opt-granularity').value,
   };
 }
+
+$('opt-use-text').onchange = () => {
+  $('alignment-options').hidden = !$('opt-use-text').checked;
+};
+
+$('btn-rematch-text').onclick = async () => {
+  try {
+    const res = await jsonPost('/api/queue/rematch-text', {});
+    note('add-note', res.matched
+      ? `Found text files for ${res.matched} more file(s).`
+      : 'Still no matching text files found.');
+    render(res.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+};
+
+const decideAll = async (mode) => {
+  try {
+    const res = await jsonPost('/api/queue/decide-all', { mode });
+    note('add-note', `Set ${res.changed} file(s) to ${mode}.`);
+    render(res.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+};
+$('btn-all-transcribe').onclick = () => decideAll('transcribe');
+$('btn-all-skip').onclick = () => decideAll('skip');
 
 function note(id, message, isError) {
   const el = $(id);
@@ -68,6 +98,41 @@ $('btn-theme').onclick = () => {
   localStorage.setItem('tertius-theme', next);
   applyTheme(next);
 };
+
+// Per-file mode. "undecided" is the interesting one: no text file was found, so
+// the user has to say what should happen rather than us picking for them.
+function renderMode(file, running) {
+  const mode = file.mode || 'transcribe';
+  if (mode === 'align') {
+    const name = basename(file.reference_text || '');
+    return `<span class="mode-align" title="Will timestamp ${file.reference_text}">text: ${name}</span>`;
+  }
+  if (mode === 'skip') {
+    return `<span class="mode-skip">skip</span>${running ? '' : modeButtons(file, ['transcribe'])}`;
+  }
+  if (mode === 'undecided') {
+    return (
+      `<span class="mode-undecided" title="No matching .txt file was found next to this audio">no text found</span>` +
+      (running ? '' : modeButtons(file, ['transcribe', 'skip']))
+    );
+  }
+  return `<span class="mode-transcribe">transcribe</span>${running ? '' : modeButtons(file, ['skip'])}`;
+}
+
+const MODE_LABEL = { transcribe: 'transcribe', skip: 'skip' };
+
+function modeButtons(file, modes) {
+  return (
+    ' ' +
+    modes
+      .map(
+        (m) =>
+          `<button class="tiny" data-mode="${m}" data-path="${encodeURIComponent(file.path)}" ` +
+          `title="Set this file to ${MODE_LABEL[m]}">${MODE_LABEL[m]}</button>`,
+      )
+      .join(' ')
+  );
+}
 
 function renderDownload(status) {
   const panel = $('download-panel');
@@ -186,6 +251,7 @@ function render(status) {
     return `<tr>
       <td class="file" title="${f.path}">${shownName}</td>
       <td class="status-${f.status}">${f.status}</td>
+      <td>${renderMode(f, status.running)}</td>
       <td class="detail">${detail || ''}</td>
       <td>${links}</td>
       <td>${remove}</td>
@@ -193,6 +259,32 @@ function render(status) {
   });
   $('queue').querySelector('tbody').innerHTML =
     rows.join('') || '<tr><td colspan="5" class="detail">Queue is empty.</td></tr>';
+
+  // The "no text found" alert, and the bulk answers to it.
+  const undecided = (status.files || []).filter((f) => f.mode === 'undecided');
+  const missingBanner = $('text-missing-banner');
+  missingBanner.hidden = undecided.length === 0;
+  if (undecided.length) {
+    $('text-missing-detail').textContent =
+      ` ${undecided.length} file(s) have no matching .txt beside them: ` +
+      `${undecided.slice(0, 3).map((f) => f.name).join(', ')}` +
+      `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}. ` +
+      `Add the text files and press Check again, or choose per file below.`;
+  }
+
+  document.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        const res = await jsonPost('/api/queue/mode', {
+          path: decodeURIComponent(btn.dataset.path),
+          mode: btn.dataset.mode,
+        });
+        render(res.status);
+      } catch (err) {
+        note('job-error', err.message, true);
+      }
+    };
+  });
 
   document.querySelectorAll('[data-remove]').forEach((btn) => {
     btn.onclick = async () => {
@@ -355,8 +447,13 @@ $('btn-scan').onclick = async () => {
     const queued = await jsonPost('/api/queue', {
       files: found.files,
       base_dir: found.directory,
+      match_reference_text: $('opt-use-text').checked,
     });
-    note('add-note', `Found ${found.count} file(s); queued ${queued.added} new.`);
+    let message = `Found ${found.count} file(s); queued ${queued.added} new.`;
+    if ($('opt-use-text').checked) {
+      message += ` Matched text for ${queued.matched_text}; ${queued.needs_choice} need a choice.`;
+    }
+    note('add-note', message);
     render(queued.status);
   } catch (err) {
     note('add-note', err.message, true);

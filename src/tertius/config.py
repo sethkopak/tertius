@@ -44,6 +44,10 @@ MODEL_SIZES = (
 # state file or a direct API call.
 MODEL_ALIASES = {"turbo": "large-v3-turbo", "large": "large-v3"}
 
+# How finely supplied text is timestamped. "auto" picks paragraphs when the
+# text has them and sentences otherwise.
+GRANULARITIES = ("auto", "paragraph", "sentence")
+
 DEVICES = ("auto", "cpu", "cuda")
 COMPUTE_TYPES = ("default", "int8", "int8_float16", "float16", "float32")
 OUTPUT_FORMATS = ("txt", "srt")
@@ -79,6 +83,9 @@ class TranscriptionOptions:
     beam_size: int = 5
     vad_filter: bool = True
     formats: list[str] = field(default_factory=lambda: ["txt", "srt"])
+    # Timestamp text you supply instead of writing a fresh transcript.
+    use_reference_text: bool = False
+    alignment_granularity: str = "auto"
 
     def __post_init__(self) -> None:
         self.model_size = MODEL_ALIASES.get(self.model_size, self.model_size)
@@ -101,6 +108,11 @@ class TranscriptionOptions:
                     "short code like en, es, fr, de, zh, ja (or leave it blank "
                     "to auto-detect)"
                 )
+        if self.alignment_granularity not in GRANULARITIES:
+            raise ValueError(
+                f"unknown timestamp granularity: {self.alignment_granularity!r} "
+                f"(expected one of: {', '.join(GRANULARITIES)})"
+            )
         if not self.formats:
             raise ValueError("at least one output format is required")
         bad = [f for f in self.formats if f not in OUTPUT_FORMATS]

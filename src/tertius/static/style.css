@@ -172,6 +172,12 @@ h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .05e
 #model-table code { font-size: 12px; }
 #model-table td { font-size: 13px; }
 
+button.tiny { padding: 1px 6px; font-size: 11px; border-radius: 4px; }
+.mode-align { color: var(--ok); }
+.mode-skip { color: var(--muted); }
+.mode-undecided { color: var(--warn); font-weight: 600; }
+.mode-transcribe { color: var(--muted); }
+
 .verdict-ok { color: var(--ok); }
 .verdict-warn { color: var(--warn); cursor: help; }
 .verdict-bad { color: var(--bad); cursor: help; }
