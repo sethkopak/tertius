@@ -26,6 +26,14 @@
 </header>
 
 <main>
+  <section class="card warn-card" id="cuda-banner" hidden>
+    <strong>GPU found, but it can't be used yet.</strong>
+    <span id="cuda-detail"></span>
+    <code id="cuda-command"></code>
+    <span class="note dim">Until then everything runs on the CPU, which works but is
+      much slower. Restart Tertius after installing.</span>
+  </section>
+
   <section class="card" id="resume-banner" hidden>
     <strong>Unfinished job found.</strong>
     <span id="resume-detail"></span>

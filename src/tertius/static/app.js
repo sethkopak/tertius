@@ -236,6 +236,24 @@ async function loadSystem() {
   return systemCache;
 }
 
+// A GPU existing and a GPU being usable are different things. Say so on load,
+// rather than letting someone discover it part-way through their first batch.
+function renderCudaBanner(sys) {
+  const runtime = (sys && sys.cuda_runtime) || {};
+  const banner = $('cuda-banner');
+  if (runtime.state !== 'missing') {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+  $('cuda-detail').textContent =
+    ` ${sys.gpu_name || 'A CUDA GPU'} was detected, but the CUDA runtime libraries ` +
+    `it needs aren't installed. Install them (about 1.2 GB) by running this in the ` +
+    `Tertius folder:`;
+  $('cuda-command').textContent =
+    '.venv\\Scripts\\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12';
+}
+
 function describeMachine(sys) {
   const parts = [];
   if (sys.cpu_count) parts.push(`${sys.cpu_count} CPU cores`);
@@ -268,6 +286,7 @@ function renderModelTable(data) {
 async function refreshModelAdvice() {
   try {
     const data = await loadSystem();
+    renderCudaBanner(data.system);
     renderModelTable(data);
     const chosen = data.models.find((m) => m.model === $('opt-model').value);
     const messages = [];

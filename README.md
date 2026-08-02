@@ -222,6 +222,12 @@ pre-download without transcribing anything:
 
 ## GPU (CUDA)
 
+**Tertius checks this for you at startup.** If it finds a CUDA GPU whose runtime
+libraries are missing, it says so in the console and shows a banner in the UI with
+the exact command to fix it — you should not have to hit the error to find out.
+The model comparison table also judges against the memory that will really be
+used, so a GPU that cannot run is not counted in your favour.
+
 > **If you see `Library cublas64_12.dll is not found or cannot be loaded`:** your
 > NVIDIA *driver* is installed but the CUDA *runtime libraries* are not. The
 > driver is what makes a GPU show up; the runtime is what actually does the

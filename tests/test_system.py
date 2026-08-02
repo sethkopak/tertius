@@ -9,6 +9,7 @@ from tertius.system import (
     MODEL_CATALOG,
     assess_model,
     check_compute_type,
+    cuda_runtime_status,
     describe_system,
     effective_device,
     total_ram_bytes,
@@ -54,6 +55,47 @@ def test_aliases_are_not_offered_as_separate_choices():
 )
 def test_effective_device(device, cuda, expected):
     assert effective_device(device, cuda) == expected
+
+
+def test_auto_ignores_a_gpu_whose_runtime_is_missing():
+    """The machine that started all this: a CUDA device with no CUDA libraries."""
+    assert effective_device("auto", 1, cuda_usable=False) == "cpu"
+    assert effective_device("cuda", 1, cuda_usable=False) == "cuda"  # forced is forced
+
+
+def test_model_verdicts_use_ram_when_the_gpu_cannot_be_used():
+    """Judging a model against VRAM it will never reach would mislead.
+
+    Small RAM, huge VRAM: if the verdict looked at the GPU it would say "fine",
+    so this only passes if it is judging the memory actually in play.
+    """
+    broken_gpu = machine(ram_gb=4, vram_gb=24, cuda=1)
+    broken_gpu["cuda_runtime"] = {"state": "missing"}
+
+    verdict = assess_model("large-v3", "auto", broken_gpu)
+
+    assert verdict["runs_on"] == "cpu"
+    assert verdict["verdict"] == "risky"
+    assert "RAM" in verdict["reason"]
+
+    # Same machine with working libraries: now the GPU is the thing to judge.
+    working = dict(broken_gpu, cuda_runtime={"state": "ok"})
+    assert assess_model("large-v3", "auto", working)["verdict"] == "ok"
+
+
+def test_cuda_runtime_status_says_no_gpu_when_there_is_none():
+    status = cuda_runtime_status(0)
+    assert status["state"] == "no_gpu"
+
+
+def test_cuda_runtime_status_on_this_machine():
+    """Whatever this machine has, the answer must be one of the known states."""
+    info = describe_system()
+    runtime = info["cuda_runtime"]
+    assert runtime["state"] in {"ok", "missing", "no_gpu"}
+    assert runtime["detail"]
+    if info["cuda_devices"] == 0:
+        assert runtime["state"] == "no_gpu"
 
 
 def test_big_model_on_a_small_machine_is_flagged():

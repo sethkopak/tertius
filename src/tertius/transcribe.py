@@ -237,31 +237,47 @@ def reset_cuda_state() -> None:
         _cuda_failure = None
 
 
-def register_cuda_dll_directories() -> list[str]:
-    """Put the pip-installed NVIDIA DLLs on Windows' DLL search path.
-
-    `pip install nvidia-cublas-cu12` drops its DLLs in
-    `site-packages/nvidia/*/bin`, which Windows does not search. Without this,
-    the libraries are installed and still "not found".
-    """
-    if os.name != "nt":
-        return []
+def nvidia_library_dirs() -> list[Path]:
+    """Where `pip install nvidia-cublas-cu12` puts its DLLs, if installed."""
     try:
         import nvidia
     except ImportError:
         return []
+    return [
+        binary_dir
+        for root in getattr(nvidia, "__path__", [])
+        for binary_dir in sorted(Path(root).glob("*/bin"))
+        if binary_dir.is_dir()
+    ]
+
+
+def register_cuda_dll_directories() -> list[str]:
+    """Put the pip-installed NVIDIA DLLs where CTranslate2 will actually find them.
+
+    `pip install nvidia-cublas-cu12` drops its DLLs in `site-packages/nvidia/*/bin`,
+    which Windows does not search, so the libraries end up installed and still
+    "not found".
+
+    Prepending to PATH is what does the work here. `os.add_dll_directory` alone is
+    not enough: it only affects loads that opt into LOAD_LIBRARY_SEARCH_USER_DIRS,
+    and CTranslate2 loads cuBLAS with a plain LoadLibrary, which uses the standard
+    search order - and that includes PATH. Verified the hard way.
+    """
+    if os.name != "nt":
+        return []
 
     added = []
-    for root in getattr(nvidia, "__path__", []):
-        for binary_dir in Path(root).glob("*/bin"):
-            if binary_dir.is_dir():
-                try:
-                    os.add_dll_directory(str(binary_dir))
-                    added.append(str(binary_dir))
-                except OSError:  # pragma: no cover - path vanished
-                    pass
+    for binary_dir in nvidia_library_dirs():
+        text = str(binary_dir)
+        try:
+            os.add_dll_directory(text)  # helps anything that does opt in
+        except OSError:  # pragma: no cover - path vanished
+            pass
+        if text not in os.environ.get("PATH", "").split(os.pathsep):
+            os.environ["PATH"] = text + os.pathsep + os.environ.get("PATH", "")
+        added.append(text)
     if added:
-        log.info("added %d NVIDIA DLL director(ies) to the search path", len(added))
+        log.info("put %d NVIDIA library folder(s) on PATH", len(added))
     return added
 
 

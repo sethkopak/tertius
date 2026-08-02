@@ -129,6 +129,60 @@ def gpu_info() -> dict:
     return info
 
 
+CUDA_PIP_PACKAGES = "nvidia-cublas-cu12 nvidia-cudnn-cu12"
+
+
+def cuda_runtime_status(cuda_devices: int) -> dict:
+    """Are the CUDA *runtime libraries* present, not just a GPU?
+
+    These are different things, and confusing them is the trap: the NVIDIA
+    driver is what makes a GPU appear, while cuBLAS/cuDNN are what actually run
+    the model. A machine can report a CUDA device and still fail on first use.
+
+    Checked cheaply here so a new user is told up front, rather than finding out
+    part-way through their first batch.
+    """
+    if not cuda_devices:
+        return {"state": "no_gpu", "detail": "No CUDA GPU detected.", "libraries": []}
+
+    from .transcribe import nvidia_library_dirs, register_cuda_dll_directories
+
+    register_cuda_dll_directories()
+    pip_dirs = [str(p) for p in nvidia_library_dirs()]
+    if pip_dirs:
+        return {
+            "state": "ok",
+            "detail": "CUDA runtime libraries are installed.",
+            "libraries": pip_dirs,
+        }
+
+    # No pip-installed libraries. A system-wide CUDA toolkit would also do, so
+    # check whether the loader can find cuBLAS before declaring it missing.
+    if os.name == "nt":
+        import ctypes
+
+        for candidate in ("cublas64_12.dll", "cublas64_11.dll"):
+            try:
+                ctypes.WinDLL(candidate)
+                return {
+                    "state": "ok",
+                    "detail": f"Found {candidate} on the system path.",
+                    "libraries": [candidate],
+                }
+            except OSError:
+                continue
+
+    return {
+        "state": "missing",
+        "detail": (
+            "A CUDA GPU is present but its runtime libraries are not installed, "
+            "so jobs will run on the CPU. Install them with: "
+            f"pip install {CUDA_PIP_PACKAGES} (about 1.2 GB)."
+        ),
+        "libraries": [],
+    }
+
+
 def supported_compute_types() -> dict:
     try:
         import ctranslate2
@@ -141,10 +195,15 @@ def supported_compute_types() -> dict:
         return {}
 
 
-def effective_device(device: str, cuda_devices: int) -> str:
-    """What `auto` will actually resolve to."""
+def effective_device(device: str, cuda_devices: int, cuda_usable: bool = True) -> str:
+    """What `auto` will actually resolve to.
+
+    `cuda_usable` matters: a GPU whose runtime libraries are missing will be
+    detected and then fall back to the CPU, so judging a model against VRAM it
+    is never going to use would be wrong.
+    """
     if device == "auto":
-        return "cuda" if cuda_devices else "cpu"
+        return "cuda" if cuda_devices and cuda_usable else "cpu"
     return device
 
 
@@ -154,7 +213,11 @@ def assess_model(
     """Rate one model for this machine: ok / tight / risky, with a reason."""
     entry = MODEL_CATALOG.get(model_size, {})
     needed = entry.get("download_bytes", 0) + MEMORY_HEADROOM_BYTES
-    target = effective_device(device, system.get("cuda_devices", 0))
+    target = effective_device(
+        device,
+        system.get("cuda_devices", 0),
+        cuda_usable=system.get("cuda_runtime", {}).get("state") != "missing",
+    )
 
     if target == "cuda":
         available = system.get("vram_bytes")
@@ -207,7 +270,11 @@ def check_compute_type(compute_type: str, device: str, system: dict) -> str | No
     """Warn about a compute type this machine's device cannot do."""
     if compute_type == "default":
         return None
-    target = effective_device(device, system.get("cuda_devices", 0))
+    target = effective_device(
+        device,
+        system.get("cuda_devices", 0),
+        cuda_usable=system.get("cuda_runtime", {}).get("state") != "missing",
+    )
     supported = (system.get("compute_types") or {}).get(target)
     if supported and compute_type not in supported:
         return (
@@ -229,5 +296,6 @@ def describe_system() -> dict:
         "gpu_name": gpu["name"],
         "vram_bytes": gpu["vram_bytes"],
         "compute_types": supported_compute_types(),
+        "cuda_runtime": cuda_runtime_status(gpu["cuda_devices"]),
     }
     return system

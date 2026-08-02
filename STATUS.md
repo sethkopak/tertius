@@ -62,21 +62,34 @@ Three separate defects, all fixed and verified against the real failure:
 Also: three consecutive identical failures now stop the batch instead of failing
 all 17 files one at a time.
 
-To use the GPU on this machine:
-`.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` (~1.2 GB).
-Tertius registers those packages' DLL directories at startup, which Windows does
-not do by itself.
+Fixed by installing `nvidia-cublas-cu12` + `nvidia-cudnn-cu12` (~1.2 GB) into the
+venv. One wrinkle worth remembering: `os.add_dll_directory()` was **not** enough
+to make CTranslate2 find them — it only affects loads that opt into
+`LOAD_LIBRARY_SEARCH_USER_DIRS`, and CTranslate2 uses a plain `LoadLibrary`.
+Prepending those folders to `PATH` is what actually works.
+
+Tertius now detects all of this at startup: a CUDA GPU with missing runtime
+libraries produces a console warning and a UI banner with the fix, and the model
+comparison table judges against the memory that will really be used.
+
+## Proven on real work (2026-08-02)
+
+The three biggest gaps are now closed, all in one run:
+
+- **Real speech, real model, real GPU.** `V1_00.mp3` (22.6 min of narration)
+  transcribed with `large-v3-turbo` on the RTX 2060 in **about 60 seconds** —
+  roughly 22x faster than realtime. Output reads correctly, including proper
+  nouns and punctuation; SRT timings line up.
+- CUDA runtime libraries installed (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`,
+  ~1.2 GB) and the GPU verified end-to-end through the server.
+- `large-v3-turbo` downloads and runs; float16 on the 6 GB card is comfortable.
 
 ## Not verified — read this before trusting it
 
-- **No real speech has ever been transcribed.** The only audio used was a
-  synthetic 220 Hz tone, which correctly produced an empty transcript. Accuracy
-  is completely unproven.
-- **The default model has never run.** `large-v3-turbo` (1.51 GB) has not been
-  downloaded. Only `tiny`, `base`, and `small` are cached.
-- **The GPU path has never been exercised.** Every run so far was CPU, despite
-  the RTX 2060 being present and detected.
+- Only one file's transcript has been read closely. Accuracy across the whole
+  set, and on harder audio, is still unassessed.
 - Windows only so far.
+- Long-batch behaviour (17 files back to back) has not been run start to finish.
 
 ## Next steps
 

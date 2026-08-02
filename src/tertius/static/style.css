@@ -84,6 +84,19 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .theme-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .theme-toggle span:first-child { font-size: 13px; }
 
+.warn-card { border-color: var(--warn); }
+.warn-card code {
+  display: block;
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 12px;
+  user-select: all;
+  overflow-x: auto;
+}
+
 button.danger { border-color: var(--bad); color: var(--bad); font-weight: 600; }
 button.danger:hover:not(:disabled) { background: var(--bad); color: var(--on-accent); }
 

@@ -122,6 +122,20 @@ def main(argv: list[str] | None = None) -> int:
     manager = app.config["JOB_MANAGER"]
     status = manager.status(include_files=False)
     log.info("output directory: %s", output_dir)
+
+    # Say this at startup as well as in the UI: a new user is looking at this
+    # window, and finding out mid-batch that the GPU was never usable is a bad
+    # way to learn it.
+    try:
+        from .system import describe_system
+
+        runtime = describe_system().get("cuda_runtime", {})
+        if runtime.get("state") == "missing":
+            log.warning("GPU detected but unusable - %s", runtime.get("detail"))
+        elif runtime.get("state") == "ok":
+            log.info("CUDA runtime libraries found; the GPU is available")
+    except Exception as exc:  # a capability probe must never stop the server
+        log.debug("could not check the CUDA runtime: %s", exc)
     if status.get("can_resume"):
         summary = status["summary"]
         log.info(
