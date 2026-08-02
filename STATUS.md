@@ -9,10 +9,12 @@ prompt asked for is implemented, plus the additions requested during the build
 (launcher, folder picker, model download progress, model comparison + system
 check, tooltips, light/dark theme, the Tertius name).
 
-**111 tests, all passing.** Whisper is mocked throughout — the suite downloads
+**113 tests, all passing.** Whisper is mocked throughout — the suite downloads
 nothing and decodes no audio.
 
 Run it: double-click `Start Tertius.bat`.
+
+Repo: `github.com/sethkopak/tertius` (private), branch `main`.
 
 ## Verified by actually running it
 
@@ -50,8 +52,7 @@ Not just by tests:
 1. **Transcribe real speech** and judge the output. Biggest untested thing.
 2. **Run the default turbo model once** and try `device: cuda` on the RTX 2060.
    Expect the first run to pause ~1.5 GB worth of download.
-3. **`git init` and commit.** There is no version control on this project yet.
-4. Decide what this is: personal tool, or something that ships.
+3. Decide what this is: personal tool, or something that ships.
 
 ## Ideas not built
 
