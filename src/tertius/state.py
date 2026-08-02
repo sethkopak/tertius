@@ -37,6 +37,22 @@ def _key(path: str | os.PathLike) -> str:
     return str(Path(path).expanduser().resolve())
 
 
+def _relative_dir(file_path: Path, base_dir: Path | None) -> str:
+    """Where this file sits inside the scanned folder, as a relative path.
+
+    Empty string for files at the top of the scan, or added without a base
+    (uploads, individually chosen files) - those land straight in the output
+    directory, as before.
+    """
+    if base_dir is None:
+        return ""
+    try:
+        relative = file_path.parent.relative_to(base_dir)
+    except ValueError:  # outside the scanned folder entirely
+        return ""
+    return "" if relative == Path(".") else relative.as_posix()
+
+
 class StateStore:
     """Tracks each file's status for one output directory.
 
@@ -119,12 +135,21 @@ class StateStore:
             self._data["options"] = dict(options)
             self._flush()
 
-    def add_files(self, paths: Iterable[str | os.PathLike]) -> list[str]:
+    def add_files(
+        self,
+        paths: Iterable[str | os.PathLike],
+        base_dir: str | os.PathLike | None = None,
+    ) -> list[str]:
         """Register files as pending. Already-known files keep their status.
+
+        `base_dir` is the folder that was scanned. Each file remembers where it
+        sat inside it, so the output directory can mirror the same structure -
+        which also stops `A/talk.mp3` and `B/talk.mp3` writing to one transcript.
 
         Returns the keys of files that were newly added.
         """
         added: list[str] = []
+        root = Path(base_dir).expanduser().resolve() if base_dir else None
         with self._lock:
             for raw in paths:
                 key = _key(raw)
@@ -133,6 +158,7 @@ class StateStore:
                 self._data["files"][key] = {
                     "path": key,
                     "name": Path(key).name,
+                    "subdir": _relative_dir(Path(key), root),
                     "status": PENDING,
                     "added_at": _now(),
                     "started_at": None,

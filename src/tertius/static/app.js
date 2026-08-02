@@ -165,12 +165,16 @@ function render(status) {
   $('btn-cancel').disabled = !status.running;
 
   const rows = (status.files || []).map((f) => {
+    // Transcripts mirror the source folders, so links need the path relative to
+    // the output directory, not just the file name.
     const links = (f.outputs || [])
       .map((o) => {
         const name = basename(o);
-        return `<a href="/api/transcript?name=${encodeURIComponent(name)}" target="_blank">${name}</a>`;
+        const relative = f.subdir ? `${f.subdir}/${name}` : name;
+        return `<a href="/api/transcript?name=${encodeURIComponent(relative)}" target="_blank">${name}</a>`;
       })
       .join(' ');
+    const shownName = f.subdir ? `${f.subdir}/${f.name}` : f.name;
     const detail = f.error
       ? f.error
       : [f.language ? `lang ${f.language}` : '', f.duration ? `${f.duration.toFixed(1)}s` : '']
@@ -180,7 +184,7 @@ function render(status) {
       ? ''
       : `<button data-remove="${encodeURIComponent(f.path)}">remove</button>`;
     return `<tr>
-      <td class="file" title="${f.path}">${f.name}</td>
+      <td class="file" title="${f.path}">${shownName}</td>
       <td class="status-${f.status}">${f.status}</td>
       <td class="detail">${detail || ''}</td>
       <td>${links}</td>
@@ -347,7 +351,11 @@ $('btn-scan').onclick = async () => {
       body: JSON.stringify({ directory, recursive: $('scan-recursive').checked }),
     });
     if (!found.count) return note('add-note', `No media files found in ${found.directory}.`);
-    const queued = await jsonPost('/api/queue', { files: found.files });
+    // Pass the scanned folder so the output directory can mirror its structure.
+    const queued = await jsonPost('/api/queue', {
+      files: found.files,
+      base_dir: found.directory,
+    });
     note('add-note', `Found ${found.count} file(s); queued ${queued.added} new.`);
     render(queued.status);
   } catch (err) {

@@ -117,6 +117,9 @@ never starts transcription, and re-scanning the same folder is safe: files alrea
 in the queue keep their status, and anything already transcribed is skipped rather
 than redone.
 
+With subfolders included, the output directory mirrors the source layout — see
+[Folder structure is mirrored](#folder-structure-is-mirrored).
+
 ## The job is independent of your browser
 
 The transcription job lives on a worker thread owned by the server process, not
@@ -294,9 +297,23 @@ lecture1.mp3  ->  lecture1.txt
 Also in the output directory: `transcription_state.json` (the queue), and
 `tertius.log` (per-file start/end plus errors, mirrored to the console).
 
-Note: two source files with the same stem in different folders (`a/talk.mp3` and
-`b/talk.mp3`) write to the same transcript name. Use separate output directories
-for those.
+### Folder structure is mirrored
+
+Scanning a folder reproduces its layout under the output directory:
+
+```
+D:\Audio\intro.mp3                    ->  transcripts\intro.txt
+D:\Audio\Volume A\talk.mp3            ->  transcripts\Volume A\talk.txt
+D:\Audio\Volume A\part 2\talk.mp3     ->  transcripts\Volume A\part 2\talk.txt
+D:\Audio\Volume B\talk.mp3            ->  transcripts\Volume B\talk.txt
+```
+
+Each file remembers where it sat inside the folder you scanned, so same-named
+files in different folders no longer overwrite each other — the three `talk.mp3`
+files above produce three separate transcripts.
+
+Files added any other way (uploads, or files outside the scanned folder) go
+straight into the output directory with no subfolder, as before.
 
 ## HTTP API
 
@@ -304,7 +321,7 @@ for those.
 | --- | --- | --- |
 | `GET` | `/api/status` | Full job + queue state (what the UI polls). |
 | `POST` | `/api/scan` | `{directory, recursive}` → media files found. |
-| `POST` | `/api/queue` | `{files: [...]}` → add to queue without starting. |
+| `POST` | `/api/queue` | `{files: [...], base_dir?}` → add to queue without starting. `base_dir` is the scanned folder, and makes the output mirror its structure. |
 | `POST` | `/api/upload` | multipart `files` → save to `_uploads/` and queue. |
 | `POST` | `/api/job/start` | `{files?, output_dir?, options?, retry_failed?}` → returns at once. |
 | `POST` | `/api/job/resume` | Work the pending set from an interrupted run. |

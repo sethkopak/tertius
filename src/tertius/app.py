@@ -163,7 +163,12 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         missing = [p for p in paths if not Path(p).expanduser().is_file()]
         if missing:
             return _error(f"file(s) not found: {', '.join(missing[:5])}", 404)
-        added = store.add_files(paths)
+        # base_dir is the folder that was scanned; it lets the output directory
+        # mirror the source layout.
+        base_dir = (body.get("base_dir") or "").strip() or None
+        if base_dir and not Path(base_dir).expanduser().is_dir():
+            return _error(f"not a directory: {base_dir}", 400)
+        added = store.add_files(paths, base_dir=base_dir)
         return jsonify({"added": len(added), "status": manager.status()})
 
     @app.post("/api/upload")

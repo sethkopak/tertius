@@ -317,12 +317,16 @@ class JobManager:
                 path = pending[0]
                 with self._lock:
                     self._current_file = path
-                store.mark_in_progress(path)
+                entry = store.mark_in_progress(path)
                 log.info("transcribing %s", path)
                 started = time.time()
+                # Mirror the scanned folder's layout under the output directory,
+                # so `A/talk.mp3` and `B/talk.mp3` do not collide on one name.
+                subdir = (entry or {}).get("subdir") or ""
+                target_dir = Path(output_dir) / subdir if subdir else output_dir
                 try:
                     outputs, result = self._transcribe_fn(
-                        transcriber, path, output_dir
+                        transcriber, path, target_dir
                     )
                 except Exception as exc:  # one bad file must not stop the batch
                     log.exception("failed: %s", path)
