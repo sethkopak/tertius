@@ -7,8 +7,11 @@ files; the worker thread does everything else.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
@@ -224,6 +227,32 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
     def api_job_cancel():
         manager.cancel()
         return jsonify(manager.status())
+
+    @app.post("/api/job/force-stop")
+    def api_job_force_stop():
+        """Kill the server outright.
+
+        The last resort when a file is wedged inside the model's native code,
+        where a cooperative cancel can never land. Safe precisely because the
+        state file is durable: on the next launch the in-progress file is reset
+        to pending and re-transcribed, and finished work is kept.
+        """
+        log.warning("force stop requested - exiting the process")
+
+        def bail_out():
+            time.sleep(0.4)  # let this response reach the browser first
+            os._exit(1)
+
+        threading.Thread(target=bail_out, daemon=True).start()
+        return jsonify(
+            {
+                "stopping": True,
+                "message": (
+                    "Tertius is shutting down. Nothing finished is lost - "
+                    "relaunch it and press Resume to carry on."
+                ),
+            }
+        )
 
     @app.post("/api/job/retry-failed")
     def api_job_retry_failed():

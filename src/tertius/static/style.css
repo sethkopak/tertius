@@ -84,6 +84,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .theme-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .theme-toggle span:first-child { font-size: 13px; }
 
+button.danger { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+button.danger:hover:not(:disabled) { background: var(--bad); color: var(--on-accent); }
+
 /* Model download indicator */
 .download {
   border: 1px solid var(--accent);

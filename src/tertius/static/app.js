@@ -128,6 +128,24 @@ function render(status) {
     : 'No job yet.';
   note('job-error', status.error || '', true);
 
+  // Cancel is cooperative and only checked between files. A file wedged inside
+  // the model's native code cannot be interrupted at all, so say that plainly
+  // instead of showing "cancelling" forever, and offer the thing that works.
+  const stuck = status.force_stop_suggested;
+  $('btn-force-stop').hidden = !stuck;
+  let notice = status.notice || '';
+  if (stuck) {
+    const secs = Math.round(status.cancel_pending_seconds || 0);
+    notice =
+      `Still on "${basename(status.current_file || '')}" ${secs}s after you cancelled. ` +
+      `Cancel only takes effect between files, and a file stuck inside the model ` +
+      `can't be interrupted. Use Force stop — finished work is kept, and you can ` +
+      `Resume afterwards.`;
+  }
+  const noticeEl = $('job-notice');
+  noticeEl.textContent = notice;
+  noticeEl.className = notice ? 'note warn-text' : 'note';
+
   const s = status.summary || {};
   $('counts').innerHTML = ['total', 'pending', 'in_progress', 'done', 'failed', 'skipped']
     .map((k) => `<span>${k.replace('_', ' ')}: <b>${s[k] || 0}</b></span>`)
@@ -363,6 +381,23 @@ $('btn-cancel').onclick = async () => {
     render(await jsonPost('/api/job/cancel', {}));
   } catch (err) {
     note('job-error', err.message, true);
+  }
+};
+
+$('btn-force-stop').onclick = async () => {
+  const button = $('btn-force-stop');
+  button.disabled = true;
+  try {
+    const res = await jsonPost('/api/job/force-stop', {});
+    clearTimeout(pollTimer); // the server is going away; stop asking it things
+    note('job-error', '');
+    $('job-notice').textContent = res.message;
+    $('job-state').textContent = 'stopped';
+  } catch (err) {
+    // A server that dies before answering is a successful force stop.
+    clearTimeout(pollTimer);
+    $('job-notice').textContent =
+      'Tertius has stopped. Relaunch it and press Resume to carry on.';
   }
 };
 

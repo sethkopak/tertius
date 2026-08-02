@@ -36,6 +36,37 @@ Not just by tests:
   per-file download links. Model table, theme toggle, and download panel all
   checked visually. No console errors.
 
+## 2026-08-02 — GPU incident, fixed
+
+First real use (17 files, ~38 min each) hit
+`RuntimeError: Library cublas64_12.dll is not found or cannot be loaded`, then
+**hung**. Root cause: the NVIDIA driver is installed but the CUDA runtime
+libraries are not, so `get_cuda_device_count()` reported 1 device and `auto`
+chose the GPU. Confirmed on this machine — no `cublas64_12.dll` anywhere.
+
+Three separate defects, all fixed and verified against the real failure:
+
+1. **`auto` trusted a device count instead of proving the GPU works.** Loading a
+   model on CUDA succeeds even with no runtime libraries; only the first encode
+   fails. Now a one-second dummy transcription runs at job start. `auto` falls
+   back to the CPU and says why; explicit `cuda` fails with the fix instructions.
+2. **A failed CUDA call poisons the process.** Reproduced directly: after one
+   CUDA failure, the *next* CUDA attempt deadlocked for 10 minutes rather than
+   raising. That is what wedged file 2 in the original incident. The first
+   failure is now remembered process-wide and the GPU is never retried.
+3. **Cancel lied.** It is checked between files, so a wedged native call meant
+   "CANCELLING" forever with no explanation. It now reports how long it has been
+   waiting and, after 20s, offers **Force stop** (kills the server; safe because
+   state is durable and Resume redoes the interrupted file).
+
+Also: three consecutive identical failures now stop the batch instead of failing
+all 17 files one at a time.
+
+To use the GPU on this machine:
+`.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` (~1.2 GB).
+Tertius registers those packages' DLL directories at startup, which Windows does
+not do by itself.
+
 ## Not verified — read this before trusting it
 
 - **No real speech has ever been transcribed.** The only audio used was a

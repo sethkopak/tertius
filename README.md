@@ -222,13 +222,55 @@ pre-download without transcribing anything:
 
 ## GPU (CUDA)
 
+> **If you see `Library cublas64_12.dll is not found or cannot be loaded`:** your
+> NVIDIA *driver* is installed but the CUDA *runtime libraries* are not. The
+> driver is what makes a GPU show up; the runtime is what actually does the
+> maths. Install them into the venv:
+>
+> ```bash
+> .venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+> ```
+>
+> That is about 1.2 GB. Tertius adds those packages' `bin` folders to Windows'
+> DLL search path at startup, which Windows does not do on its own — installing
+> them without that leaves the libraries present and still "not found". Or just
+> set **Device** to `cpu` and accept the slower run.
+
+
 Set **Device** to `cuda` and **Compute** to `float16` (or `int8_float16` on smaller
-cards). This needs an NVIDIA GPU plus the cuBLAS and cuDNN libraries that
-CTranslate2 links against — see faster-whisper's README for the current CUDA
-version requirements. On CPU, use `int8` for a large speedup at a small accuracy
-cost.
+cards). On CPU, use `int8` for a large speedup at a small accuracy cost.
+
+**`auto` proves the GPU works before using it.** A CUDA device merely *existing*
+is not enough — loading a model on CUDA succeeds even when the runtime libraries
+are missing, and the failure only appears on the first encode. So Tertius runs a
+one-second dummy transcription at job start:
+
+- `auto` — if that fails, it quietly rebuilds on the CPU and tells you why in the
+  Run panel. The batch still runs.
+- `cuda` — if that fails, the job stops with the error and the fix, rather than
+  silently taking ten times longer on the CPU than you expected.
+
+Once a CUDA operation has failed, Tertius will not touch the GPU again for the
+life of the process. That is not caution for its own sake: after a failed CUDA
+call, CTranslate2 can *deadlock* on the next one instead of raising, which is
+unrecoverable from Python.
 
 If the model fails to load, the UI shows the error and nothing is marked failed.
+
+## When Cancel won't take
+
+Cancel is cooperative and is checked *between* files, so it can take a while on a
+long file. If a file wedges inside the model's native code, Cancel can never land
+at all — Python cannot interrupt a native call.
+
+After 20 seconds of waiting, Tertius stops pretending: it explains the situation
+and shows a **Force stop** button, which kills the server outright. That is safe
+here by design — the state file is durable, so relaunch, press **Resume**, and the
+interrupted file is transcribed again from scratch while finished work is kept.
+
+Relatedly, if three files in a row fail with the *same* error, the batch stops
+instead of grinding through the rest of the queue to fail every one of them. The
+remaining files stay pending.
 
 ## Output
 

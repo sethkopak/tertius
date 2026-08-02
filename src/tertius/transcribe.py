@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,6 +194,77 @@ def ensure_model_downloaded(
     return snapshot_download(resolve_repo_id(size_or_id), **kwargs)
 
 
+class GpuUnavailableError(RuntimeError):
+    """The GPU was asked for but cannot actually run a model."""
+
+
+CUDA_FIX_HINT = (
+    "The NVIDIA driver reports a GPU, but CTranslate2 could not load the CUDA "
+    "runtime libraries it needs. Install them into this venv with:\n"
+    "    .venv\\Scripts\\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12\n"
+    "(about 1.2 GB), or set Device to cpu."
+)
+
+
+# Once a CUDA operation has failed in this process, CTranslate2 can *deadlock*
+# on the next one instead of raising - observed on a machine with an NVIDIA
+# driver but no CUDA runtime libraries. So the first failure is remembered for
+# the life of the process and the GPU is never touched again.
+_cuda_failure: str | None = None
+_cuda_failure_lock = threading.Lock()
+
+
+def cuda_known_broken() -> str | None:
+    with _cuda_failure_lock:
+        return _cuda_failure
+
+
+def mark_cuda_broken(reason: str) -> None:
+    global _cuda_failure
+    with _cuda_failure_lock:
+        if _cuda_failure is None:
+            _cuda_failure = reason
+            log.warning(
+                "CUDA is unusable in this process; every later job will use the "
+                "CPU without retrying the GPU (a retry can hang)"
+            )
+
+
+def reset_cuda_state() -> None:
+    """Test hook - forget that CUDA failed."""
+    global _cuda_failure
+    with _cuda_failure_lock:
+        _cuda_failure = None
+
+
+def register_cuda_dll_directories() -> list[str]:
+    """Put the pip-installed NVIDIA DLLs on Windows' DLL search path.
+
+    `pip install nvidia-cublas-cu12` drops its DLLs in
+    `site-packages/nvidia/*/bin`, which Windows does not search. Without this,
+    the libraries are installed and still "not found".
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import nvidia
+    except ImportError:
+        return []
+
+    added = []
+    for root in getattr(nvidia, "__path__", []):
+        for binary_dir in Path(root).glob("*/bin"):
+            if binary_dir.is_dir():
+                try:
+                    os.add_dll_directory(str(binary_dir))
+                    added.append(str(binary_dir))
+                except OSError:  # pragma: no cover - path vanished
+                    pass
+    if added:
+        log.info("added %d NVIDIA DLL director(ies) to the search path", len(added))
+    return added
+
+
 class WhisperTranscriber:
     """Lazily loads a faster-whisper model and reuses it across the batch."""
 
@@ -204,13 +276,15 @@ class WhisperTranscriber:
         self.options = options
         self.on_download_progress = on_download_progress
         self._model = None
+        self.active_device: str | None = None
+        self.gpu_fallback_reason: str | None = None
 
-    def _load_model(self):
+    def _build(self, device: str):
         # Imported here so the app, its tests, and the UI all work on a machine
         # where the (heavy) model stack is not installed yet.
         from faster_whisper import WhisperModel
 
-        kwargs = {"device": self.options.device}
+        kwargs = {"device": device}
         compute_type = self.options.resolved_compute_type()
         if compute_type:
             kwargs["compute_type"] = compute_type
@@ -223,10 +297,69 @@ class WhisperTranscriber:
         log.info(
             "loading model %s (device=%s, compute_type=%s)",
             self.options.model_size,
-            self.options.device,
+            device,
             compute_type or "auto",
         )
         return WhisperModel(model_path, **kwargs)
+
+    @staticmethod
+    def _prove_device_works(model) -> None:
+        """Actually run the model once, on one second of silence.
+
+        Loading a model on CUDA succeeds even when the CUDA *runtime* libraries
+        are missing - the failure only surfaces on the first encode. Worse, once
+        that has failed, the next call can wedge in native code where Python
+        cannot interrupt it. So force the first encode here, on audio we made
+        up, where a failure is cheap and catchable.
+        """
+        import numpy
+
+        silence = numpy.zeros(16_000, dtype=numpy.float32)
+        segments, _info = model.transcribe(
+            silence, language="en", beam_size=1, vad_filter=False
+        )
+        for _ in segments:  # consuming the generator is what runs the encoder
+            break
+
+    def _load_model(self):
+        register_cuda_dll_directories()
+        wanted = self.options.device
+        cuda_devices = 0
+        try:
+            import ctranslate2
+
+            cuda_devices = ctranslate2.get_cuda_device_count()
+        except Exception:  # pragma: no cover - ctranslate2 always present in practice
+            pass
+
+        target = "cuda" if wanted == "cuda" or (wanted == "auto" and cuda_devices) else "cpu"
+
+        # Never retry a GPU that has already failed in this process: the retry
+        # can hang forever instead of raising.
+        already_broken = cuda_known_broken()
+        if target == "cuda" and already_broken:
+            if wanted == "cuda":
+                raise GpuUnavailableError(f"{already_broken}\n\n{CUDA_FIX_HINT}")
+            self.gpu_fallback_reason = already_broken
+            target = "cpu"
+
+        if target == "cuda":
+            try:
+                model = self._build("cuda")
+                self._prove_device_works(model)
+                self.active_device = "cuda"
+                return model
+            except Exception as exc:
+                mark_cuda_broken(str(exc))
+                if wanted == "cuda":
+                    # They asked for the GPU explicitly; do not silently ignore it.
+                    raise GpuUnavailableError(f"{exc}\n\n{CUDA_FIX_HINT}") from exc
+                self.gpu_fallback_reason = str(exc)
+                log.warning("GPU unusable (%s) - falling back to the CPU", exc)
+
+        model = self._build("cpu")
+        self.active_device = "cpu"
+        return model
 
     @property
     def model(self):
@@ -235,8 +368,8 @@ class WhisperTranscriber:
         return self._model
 
     def warmup(self) -> None:
-        """Force the model to load now, so a bad model/device fails loudly at
-        job start rather than once per file."""
+        """Force the model to load *and run* now, so a broken device fails at
+        job start rather than part-way through a queue."""
         _ = self.model
 
     def transcribe(self, path: str | Path) -> TranscriptionResult:

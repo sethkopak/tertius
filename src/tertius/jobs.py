@@ -33,6 +33,10 @@ DOWNLOADING_MODEL = "downloading_model"
 LOADING_MODEL = "loading_model"
 TRANSCRIBING = "transcribing"
 
+# Stop the batch after this many files fail in a row with the identical error:
+# that is the environment being broken, not a run of bad files.
+REPEATED_FAILURE_LIMIT = 3
+
 
 class JobError(RuntimeError):
     """Raised for invalid job control requests (e.g. start while running)."""
@@ -63,6 +67,9 @@ class JobManager:
         self._run = self._empty_run()
         self._phase: str | None = None
         self._download = self._empty_download()
+        self._cancel_requested_at: float | None = None
+        self._notice: str | None = None
+        self._active_device: str | None = None
 
     # ------------------------------------------------------------------ setup
 
@@ -185,6 +192,9 @@ class JobManager:
             self._current_file = None
             self._phase = None
             self._download = self._empty_download()
+            self._cancel_requested_at = None
+            self._notice = None
+            self._active_device = None
             self._started_at = time.time()
             self._finished_at = None
 
@@ -207,8 +217,26 @@ class JobManager:
             return self.start(files=None, output_dir=self._output_dir)
 
     def cancel(self) -> None:
-        """Ask the worker to stop after the file it is currently working on."""
+        """Ask the worker to stop after the file it is currently working on.
+
+        This is cooperative, and the check happens between files. A file wedged
+        inside the model's native code cannot be interrupted from Python at all,
+        so cancelling can appear to do nothing. `status()` reports how long the
+        request has been outstanding so the UI can offer a force stop instead of
+        showing "cancelling" forever.
+        """
+        with self._lock:
+            if self._cancel_requested_at is None:
+                self._cancel_requested_at = time.time()
         self._cancel.set()
+
+    def force_stop_is_the_only_way_out(self, patience: float = 20.0) -> bool:
+        """Has a cancel been pending long enough to look stuck?"""
+        with self._lock:
+            requested = self._cancel_requested_at
+            return bool(
+                requested and self.is_running() and time.time() - requested > patience
+            )
 
     def join(self, timeout: float | None = None) -> None:
         thread = self._thread
@@ -269,6 +297,15 @@ class JobManager:
 
         with self._lock:
             self._phase = TRANSCRIBING
+            if getattr(transcriber, "gpu_fallback_reason", None):
+                self._notice = (
+                    "The GPU could not be used, so this job is running on the CPU "
+                    f"(slower). Reason: {transcriber.gpu_fallback_reason}"
+                )
+            self._active_device = getattr(transcriber, "active_device", None)
+
+        last_error: str | None = None
+        repeated = 0
 
         try:
             while True:
@@ -289,10 +326,35 @@ class JobManager:
                     )
                 except Exception as exc:  # one bad file must not stop the batch
                     log.exception("failed: %s", path)
-                    store.mark_failed(path, f"{type(exc).__name__}: {exc}")
+                    message = f"{type(exc).__name__}: {exc}"
+                    store.mark_failed(path, message)
                     with self._lock:
                         self._run["failed"] += 1
                         self._run["processed"] += 1
+                        if message == last_error:
+                            repeated += 1
+                        else:
+                            last_error, repeated = message, 1
+
+                    # A bad file is a bad file; the same error on file after
+                    # file is the environment, and grinding through the whole
+                    # queue to fail every one of them helps nobody.
+                    if repeated >= REPEATED_FAILURE_LIMIT:
+                        log.error(
+                            "%d files in a row failed identically - stopping", repeated
+                        )
+                        with self._lock:
+                            self._state = ERROR
+                            self._error = (
+                                f"{repeated} files in a row failed with the same "
+                                f"error, so the batch was stopped with "
+                                f"{len(store.pending_files())} still pending. "
+                                f"Fix the cause and resume.\n\n{message}"
+                            )
+                            self._finished_at = time.time()
+                            self._current_file = None
+                            self._phase = None
+                        return
                     continue
                 store.mark_done(
                     path,
@@ -357,7 +419,15 @@ class JobManager:
                 "phase": self._phase,
                 "download": dict(self._download),
                 "cancel_requested": self._cancel.is_set(),
+                "cancel_pending_seconds": (
+                    round(time.time() - self._cancel_requested_at, 1)
+                    if self._cancel_requested_at and running
+                    else None
+                ),
+                "notice": self._notice,
+                "active_device": self._active_device,
             }
+        payload["force_stop_suggested"] = self.force_stop_is_the_only_way_out()
         if store is not None:
             snapshot = store.snapshot()
             payload["summary"] = snapshot["summary"]

@@ -128,6 +128,8 @@
               title="Stop after the file currently being transcribed. Finished files are kept; the rest stay pending so you can resume.">Cancel</button>
       <button id="btn-retry"
               title="Put every failed file back in the queue to try again">Retry failed</button>
+      <button id="btn-force-stop" class="danger" hidden
+              title="Shut Tertius down immediately. Use when Cancel will not take — a file stuck inside the model cannot be interrupted any other way. Finished work is kept; relaunch and press Resume.">Force stop</button>
       <span id="job-state" class="pill idle"
             title="Current job state: idle, running, completed, cancelled, or error">idle</span>
     </div>
@@ -144,6 +146,7 @@
 
     <div class="progress"><div class="bar" id="progress-bar"></div></div>
     <p class="note" id="progress-text">No job yet.</p>
+    <p class="note" id="job-notice"></p>
     <p class="note" id="job-error"></p>
   </section>
 
