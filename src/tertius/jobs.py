@@ -345,9 +345,12 @@ class JobManager:
                     with self._lock:
                         self._run["skipped"] += 1
                     continue
+                # Mark the store first, then publish the current file: status
+                # must never claim to be working on something the state file
+                # has not caught up with yet.
+                entry = store.mark_in_progress(path)
                 with self._lock:
                     self._current_file = path
-                entry = store.mark_in_progress(path)
                 log.info("transcribing %s", path)
                 started = time.time()
                 # Mirror the scanned folder's layout under the output directory,
