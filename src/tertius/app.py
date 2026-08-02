@@ -243,7 +243,18 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         store = manager.store
         if store is None:
             return _error("no output directory attached", 409)
+
+        # .txt files are kept, not rejected: uploading a recording together with
+        # its text is the obvious way to use the timestamping feature, and the
+        # two land side by side in _uploads/ so name matching finds them.
+        match_text = str(request.form.get("match_reference_text", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         saved: list[str] = []
+        texts: list[str] = []
         rejected: list[str] = []
         for item in uploaded:
             name = Path(item.filename or "").name
@@ -253,14 +264,84 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             item.save(str(target))
             if is_media_file(target):
                 saved.append(str(target))
+            elif target.suffix.lower() == ".txt":
+                texts.append(str(target))
             else:
                 rejected.append(name)
                 target.unlink(missing_ok=True)
+
+        # Save every file before matching, so order of upload does not matter.
         if saved:
-            store.add_files(saved)
+            store.add_files(saved, match_reference_text=match_text)
+        status = manager.status()
         return jsonify(
-            {"saved": saved, "rejected": rejected, "status": manager.status()}
+            {
+                "saved": saved,
+                "texts": texts,
+                "rejected": rejected,
+                "matched_text": sum(
+                    1 for f in status["files"] if f.get("mode") == "align"
+                ),
+                "needs_choice": len(store.files_needing_a_decision()),
+                "status": status,
+            }
         )
+
+    @app.post("/api/queue/reference-mode")
+    def api_queue_reference_mode():
+        """Turn text-timestamping on or off for everything already queued.
+
+        Without this, ticking the box after queueing did nothing, and the queue
+        sat there saying "transcribe" with no explanation.
+        """
+        body = request.get_json(silent=True) or {}
+        store = manager.store
+        if store is None:
+            return _error("no output directory attached", 409)
+        if manager.is_running():
+            return _error("cannot change the queue while a job is running", 409)
+        enabled = bool(body.get("enabled"))
+        matched, undecided, reverted = store.apply_reference_mode(enabled)
+        return jsonify(
+            {
+                "matched": matched,
+                "needs_choice": undecided,
+                "reverted": reverted,
+                "status": manager.status(),
+            }
+        )
+
+    @app.post("/api/browse-text-file")
+    def api_browse_text_file():
+        """Native file picker for choosing a .txt to pair with one audio file."""
+        body = request.get_json(silent=True) or {}
+        script = str(Path(__file__).with_name("folder_picker.py"))
+        command = [sys.executable, script, "--file"]
+        initial = (body.get("initial") or "").strip()
+        if initial:
+            command.append(initial)
+        try:
+            finished = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired:
+            return _error("the file picker was left open too long", 504)
+        except OSError as exc:
+            return _error(f"could not start the file picker: {exc}", 503)
+        if finished.returncode != 0:
+            log.warning("file picker failed: %s", finished.stderr.strip())
+            return _error(
+                "no file picker available on this machine - paste the path instead",
+                503,
+            )
+        chosen = finished.stdout.strip()
+        if not chosen:
+            return jsonify({"cancelled": True, "path": None})
+        return jsonify({"cancelled": False, "path": str(Path(chosen))})
 
     @app.post("/api/job/start")
     def api_job_start():

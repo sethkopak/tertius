@@ -315,6 +315,20 @@ Tick **Timestamp my own text**, then pick how finely to timestamp:
 beside it (case-insensitive). Near misses are not matched: `VolA01.mp3` will never
 grab `VolA02.txt`.
 
+You can see at a glance whether that worked. The queue header counts **with text**
+and **no text**, and each row shows either `✓ text: VolA01.txt` or `✗ no text
+found`. Every row also has a **text…** button to pick a file by hand, for when the
+names don't match.
+
+This works for both ways of adding files:
+
+- **Scan & queue** — pairs each audio file with the `.txt` beside it.
+- **Upload & queue** — upload the recording *and* its `.txt` together and they are
+  paired by name. (Other file types are still rejected.)
+
+Ticking or unticking **Timestamp my own text** re-evaluates whatever is already
+queued, so the order you do things in doesn't matter.
+
 **Text that isn't spoken is left alone.** Title pages, page numbers, copyright
 lines and footnotes find no match in the audio, so they are kept exactly as
 written with no timestamp rather than being forced onto a time. In a real run, a

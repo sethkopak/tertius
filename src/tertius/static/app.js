@@ -34,8 +34,25 @@ function collectOptions() {
   };
 }
 
-$('opt-use-text').onchange = () => {
-  $('alignment-options').hidden = !$('opt-use-text').checked;
+$('opt-use-text').onchange = async () => {
+  const enabled = $('opt-use-text').checked;
+  $('alignment-options').hidden = !enabled;
+  // Re-evaluate what is already queued, so ticking the box after adding files
+  // does something visible instead of silently nothing.
+  try {
+    const res = await jsonPost('/api/queue/reference-mode', { enabled });
+    if (enabled) {
+      note('add-note',
+        `Text matching on: ${res.matched} file(s) matched, ${res.needs_choice} need a choice.`);
+    } else if (res.reverted) {
+      note('add-note', `Text matching off: ${res.reverted} file(s) back to normal transcription.`);
+    } else {
+      note('add-note', '');
+    }
+    render(res.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
 };
 
 $('btn-rematch-text').onclick = async () => {
@@ -103,20 +120,31 @@ $('btn-theme').onclick = () => {
 // the user has to say what should happen rather than us picking for them.
 function renderMode(file, running) {
   const mode = file.mode || 'transcribe';
+  const attach = running
+    ? ''
+    : ` <button class="tiny" data-attach="${encodeURIComponent(file.path)}" ` +
+      `title="Choose a text file to timestamp for this recording">text…</button>`;
+
   if (mode === 'align') {
     const name = basename(file.reference_text || '');
-    return `<span class="mode-align" title="Will timestamp ${file.reference_text}">text: ${name}</span>`;
+    return (
+      `<span class="mode-align" title="Will timestamp: ${file.reference_text}">` +
+      `✓ text: ${name}</span>${attach}`
+    );
   }
   if (mode === 'skip') {
     return `<span class="mode-skip">skip</span>${running ? '' : modeButtons(file, ['transcribe'])}`;
   }
   if (mode === 'undecided') {
     return (
-      `<span class="mode-undecided" title="No matching .txt file was found next to this audio">no text found</span>` +
-      (running ? '' : modeButtons(file, ['transcribe', 'skip']))
+      `<span class="mode-undecided" title="No .txt with a matching name was found next to this audio">✗ no text found</span>` +
+      (running ? '' : modeButtons(file, ['transcribe', 'skip']) + attach)
     );
   }
-  return `<span class="mode-transcribe">transcribe</span>${running ? '' : modeButtons(file, ['skip'])}`;
+  return (
+    `<span class="mode-transcribe">transcribe</span>` +
+    (running ? '' : modeButtons(file, ['skip']) + attach)
+  );
 }
 
 const MODE_LABEL = { transcribe: 'transcribe', skip: 'skip' };
@@ -212,9 +240,17 @@ function render(status) {
   noticeEl.className = notice ? 'note warn-text' : 'note';
 
   const s = status.summary || {};
-  $('counts').innerHTML = ['total', 'pending', 'in_progress', 'done', 'failed', 'skipped']
-    .map((k) => `<span>${k.replace('_', ' ')}: <b>${s[k] || 0}</b></span>`)
-    .join('');
+  const files = status.files || [];
+  const withText = files.filter((f) => f.mode === 'align').length;
+  const noText = files.filter((f) => f.mode === 'undecided').length;
+  $('counts').innerHTML =
+    ['total', 'pending', 'in_progress', 'done', 'failed', 'skipped']
+      .map((k) => `<span>${k.replace('_', ' ')}: <b>${s[k] || 0}</b></span>`)
+      .join('') +
+    (withText || noText
+      ? `<span class="mode-align" title="Files that will have your supplied text timestamped">with text: <b>${withText}</b></span>` +
+        `<span class="mode-undecided" title="Files with no matching text file yet">no text: <b>${noText}</b></span>`
+      : '');
 
   const banner = $('resume-banner');
   if (status.can_resume) {
@@ -271,6 +307,31 @@ function render(status) {
       `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}. ` +
       `Add the text files and press Check again, or choose per file below.`;
   }
+
+  document.querySelectorAll('[data-attach]').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      note('add-note', 'File picker open — check for a dialog window.');
+      try {
+        const picked = await jsonPost('/api/browse-text-file', {});
+        if (picked.cancelled) {
+          note('add-note', 'No text file chosen.');
+        } else {
+          const res = await jsonPost('/api/queue/mode', {
+            path: decodeURIComponent(btn.dataset.attach),
+            mode: 'align',
+            reference_text: picked.path,
+          });
+          note('add-note', `Using ${basename(picked.path)} for this recording.`);
+          render(res.status);
+        }
+      } catch (err) {
+        note('add-note', err.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  });
 
   document.querySelectorAll('[data-mode]').forEach((btn) => {
     btn.onclick = async () => {
@@ -465,11 +526,18 @@ $('btn-upload').onclick = async () => {
   if (!input.files.length) return note('add-note', 'Choose files to upload first.', true);
   const form = new FormData();
   [...input.files].forEach((f) => form.append('files', f));
+  // Upload .txt files alongside the audio and they are paired by name.
+  form.append('match_reference_text', $('opt-use-text').checked ? '1' : '0');
   note('add-note', `Uploading ${input.files.length} file(s)…`);
   try {
     const res = await api('/api/upload', { method: 'POST', body: form });
     const rejected = res.rejected.length ? ` (skipped: ${res.rejected.join(', ')})` : '';
-    note('add-note', `Queued ${res.saved.length} uploaded file(s)${rejected}.`);
+    const texts = res.texts && res.texts.length ? ` and ${res.texts.length} text file(s)` : '';
+    let message = `Queued ${res.saved.length} uploaded file(s)${texts}${rejected}.`;
+    if ($('opt-use-text').checked) {
+      message += ` Matched text for ${res.matched_text}; ${res.needs_choice} need a choice.`;
+    }
+    note('add-note', message);
     input.value = '';
     render(res.status);
   } catch (err) {

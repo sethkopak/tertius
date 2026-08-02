@@ -18,26 +18,47 @@ from __future__ import annotations
 import sys
 
 
-def pick_folder(initial_dir: str | None = None) -> str:
-    """Open the OS folder chooser. Returns "" if the user cancels."""
+def _dialog(pick, **options) -> str:
     import tkinter
-    from tkinter import filedialog
 
     root = tkinter.Tk()
     root.withdraw()  # we only want the dialog, not an empty window
     root.attributes("-topmost", True)  # else it can hide behind the browser
     try:
-        options = {"title": "Choose a folder of audio or video files"}
-        if initial_dir:
-            options["initialdir"] = initial_dir
-        return filedialog.askdirectory(**options) or ""
+        return pick(**options) or ""
     finally:
         root.destroy()
 
 
+def pick_folder(initial_dir: str | None = None) -> str:
+    """Open the OS folder chooser. Returns "" if the user cancels."""
+    from tkinter import filedialog
+
+    options = {"title": "Choose a folder of audio or video files"}
+    if initial_dir:
+        options["initialdir"] = initial_dir
+    return _dialog(filedialog.askdirectory, **options)
+
+
+def pick_text_file(initial_dir: str | None = None) -> str:
+    """Open the OS file chooser for a .txt. Returns "" if the user cancels."""
+    from tkinter import filedialog
+
+    options = {
+        "title": "Choose the text file for this recording",
+        "filetypes": [("Text files", "*.txt"), ("All files", "*.*")],
+    }
+    if initial_dir:
+        options["initialdir"] = initial_dir
+    return _dialog(filedialog.askopenfilename, **options)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    path = pick_folder(argv[0] if argv else None)
+    want_file = "--file" in argv
+    rest = [a for a in argv if a != "--file"]
+    initial = rest[0] if rest else None
+    path = pick_text_file(initial) if want_file else pick_folder(initial)
     if path:
         sys.stdout.write(path)
     return 0

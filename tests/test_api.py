@@ -107,10 +107,13 @@ def test_queue_rejects_missing_files(api, tmp_path):
 
 
 def test_upload_saves_and_queues(api):
+    """.txt files are kept as possible reference texts, not rejected;
+    anything else still is."""
     data = {
         "files": [
             (io.BytesIO(b"\x00fake"), "talk.mp3"),
             (io.BytesIO(b"nope"), "readme.txt"),
+            (io.BytesIO(b"nope"), "handout.pdf"),
         ]
     }
     res = api.client.post(
@@ -118,8 +121,9 @@ def test_upload_saves_and_queues(api):
     ).get_json()
 
     assert [Path(p).name for p in res["saved"]] == ["talk.mp3"]
-    assert res["rejected"] == ["readme.txt"]
-    assert res["status"]["summary"]["pending"] == 1
+    assert [Path(p).name for p in res["texts"]] == ["readme.txt"]
+    assert res["rejected"] == ["handout.pdf"]
+    assert res["status"]["summary"]["pending"] == 1  # only the audio is queued
 
 
 def test_start_returns_while_the_job_is_still_running(api, tmp_path):

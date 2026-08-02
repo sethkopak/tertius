@@ -240,6 +240,36 @@ class StateStore:
                 and entry.get("status") in (PENDING, IN_PROGRESS)
             ]
 
+    def apply_reference_mode(self, enabled: bool) -> tuple[int, int, int]:
+        """Switch text-timestamping on or off across the whole pending queue.
+
+        Returns (matched, needing a decision, reverted to plain transcription).
+        Files already done, failed or deliberately skipped are left alone.
+        """
+        matched = undecided = reverted = 0
+        with self._lock:
+            for key, entry in self._data["files"].items():
+                if entry.get("status") not in (PENDING, IN_PROGRESS):
+                    continue
+                if entry.get("mode") == MODE_SKIP:
+                    continue
+                if enabled:
+                    reference = entry.get("reference_text") or self.find_reference_text(
+                        key
+                    )
+                    if reference:
+                        entry["mode"] = MODE_ALIGN
+                        entry["reference_text"] = reference
+                        matched += 1
+                    else:
+                        entry["mode"] = MODE_UNDECIDED
+                        undecided += 1
+                elif entry.get("mode") in (MODE_ALIGN, MODE_UNDECIDED):
+                    entry["mode"] = MODE_TRANSCRIBE
+                    reverted += 1
+            self._flush()
+        return matched, undecided, reverted
+
     def rematch_reference_texts(self) -> int:
         """Re-check for text files, for when they are added after queueing."""
         found = 0
