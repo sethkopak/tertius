@@ -88,6 +88,7 @@ class StateStore:
             "created_at": _now(),
             "updated_at": _now(),
             "output_dir": None,
+            "reference_dir": None,
             "options": {},
             "files": {},
         }
@@ -112,6 +113,7 @@ class StateStore:
         data.setdefault("version", STATE_VERSION)
         data.setdefault("options", {})
         data.setdefault("output_dir", None)
+        data.setdefault("reference_dir", None)
         self._data = data
 
     def _flush(self) -> None:
@@ -142,27 +144,61 @@ class StateStore:
             self._data["options"] = dict(options)
             self._flush()
 
-    def find_reference_text(self, audio_path: str | os.PathLike) -> str | None:
-        """The text file that goes with this audio, matched by name.
+    @property
+    def reference_dir(self) -> str | None:
+        """An extra folder to look in for text files, if the user set one."""
+        with self._lock:
+            return self._data.get("reference_dir")
 
-        `VolA01.mp3` pairs with `VolA01.txt` sitting beside it. Case-insensitive,
-        because Windows users do not think about that and should not have to.
+    def set_reference_dir(self, directory: str | os.PathLike | None) -> None:
+        with self._lock:
+            self._data["reference_dir"] = (
+                str(Path(directory).expanduser().resolve()) if directory else None
+            )
+            self._flush()
+
+    def search_locations(self, audio_path: str | os.PathLike) -> list[str]:
+        """Every folder that will be searched for this file's text.
+
+        Exposed so the UI can say where it looked, rather than leaving someone
+        staring at "no text found" with no idea why.
         """
-        audio = Path(audio_path)
-        exact = audio.with_suffix(".txt")
+        places = [str(Path(audio_path).parent)]
+        extra = self.reference_dir
+        if extra and extra not in places:
+            places.append(extra)
+        return places
+
+    @staticmethod
+    def _text_in(directory: Path, stem: str, recursive: bool = False) -> str | None:
+        exact = directory / f"{stem}.txt"
         if exact.is_file():
             return str(exact)
-        stem = audio.stem.lower()
+        wanted = stem.lower()
         try:
-            for candidate in audio.parent.iterdir():
-                if (
-                    candidate.is_file()
-                    and candidate.suffix.lower() == ".txt"
-                    and candidate.stem.lower() == stem
-                ):
+            entries = directory.rglob("*.txt") if recursive else directory.glob("*.txt")
+            for candidate in entries:
+                if candidate.is_file() and candidate.stem.lower() == wanted:
                     return str(candidate)
         except OSError:
             pass
+        return None
+
+    def find_reference_text(self, audio_path: str | os.PathLike) -> str | None:
+        """The text file that goes with this audio, matched by name.
+
+        `VolA01.mp3` pairs with `VolA01.txt`. Looked for beside the audio first,
+        then in the text folder if one was set - searched recursively there,
+        since people keep texts in their own tree. Case-insensitive throughout,
+        because Windows users do not think about that and should not have to.
+        """
+        audio = Path(audio_path)
+        found = self._text_in(audio.parent, audio.stem)
+        if found:
+            return found
+        extra = self.reference_dir
+        if extra:
+            return self._text_in(Path(extra), audio.stem, recursive=True)
         return None
 
     def add_files(
@@ -416,13 +452,21 @@ class StateStore:
     def snapshot(self) -> dict:
         """Deep-ish copy safe to serialise from a request handler."""
         with self._lock:
+            files = []
+            for entry in self._data["files"].values():
+                copied = dict(entry)
+                if copied.get("mode") == MODE_UNDECIDED:
+                    # Say where we looked, so "no text found" is explicable.
+                    copied["searched"] = self.search_locations(copied["path"])
+                files.append(copied)
             return {
                 "version": self._data.get("version"),
                 "created_at": self._data.get("created_at"),
                 "updated_at": self._data.get("updated_at"),
                 "output_dir": self._data.get("output_dir"),
+                "reference_dir": self._data.get("reference_dir"),
                 "options": dict(self._data.get("options", {})),
-                "files": [dict(e) for e in self._data["files"].values()],
+                "files": files,
                 "summary": self.summary(),
             }
 

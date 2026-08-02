@@ -478,6 +478,7 @@ class JobManager:
         if store is not None:
             snapshot = store.snapshot()
             payload["summary"] = snapshot["summary"]
+            payload["reference_dir"] = snapshot.get("reference_dir")
             payload["can_resume"] = store.has_unfinished_work() and not payload[
                 "running"
             ]

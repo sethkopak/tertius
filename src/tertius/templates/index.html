@@ -95,8 +95,17 @@
                 title="Auto — paragraphs if your text has them, sentences otherwise.&#10;Per Paragraph — one timestamp per blank-line-separated block.&#10;Per Sentence — one timestamp per sentence (more precise, more lines).">
           {% for g in granularities %}<option value="{{ g }}">{% if g == 'auto' %}Auto{% elif g == 'paragraph' %}Per Paragraph{% else %}Per Sentence{% endif %}</option>{% endfor %}
         </select>
-        <span class="note dim">Text files are matched by name: <code>VolA01.mp3</code> → <code>VolA01.txt</code></span>
+        <span class="note dim">Matched by name: <code>VolA01.mp3</code> → <code>VolA01.txt</code></span>
       </span>
+    </div>
+    <div class="row" id="reference-dir-row" hidden>
+      <label for="opt-textdir"
+             title="Where to look for the text files. Leave blank to look only beside each audio file.">Text folder</label>
+      <input type="text" id="opt-textdir" size="44"
+             placeholder="(optional) folder holding the .txt files"
+             title="Searched recursively, matching by file name. Needed when the text files are not beside the audio — including for uploaded files, which are copied into _uploads and lose their original location.">
+      <button id="btn-browse-textdir" title="Pick the folder holding your text files">Browse…</button>
+      <button id="btn-apply-textdir" title="Look again using this folder">Apply</button>
     </div>
     <p class="note" id="model-warning"></p>
 

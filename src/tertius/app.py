@@ -301,12 +301,18 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if manager.is_running():
             return _error("cannot change the queue while a job is running", 409)
         enabled = bool(body.get("enabled"))
+        if "reference_dir" in body:
+            directory = (body.get("reference_dir") or "").strip() or None
+            if directory and not Path(directory).expanduser().is_dir():
+                return _error(f"not a directory: {directory}", 404)
+            store.set_reference_dir(directory)
         matched, undecided, reverted = store.apply_reference_mode(enabled)
         return jsonify(
             {
                 "matched": matched,
                 "needs_choice": undecided,
                 "reverted": reverted,
+                "reference_dir": store.reference_dir,
                 "status": manager.status(),
             }
         )

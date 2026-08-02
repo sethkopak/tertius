@@ -34,13 +34,54 @@ function collectOptions() {
   };
 }
 
+async function applyReferenceMode(enabled) {
+  return jsonPost('/api/queue/reference-mode', {
+    enabled,
+    reference_dir: $('opt-textdir').value.trim(),
+  });
+}
+
+$('btn-browse-textdir').onclick = async () => {
+  const button = $('btn-browse-textdir');
+  button.disabled = true;
+  note('add-note', 'Folder picker open — check for a dialog window.');
+  try {
+    const picked = await jsonPost('/api/browse-folder', {
+      initial: $('opt-textdir').value.trim(),
+    });
+    if (picked.cancelled) {
+      note('add-note', 'No folder chosen.');
+    } else {
+      $('opt-textdir').value = picked.path;
+      $('btn-apply-textdir').click();
+    }
+  } catch (err) {
+    note('add-note', err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$('btn-apply-textdir').onclick = async () => {
+  try {
+    const res = await applyReferenceMode($('opt-use-text').checked);
+    note('add-note',
+      `Looked in ${res.reference_dir || 'each audio file’s own folder'}: ` +
+      `${res.matched} matched, ${res.needs_choice} still without text.`);
+    render(res.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+};
+
 $('opt-use-text').onchange = async () => {
   const enabled = $('opt-use-text').checked;
   $('alignment-options').hidden = !enabled;
+  $('reference-dir-row').hidden = !enabled;
   // Re-evaluate what is already queued, so ticking the box after adding files
   // does something visible instead of silently nothing.
   try {
-    const res = await jsonPost('/api/queue/reference-mode', { enabled });
+    const res = await applyReferenceMode(enabled);
     if (enabled) {
       note('add-note',
         `Text matching on: ${res.matched} file(s) matched, ${res.needs_choice} need a choice.`);
@@ -136,8 +177,9 @@ function renderMode(file, running) {
     return `<span class="mode-skip">skip</span>${running ? '' : modeButtons(file, ['transcribe'])}`;
   }
   if (mode === 'undecided') {
+    const where = (file.searched || []).join('\n');
     return (
-      `<span class="mode-undecided" title="No .txt with a matching name was found next to this audio">✗ no text found</span>` +
+      `<span class="mode-undecided" title="Looked for ${file.name.replace(/\.[^.]+$/, '')}.txt in:\n${where}">✗ no text found</span>` +
       (running ? '' : modeButtons(file, ['transcribe', 'skip']) + attach)
     );
   }
@@ -301,11 +343,16 @@ function render(status) {
   const missingBanner = $('text-missing-banner');
   missingBanner.hidden = undecided.length === 0;
   if (undecided.length) {
-    $('text-missing-detail').textContent =
-      ` ${undecided.length} file(s) have no matching .txt beside them: ` +
+    // Say exactly where it looked — "no text found" is useless on its own.
+    const searched = (undecided[0].searched || []).join('  ·  ');
+    $('text-missing-detail').innerHTML =
+      ` No <code>.txt</code> with a matching name was found for ` +
+      `${undecided.length} file(s): ` +
       `${undecided.slice(0, 3).map((f) => f.name).join(', ')}` +
-      `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}. ` +
-      `Add the text files and press Check again, or choose per file below.`;
+      `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}.` +
+      (searched ? `<br><span class="note dim">Looked in: ${searched}</span>` : '') +
+      `<br><span class="note dim">Set a <b>Text folder</b> above if your text files live somewhere else — ` +
+      `uploaded audio is copied into <code>_uploads</code>, so its original folder is not known.</span>`;
   }
 
   document.querySelectorAll('[data-attach]').forEach((btn) => {

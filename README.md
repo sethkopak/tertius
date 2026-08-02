@@ -320,11 +320,28 @@ and **no text**, and each row shows either `✓ text: VolA01.txt` or `✗ no tex
 found`. Every row also has a **text…** button to pick a file by hand, for when the
 names don't match.
 
-This works for both ways of adding files:
+## Where Tertius looks for text files
 
-- **Scan & queue** — pairs each audio file with the `.txt` beside it.
-- **Upload & queue** — upload the recording *and* its `.txt` together and they are
-  paired by name. (Other file types are still rejected.)
+For each audio file it looks for a `.txt` with the same name, in this order:
+
+1. **Beside the audio file** — the folder that audio actually lives in.
+2. **The Text folder**, if you set one — searched recursively, so your texts can
+   sit in their own tree.
+
+The queue tells you where it looked: hover **✗ no text found**, and the alert
+lists the folders searched.
+
+**Uploaded files are the catch.** A browser never tells the server where a file
+came from, so **Upload & queue** copies the audio into `<output-dir>/_uploads/`
+and that becomes "beside the audio". Your original folder is unknown to Tertius.
+So if you upload `V1_01.mp3` and its `V1_01.txt` is sitting next to the original,
+it will not be found. Three ways round it:
+
+- Use **Scan & queue** with the folder path instead of uploading — then the audio
+  stays where it is and the text beside it is found.
+- Upload the `.txt` together with the audio; they land in `_uploads` side by side
+  and pair by name.
+- Set the **Text folder** to wherever your text files live.
 
 Ticking or unticking **Timestamp my own text** re-evaluates whatever is already
 queued, so the order you do things in doesn't matter.
