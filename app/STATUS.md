@@ -4,17 +4,22 @@ Last updated: 2026-08-03
 
 ## Where it stands
 
-Working, and in real use. Built from `transcription-app-claude-code-prompt.md`,
-plus everything requested since: the launcher, folder picker, model download
-progress, model comparison + machine check, tooltips, light/dark theme, mirrored
-output folders, timestamping of supplied text, and the designed UI.
+Working, and in real use. Built from `design/original-spec.md`, plus everything
+requested since: the launcher, folder picker, model download progress, model
+comparison + machine check, tooltips, light/dark theme, mirrored output folders,
+timestamping of supplied text, the designed UI, and macOS/Linux support.
 
-**199 tests, all passing.** Whisper is mocked throughout — the suite downloads
-nothing and decodes no audio.
+**262 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+CI. Whisper is mocked throughout — the suite downloads nothing and decodes no
+audio, which is what makes it safe to run on a hosted runner.
 
-Run it: double-click `Start Tertius.bat`.
+Run it: double-click `Start Tertius.bat` (Windows), `Tertius.app` (macOS), or
+run `./start-tertius.sh` (Linux).
 
 Repo: `github.com/sethkopak/tertius` (private), branch `main`.
+
+**Windows is the only platform anyone has actually run this on.** See
+[Not verified](#not-verified--read-this-before-trusting-it).
 
 ## What it does now
 
@@ -37,6 +42,16 @@ Repo: `github.com/sethkopak/tertius` (private), branch `main`.
 - **Language is a menu now**, built from Whisper's own list of codes so it can
   never offer one the model would reject, with names resolved by the browser's
   `Intl.DisplayNames` rather than a hand-written table that could go stale.
+- **Runs on macOS and Linux** (2026-08-03), from source, with a double-clickable
+  launcher on each. On a Mac that means the CPU: there is no CUDA on Apple
+  hardware and CTranslate2 has no Metal backend, and Tertius says so plainly
+  rather than offering a fix that could never apply.
+- **Comes back to the folder you were working in.** Each output directory keeps
+  its own queue, so returning to the wrong one makes finished work look
+  unfinished. The last-used folder is remembered in `app/.tertius-session.json`.
+- **Clear queue**, with a confirmation that says how many files go and how many
+  of them were already transcribed. Housekeeping to match: uploaded copies no
+  longer needed are removed at startup, and with the queue when it is cleared.
 
 ## Verified by actually running it
 
@@ -131,10 +146,63 @@ Getting there turned up two defects worth recording:
 Both are the same underlying lesson: a feature that silently does the wrong thing
 is worse than one that fails loudly.
 
+## 2026-08-03 — the queue that looked unfinished
+
+A 99-file batch finished at 06:07 into `Bible Study App\Transcripts` — the
+output folder chosen in the UI. The server was restarted three times that
+morning during other work. Each restart came back showing **99 files pending**.
+
+Nothing was lost: 99 `.txt`, 99 `.srt` and a 99-done state file were in that
+folder the whole time. But a new batch was started against the stale queue and
+re-transcribed two files before it was stopped.
+
+The cause was one line. The launcher passed `--output-dir <app>\transcripts` on
+*every* start, and each output directory keeps its own queue — so every restart
+snapped back to the default folder, which held a never-run copy of the same 99
+files. The old `.bat` had hardcoded the same flag; it had simply never been
+noticed, because the server had never been restarted this often in one session.
+
+Fixed by making the flag optional and the resolution explicit: an explicit
+`--output-dir`, else the folder last used, else the default. The choice is
+recorded by `JobManager.attach`, which every route that changes the directory
+already goes through, so there is one place to get right rather than four.
+
+That also exposed something the always-passed flag had been hiding:
+`default_output_dir()` was `cwd/transcripts`, so starting the server from any
+other working directory would have silently attached to a different queue. It
+is anchored to the install location now.
+
+The lesson is the same one as the GPU incident above, in a different costume:
+this was a *silent* wrong answer. Nothing errored, nothing logged a warning —
+the app confidently displayed a finished batch as unfinished work, and the only
+way to notice was to know what the number should have been.
+
+**Clear queue** shipped alongside it, since the incident left a stale 99-file
+queue that could only be cleared by deleting the state file by hand.
+
+## 2026-08-03 — macOS and Linux
+
+The app's logic was already portable — `pathlib` throughout, `sys.platform`
+branches already present. The Windows coupling was in three places: a 130-line
+`.bat` launcher with no equivalent, CUDA wiring that returned early on anything
+but Windows, and a library glob that only looked in `bin`.
+
+The launcher logic moved into `launcher.py`, with three thin wrappers that only
+find a Python and hand over. CUDA now works the way each platform actually
+loads libraries: Windows keeps the `PATH` trick, Linux opens each `.so` with
+`RTLD_GLOBAL` because `LD_LIBRARY_PATH` is read at exec and cannot be changed
+in-process. macOS is reported as CPU-only in its own right.
+
+**CI paid for itself on the first run.** Five of eight jobs failed, and one was
+a real defect a Windows machine could not have found: `Path.glob("*.txt")` is
+case-insensitive on Windows and case-sensitive everywhere else, so text pairing
+worked here and silently would not have on Linux. The test asserting that exact
+behaviour was green locally.
+
 ## 2026-08-03 — the designed UI, and the launcher bug it exposed
 
 The UI was rebuilt from the *Tertius — UI & Identity Redesign* handoff (kept in
-`Tertius Transcription App Design/`). Two columns: a fixed 352px setup rail, and
+`app/design/handoff/`). Two columns: a fixed 352px setup rail, and
 a status band over the file queue. Cardo and IBM Plex are self-hosted as woff2 —
 an offline tool must not fetch fonts from Google at runtime.
 
@@ -164,7 +232,7 @@ old markup with the new script, which threw on the first element that no longer
 existed and stopped dead. Nothing was wrong with the app; the launcher just
 never asked whether the server it was reusing was current.
 
-`Start Tertius.bat` now probes the port first: idle Tertius → stop it and start
+The launcher now probes the port first: idle Tertius → stop it and start
 fresh (the queue lives in the state file, so nothing is lost); busy Tertius →
 open its tab and say plainly that an update needs a relaunch after the batch;
 nothing there → start normally.
@@ -173,7 +241,15 @@ nothing there → start normally.
 
 - Only one transcript and one aligned output have been read closely. Accuracy
   across a whole volume, and on harder audio, is still unassessed.
-- Windows only so far.
+- **Nothing has ever been run on a Mac or a Linux machine.** There wasn't one.
+  The cross-platform support was written, and merged, without a single line of
+  it executing on the hardware it is for. What exists instead is a CI matrix
+  (ubuntu/macOS/Windows × 3.11/3.13, plus Windows 3.14) and tests pinning each
+  platform branch — which proves the logic runs, and nothing more. Specifically
+  unverified there: real audio decode, CUDA on Linux, the tkinter folder picker,
+  whether `Tertius.app` double-clicks, whether the generated `.desktop` entry
+  works, whether `tertius.icns` even looks right, and any Mac throughput figure.
+  The ~22x realtime number below is from an RTX 2060 and does not transfer.
 - Long-batch behaviour (17 files back to back) has not been run start to finish.
 - Alignment has not been tried on a text that diverges heavily from the audio
   (abridged, reordered, or a different edition).
@@ -186,12 +262,13 @@ nothing there → start normally.
 ## Next steps
 
 1. Run a full volume through and read a few outputs properly.
-2. Decide what this is: personal tool, or something that ships.
+2. Get this in front of a real Mac and a real Linux box. Everything in
+   *Not verified* about those two stays open until someone does.
+3. Decide what this is: personal tool, or something that ships. Settled so far
+   only that cross-platform support is run-from-source; packaging is untouched.
 
 ## Ideas not built
 
-- No **Clear queue** button in the UI — clearing means deleting the state file
-  by hand.
 - Whisper can also *translate* to English (`task="translate"`); Tertius only
   transcribes. The library supports it — it is just not exposed.
 - Alignment reports how many chunks went untimed in the log, but the UI does not
@@ -224,8 +301,52 @@ nothing there → start normally.
 - Each launch shows as two `python.exe` processes (venv redirector). Relevant
   when counting processes to check whether a second server started.
 - `faster-whisper` / `ctranslate2` install fine on Python 3.14.
+- **`Path.glob` is case-insensitive on Windows and case-sensitive elsewhere.**
+  Any extension filter written as a glob (`*.txt`) is therefore a silent
+  platform behaviour change — the file is simply not found, with no error. It
+  cost a real bug: text pairing compared the stem case-insensitively while the
+  extension quietly wasn't, so `talk.TXT` paired here and would not have on
+  Linux. Filter on `suffix.lower()` in code instead.
+- **Git stores shell scripts with CRLF when you develop on Windows**, and a
+  CRLF shebang makes the kernel report `/bin/sh\r` as a missing interpreter for
+  a file that plainly exists. `.gitattributes` pins `*.sh`, `*.command`,
+  `.desktop` and the `.app` executable to LF, and `*.bat` to CRLF.
+- **Do not monkeypatch `os.name` in tests.** `pathlib` picks its flavour from
+  it, so stubbing it to exercise another platform's branch makes `Path` raise
+  `UnsupportedOperation` underneath. Platform branches are keyed off
+  `sys.platform`, which nothing else depends on.
+- **A Windows venv cannot be moved** — `pyvenv.cfg` and the `Scripts` shims hold
+  absolute paths. Relocating means deleting and recreating. The model cache is
+  unaffected; it lives in `~/.cache/huggingface/hub`, outside the app folder.
+- **Each output directory keeps its own queue.** Changing the output folder
+  switches you to a different state file with a different history. The failure
+  mode is expensive rather than cosmetic: a server that comes back up pointing
+  elsewhere shows a finished batch as pending, and pressing Begin redoes it.
+  Anything that resets the output directory on restart is a data-costing bug.
+- **A `.bat` file cannot carry its own icon.** Windows takes the icon from the
+  file type and offers no per-file override, so the launcher writes a `.lnk`
+  and a `desktop.ini` folder icon instead. `desktop.ini` also needs an
+  *absolute* `IconResource` path — a relative one is ignored, confirmed by
+  asking `SHGetFileInfo` what Windows resolves for a test folder.
 
 ## Layout
+
+Restructured 2026-08-03: the launchers, `README.md` and `transcripts/` are the
+top level, because they are the only things most people need. Everything the
+app is made of lives under `app/`.
+
+```
+Start Tertius.bat    Windows launcher
+Tertius.app/         macOS launcher (a shell script in a bundle, no compiler)
+start-tertius.sh     Linux launcher
+transcripts/         output, the resume state file, and the log
+app/
+  src/tertius/       the app
+  tests/             the suite
+  assets/            the T mark as .svg/.png/.ico/.icns, plus its generator
+  design/            UI handoff and the original build spec
+  .venv/             created on first run
+```
 
 See README.md for full documentation — install, launch, resume semantics, model
 sizes, GPU notes, and the HTTP API.
