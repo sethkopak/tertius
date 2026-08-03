@@ -374,6 +374,11 @@ Also in the output directory: `transcription_state.json` (the queue), and
 This matters more than it sounds. Change the output folder and you are looking
 at a **different queue**, with its own history of what has been done.
 
+**Anything still queued follows you.** Change the output folder with files
+waiting and press Begin, and those files are transcribed into the new folder,
+keeping their mode and matched text — the queue you are looking at never
+vanishes out from under you.
+
 **Tertius remembers the folder you last used** and returns to it on the next
 launch, recorded in `app/.tertius-session.json`. Without that, every restart
 dropped you back at the default folder — where a batch you had finished
@@ -515,7 +520,7 @@ straight into the output directory with no subfolder, as before.
 cd app && pytest
 ```
 
-262 tests. The whisper model is mocked throughout — the suite downloads nothing
+269 tests. The whisper model is mocked throughout — the suite downloads nothing
 and decodes no audio, which is also what makes it safe to run in CI. Coverage is
 aimed at what is easy to get wrong: state tracking and resume semantics, the
 job's independence from the HTTP request that started it, download-progress

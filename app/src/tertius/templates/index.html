@@ -157,9 +157,13 @@
         </div>
 
         <label for="opt-outdir">Output</label>
-        <input type="text" id="opt-outdir" class="field data" spellcheck="false"
-               value="{{ default_output_dir }}"
-               title="Folder for transcripts, the resume state file, and the log. Changing it starts a separate queue with its own history.">
+        <div class="path-row">
+          <input type="text" id="opt-outdir" class="field data" spellcheck="false"
+                 value="{{ default_output_dir }}"
+                 title="Folder for transcripts, the resume state file, and the log. Each folder keeps its own queue and history; anything still waiting comes with you.">
+          <button type="button" id="btn-browse-outdir" class="btn"
+                  title="Pick the folder to write transcripts into">Browse</button>
+        </div>
       </div>
 
       <p class="caption warn-text" id="model-warning"></p>

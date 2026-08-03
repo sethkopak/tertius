@@ -212,7 +212,26 @@ class JobManager:
             if self._store is None or Path(target_dir).expanduser().resolve() != (
                 self._output_dir
             ):
+                # Pressing Begin must never make the queue you are looking at
+                # disappear. Each output directory keeps its own history, but
+                # files queued and not yet done are the ones being pointed at,
+                # so they come along. Without this, starting a run against a
+                # different output folder attached to that folder's own (empty)
+                # queue and reported "nothing to transcribe" - with the files
+                # gone from the screen.
+                carried = (
+                    self._store.unfinished_entries()
+                    if self._store is not None
+                    else []
+                )
                 self.attach(target_dir)
+                taken = self._store.adopt(carried) if carried else 0
+                if taken:
+                    log.info(
+                        "output directory changed; carried %d queued file(s) to %s",
+                        taken,
+                        self._output_dir,
+                    )
             else:
                 self._store.reset_in_progress()
 

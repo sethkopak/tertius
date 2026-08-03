@@ -11,6 +11,7 @@ let pollTimer = null;
 let confirmingCancel = false;
 let settingsRestored = false;
 let lastRunState = null;
+let lastRunSignature = null;
 let missedPolls = 0;
 
 async function api(path, options) {
@@ -350,6 +351,30 @@ $('opt-use-text').onchange = async () => {
   }
 };
 
+$('btn-browse-outdir').onclick = async () => {
+  const button = $('btn-browse-outdir');
+  button.disabled = true;
+  note('add-note', 'Folder picker open — check for a dialog window.');
+  try {
+    const picked = await jsonPost('/api/browse-folder', {
+      initial: $('opt-outdir').value.trim(),
+    });
+    if (picked.cancelled) {
+      note('add-note', 'No folder chosen.');
+    } else {
+      $('opt-outdir').value = picked.path;
+      // Say what changing this means, rather than letting it be discovered on
+      // the next run: each folder carries its own history of what is done.
+      note('add-note',
+        `Transcripts will go to ${picked.path}. Anything still queued comes too.`);
+    }
+  } catch (err) {
+    note('add-note', err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
 $('btn-browse-textdir').onclick = async () => {
   const button = $('btn-browse-textdir');
   button.disabled = true;
@@ -684,7 +709,29 @@ function renderBand(status) {
 
 // --- the run section -------------------------------------------------------
 
-function renderRun(status) {
+// What renderRun would draw. Compared before touching the DOM, because
+// rebuilding the controls on a 2s poll silently ate clicks: a press that spans
+// a tick puts mousedown on one button and mouseup on its replacement, and the
+// browser fires no click at all. That is the "I pressed Begin and nothing
+// happened, so I pressed it again" bug.
+function runSignature(status) {
+  const s = status.summary || {};
+  return [
+    status.running ? 'running' : 'idle',
+    confirmingCancel ? 'confirming' : '',
+    status.cancel_requested ? 'stopping' : '',
+    status.force_stop_suggested ? 'force' : '',
+    s.pending || 0,
+    (s.done || 0) + (s.failed || 0),
+    s.total || 0,
+  ].join('|');
+}
+
+function renderRun(status, force = false) {
+  const signature = runSignature(status);
+  if (!force && signature === lastRunSignature) return;
+  lastRunSignature = signature;
+
   const s = status.summary || {};
   const pending = s.pending || 0;
   const box = $('run-controls');
@@ -703,7 +750,7 @@ function renderRun(status) {
         `<button type="button" class="btn" id="btn-keep-going">Keep going</button>` +
         `</div></div>`;
       $('btn-confirm-cancel').onclick = cancelRun;
-      $('btn-keep-going').onclick = () => { confirmingCancel = false; renderRun(status); };
+      $('btn-keep-going').onclick = () => { confirmingCancel = false; renderRun(status, true); };
       return;
     }
     const stopping = status.cancel_requested;
@@ -715,7 +762,7 @@ function renderRun(status) {
     cancel.textContent = stopping ? 'Stopping…' : 'Cancel';
     cancel.disabled = stopping;
     cancel.title = 'Stop after the file being transcribed now. Finished files are kept.';
-    cancel.onclick = () => { confirmingCancel = true; renderRun(status); };
+    cancel.onclick = () => { confirmingCancel = true; renderRun(status, true); };
     pair.appendChild(cancel);
     if (status.force_stop_suggested) {
       const force = document.createElement('button');

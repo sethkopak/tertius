@@ -512,6 +512,48 @@ class StateStore:
                 if e.get("status") == PENDING
             ]
 
+    def unfinished_entries(self) -> list[dict]:
+        """Copies of the entries that still have work outstanding."""
+        with self._lock:
+            return [
+                dict(entry)
+                for entry in self._data["files"].values()
+                if entry.get("status") in (PENDING, IN_PROGRESS)
+            ]
+
+    def adopt(self, entries: Iterable[dict]) -> int:
+        """Take on queue entries from another directory's queue, as pending.
+
+        Used when the output directory changes while files are still queued.
+        Each output directory keeps its own history, but the files someone has
+        lined up are what they are pointing at, and those should follow rather
+        than vanish. Copied whole so a matched text file and the mirrored
+        subfolder survive the move - re-adding the paths from scratch would
+        lose both.
+
+        Entries already known here are left alone; this never overwrites a
+        finished file with a pending one.
+        """
+        taken = 0
+        with self._lock:
+            for entry in entries:
+                key = entry.get("path")
+                if not key or key in self._data["files"]:
+                    continue
+                fresh = dict(entry)
+                fresh.update(
+                    status=PENDING,
+                    started_at=None,
+                    finished_at=None,
+                    error=None,
+                    outputs=[],
+                )
+                self._data["files"][key] = fresh
+                taken += 1
+            if taken:
+                self._flush()
+        return taken
+
     def files_with_status(self, status: str) -> list[str]:
         with self._lock:
             return [
