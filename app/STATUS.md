@@ -9,7 +9,7 @@ requested since: the launcher, folder picker, model download progress, model
 comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, and macOS/Linux support.
 
-**262 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**290 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout — the suite downloads nothing and decodes no
 audio, which is what makes it safe to run on a hosted runner.
 
@@ -52,6 +52,12 @@ Repo: `github.com/sethkopak/tertius` (private), branch `main`.
 - **Clear queue**, with a confirmation that says how many files go and how many
   of them were already transcribed. Housekeeping to match: uploaded copies no
   longer needed are removed at startup, and with the queue when it is cleared.
+- **Three output formats.** `.txt` one sentence per line — Whisper's segments
+  are cut for timing, not for reading, so they are rejoined and re-split on
+  sentence ends without a word changing. `.srt` unchanged, its lines being
+  timing units. `.json` the transcript as data, off by default.
+- **The queue follows you** when the output folder changes. Each folder keeps
+  its own history, but files you have lined up are what you are pointing at.
 
 ## Verified by actually running it
 
@@ -145,6 +151,61 @@ Getting there turned up two defects worth recording:
 
 Both are the same underlying lesson: a feature that silently does the wrong thing
 is worse than one that fails loudly.
+
+## 2026-08-03 — one report, two bugs
+
+Reported as: add a file, press Begin, the file leaves the queue, the queue reads
+empty, Begin greys out. Add it again and it runs. Reproducing it first turned
+out to matter, because it was two unrelated defects arriving in one click.
+
+**The queue vanishing.** `start()` attached to whatever output directory was
+requested whenever it differed from the attached one. Each directory has its own
+state file, so that landed on the target folder's empty queue, found nothing
+pending, and errored — with the files gone from the screen. Queued files now
+come along, copied whole so a matched text file and the mirrored subfolder
+survive, arriving as pending, and never overwriting an entry the target folder
+has already finished.
+
+**The swallowed click.** `renderRun` rebuilt the whole controls box, Begin
+included, on every poll. A press spanning a tick puts mousedown on one element
+and mouseup on its replacement, and the browser then fires no click at all.
+Idle polling is every two seconds, so the window is wide open. It now compares a
+signature of what it would draw and leaves the DOM alone when nothing changed.
+
+Worth keeping: **rebuilding a control on a timer silently eats clicks**, and the
+symptom — "I pressed it and nothing happened, so I pressed it again" — reads
+like a mis-click rather than a bug.
+
+## 2026-08-03 — readable transcripts, and a third format
+
+`.txt` is now one sentence per line. Whisper's segments are cut for timing, not
+for reading: they run on, break mid-sentence, and sometimes carry three
+sentences at once. They are rejoined and re-split using the sentence splitter
+the alignment feature already had, so `Dr.` and `Vol. 2` do not become line
+breaks. No word changes, only where the lines fall. `.srt` is deliberately left
+alone — its lines are timing units — and so is timestamped supplied text, which
+promises your wording *and* your layout back unchanged.
+
+`.json` was added as a third format, off by default. Fresh transcriptions get
+every segment with its times plus the detected language and duration. Supplied
+text gets a different shape on purpose: your chunks in order, each marked timed
+or not, because the `.srt` can only carry cues that have times and a title page
+that is never spoken has none.
+
+Adding a format turned up three things that were already waiting:
+
+1. A recording called `transcription_state.mp3` would have written its `.json`
+   straight over the queue's own state file, part-way through the run using it.
+2. The page seeded its selected-formats set from *every* chip on the row, so a
+   new format would have switched itself on for everyone with no saved
+   settings.
+3. Supplied text was read as plain `utf-8`, so a BOM — which Notepad and
+   PowerShell both write — survived as an invisible character glued to the first
+   word, appeared in the output, and stopped that chunk matching the audio.
+
+Also fixed: "Timestamp my own text" arrived pre-ticked, because
+`use_reference_text` persists in the state file from whenever it was last run.
+It now follows the queue in front of you rather than the saved flag.
 
 ## 2026-08-03 — the queue that looked unfinished
 
@@ -273,6 +334,8 @@ nothing there → start normally.
   transcribes. The library supports it — it is just not exposed.
 - Alignment reports how many chunks went untimed in the log, but the UI does not
   show it per file. Worth surfacing if a text ever aligns badly.
+- The `.json` shape is not versioned. If anything ever depends on it, it will
+  want a `version` key before the shape changes under it.
 - No live microphone input; file/batch only, as the original spec required.
 
 ## Gotchas worth remembering
@@ -315,6 +378,21 @@ nothing there → start normally.
   it, so stubbing it to exercise another platform's branch makes `Path` raise
   `UnsupportedOperation` underneath. Platform branches are keyed off
   `sys.platform`, which nothing else depends on.
+- **Rebuilding a DOM control on a poll timer silently eats clicks.** A press
+  spanning the rebuild puts mousedown on one element and mouseup on its
+  replacement, and no click event fires. Compare a signature of what would be
+  drawn and skip the rebuild when nothing changed.
+- **Deriving "what is selected" from "what exists" is a bug waiting.** The
+  format chips seeded their selected-set from every chip present, so adding
+  `.json` would have switched it on for everyone without saved settings.
+- **Anything writing `<stem>.<fmt>` into the output directory can collide with
+  Tertius's own files** — `transcription_state.json`, `tertius.log`. Only
+  reachable once `.json` became an output format, and it would have corrupted
+  the state file mid-run. Both write paths go through one guard now.
+- **Read supplied text as `utf-8-sig`, not `utf-8`.** Notepad and PowerShell
+  both write a BOM; read as plain utf-8 it survives as an invisible character
+  glued to the first word, which then shows up in the output *and* stops that
+  chunk matching the audio. Files without a BOM are unaffected.
 - **A Windows venv cannot be moved** — `pyvenv.cfg` and the `Scripts` shims hold
   absolute paths. Relocating means deleting and recreating. The model cache is
   unaffected; it lives in `~/.cache/huggingface/hub`, outside the app folder.
