@@ -345,6 +345,102 @@ def test_a_non_text_file_with_a_matching_name_is_not_picked_up(tmp_path):
     assert store.find_reference_text(audio) is None
 
 
+# -------------------------------------------------------------- upload cleanup
+
+def _upload(store, name: str, queued_as: str | None = None) -> Path:
+    """Put a file in the store's _uploads folder, optionally queueing it."""
+    from tertius.config import UPLOAD_DIRNAME
+
+    uploads = store.path.parent / UPLOAD_DIRNAME
+    uploads.mkdir(parents=True, exist_ok=True)
+    path = uploads / name
+    path.write_bytes(b"\x00" * 1024)
+    if queued_as:
+        store.add_files([path])
+        store._update(path, status=queued_as)
+    return path
+
+
+def test_finished_uploads_are_cleared_at_startup(tmp_path):
+    """The transcript is what is worth keeping; the copy is dead weight."""
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+    done = _upload(store, "finished.mp3", queued_as="done")
+    orphan = _upload(store, "never-queued.mp3")
+
+    removed, reclaimed = store.purge_uploads()
+
+    assert not done.exists()
+    assert not orphan.exists()
+    assert removed == 2
+    assert reclaimed == 2048
+
+
+def test_an_interrupted_batch_keeps_the_files_it_still_needs(tmp_path):
+    """Clearing these would silently break resume - the one hard-tested feature."""
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+    pending = _upload(store, "still-queued.mp3", queued_as="pending")
+    running = _upload(store, "mid-flight.mp3", queued_as="in_progress")
+    done = _upload(store, "finished.mp3", queued_as="done")
+
+    removed, _ = store.purge_uploads()
+
+    assert pending.exists()
+    assert running.exists()
+    assert not done.exists()
+    assert removed == 1
+
+
+def test_failed_uploads_are_cleared_too(tmp_path):
+    """A failed file is not resumable work - retry re-queues it as pending."""
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+    failed = _upload(store, "broken.mp3", queued_as="failed")
+
+    store.purge_uploads()
+
+    assert not failed.exists()
+
+
+def test_purging_leaves_the_uploads_folder_itself_alone(tmp_path):
+    """The server expects the folder to exist; only its contents go."""
+    from tertius.config import UPLOAD_DIRNAME
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+    _upload(store, "gone.mp3")
+
+    store.purge_uploads()
+
+    assert (store.path.parent / UPLOAD_DIRNAME).is_dir()
+
+
+def test_purging_with_no_uploads_folder_is_harmless(tmp_path):
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+
+    assert store.purge_uploads() == (0, 0)
+
+
+def test_paired_text_files_are_cleared_with_their_audio(tmp_path):
+    """Uploaded .txt partners land in _uploads too and are just as disposable."""
+    from tertius.state import StateStore
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+    audio = _upload(store, "talk.mp3", queued_as="done")
+    text = _upload(store, "talk.txt")
+
+    store.purge_uploads()
+
+    assert not audio.exists()
+    assert not text.exists()
+
+
 # ------------------------------------------------------------------ shipped files
 
 def test_the_shell_launchers_are_committed_with_unix_line_endings():

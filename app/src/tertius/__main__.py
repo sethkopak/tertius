@@ -123,6 +123,21 @@ def main(argv: list[str] | None = None) -> int:
     status = manager.status(include_files=False)
     log.info("output directory: %s", output_dir)
 
+    # Clear out uploaded copies left over from previous sessions. Done here,
+    # after the store has been attached and interrupted work reset to pending,
+    # so anything a resumable batch still needs is known and kept.
+    try:
+        store = getattr(manager, "store", None)
+        removed, reclaimed = store.purge_uploads() if store else (0, 0)
+        if removed:
+            log.info(
+                "cleared %d uploaded file(s) from previous sessions (%.1f MB)",
+                removed,
+                reclaimed / (1024 * 1024),
+            )
+    except Exception as exc:  # housekeeping must never stop the server
+        log.debug("could not clear old uploads: %s", exc)
+
     # Say this at startup as well as in the UI: a new user is looking at this
     # window, and finding out mid-batch that the GPU was never usable is a bad
     # way to learn it.

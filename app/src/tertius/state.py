@@ -8,6 +8,7 @@ mutation persists immediately: whatever is on disk is the truth on resume.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -15,7 +16,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from .config import STATE_FILENAME
+from .config import STATE_FILENAME, UPLOAD_DIRNAME
+
+log = logging.getLogger(__name__)
 
 # What to do with a file when its turn comes.
 MODE_TRANSCRIBE = "transcribe"  # normal: Whisper writes the transcript
@@ -421,6 +424,61 @@ class StateStore:
             if reset:
                 self._flush()
         return reset
+
+    def purge_uploads(self) -> tuple[int, int]:
+        """Delete uploaded copies that no unfinished work still needs.
+
+        Uploads are copies. A browser never tells the server where a file really
+        lives, so anything dragged onto the page is copied into `_uploads/` and
+        then transcribed from there. Once it is done the copy is dead weight -
+        the transcript is the thing worth keeping - and it accumulates until
+        somebody notices the output folder has grown by gigabytes.
+
+        Run at startup rather than at shutdown, because shutdown is not a thing
+        that reliably happens: Ctrl+C, closing the console window, and a killed
+        process all skip any cleanup code. Startup always runs.
+
+        A file still queued as pending or in-progress is kept. Deleting those
+        would quietly break resume, which is the one feature that has been
+        hard-tested - a batch interrupted part-way must be able to carry on.
+
+        Returns (files deleted, bytes reclaimed).
+        """
+        uploads = self.path.parent / UPLOAD_DIRNAME
+        if not uploads.is_dir():
+            return (0, 0)
+
+        with self._lock:
+            keep = {
+                key
+                for key, entry in self._data["files"].items()
+                if entry.get("status") in (PENDING, IN_PROGRESS)
+            }
+
+        deleted = reclaimed = 0
+        for candidate in uploads.rglob("*"):
+            if not candidate.is_file() or _key(candidate) in keep:
+                continue
+            try:
+                size = candidate.stat().st_size
+                candidate.unlink()
+            except OSError as exc:
+                # Never fatal, and never worth stopping a launch over: a locked
+                # or vanished file just stays where it is until next time.
+                log.debug("could not remove upload %s: %s", candidate, exc)
+                continue
+            deleted += 1
+            reclaimed += size
+
+        # Tidy up any directories the deletions left empty, but never the
+        # uploads folder itself - the server expects it to exist.
+        for directory in sorted(uploads.rglob("*"), key=lambda p: -len(p.parts)):
+            if directory.is_dir():
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+        return (deleted, reclaimed)
 
     def retry_failed(self) -> list[str]:
         retried: list[str] = []
