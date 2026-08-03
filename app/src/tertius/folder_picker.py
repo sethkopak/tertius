@@ -17,6 +17,12 @@ from __future__ import annotations
 
 import sys
 
+# Exit codes the server turns into an explanation the user can act on. The two
+# ways this fails on Linux are different problems with different fixes, and
+# "no folder picker available" tells you neither.
+EXIT_NO_TKINTER = 3
+EXIT_NO_DISPLAY = 4
+
 
 def _dialog(pick, **options) -> str:
     import tkinter
@@ -58,7 +64,22 @@ def main(argv: list[str] | None = None) -> int:
     want_file = "--file" in argv
     rest = [a for a in argv if a != "--file"]
     initial = rest[0] if rest else None
-    path = pick_text_file(initial) if want_file else pick_folder(initial)
+
+    try:
+        path = pick_text_file(initial) if want_file else pick_folder(initial)
+    except ImportError:
+        # tkinter is part of the standard library but is packaged separately on
+        # most Linux distributions, so a perfectly good Python can be missing it.
+        return EXIT_NO_TKINTER
+    except Exception as exc:
+        # Tk raises TclError for "no display name and no $DISPLAY", which is
+        # what a headless box, a bare SSH session or WSL without an X server
+        # looks like. Matched on the message because importing tkinter just to
+        # name the exception class would defeat the ImportError branch above.
+        if "display" in str(exc).lower():
+            return EXIT_NO_DISPLAY
+        raise
+
     if path:
         sys.stdout.write(path)
     return 0

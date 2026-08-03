@@ -13,6 +13,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,23 @@ def total_ram_bytes() -> int | None:
             return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
         except (ValueError, OSError):
             pass
+
+    # macOS has not been confirmed to expose SC_PHYS_PAGES through sysconf, so
+    # there is a second route rather than an assumption. `hw.memsize` is the
+    # documented one and returns bytes directly.
+    if sys.platform == "darwin" and shutil.which("sysctl"):
+        try:
+            done = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if done.returncode == 0 and done.stdout.strip():
+                return int(done.stdout.strip())
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            log.debug("sysctl hw.memsize failed: %s", exc)
+
     if platform.system() == "Windows":
         class MemoryStatusEx(ctypes.Structure):
             _fields_ = [
@@ -142,6 +160,21 @@ def cuda_runtime_status(cuda_devices: int) -> dict:
     Checked cheaply here so a new user is told up front, rather than finding out
     part-way through their first batch.
     """
+    if sys.platform == "darwin":
+        # Not a failure, and not worth a warning: Apple hardware has no CUDA and
+        # CTranslate2 has no Metal backend, so the CPU is the only option here.
+        # Reported as its own state so the UI can say that plainly instead of
+        # showing a "runtime libraries missing" fix that would never apply.
+        return {
+            "state": "cpu_only",
+            "detail": (
+                "Transcription runs on the CPU. Macs have no CUDA GPU and "
+                "CTranslate2 does not use Metal, so this is expected rather "
+                "than something to fix."
+            ),
+            "libraries": [],
+        }
+
     if not cuda_devices:
         return {"state": "no_gpu", "detail": "No CUDA GPU detected.", "libraries": []}
 
@@ -158,27 +191,39 @@ def cuda_runtime_status(cuda_devices: int) -> dict:
 
     # No pip-installed libraries. A system-wide CUDA toolkit would also do, so
     # check whether the loader can find cuBLAS before declaring it missing.
-    if os.name == "nt":
-        import ctypes
+    import ctypes
 
-        for candidate in ("cublas64_12.dll", "cublas64_11.dll"):
-            try:
-                ctypes.WinDLL(candidate)
-                return {
-                    "state": "ok",
-                    "detail": f"Found {candidate} on the system path.",
-                    "libraries": [candidate],
-                }
-            except OSError:
-                continue
+    if sys.platform == "win32":
+        candidates = ("cublas64_12.dll", "cublas64_11.dll")
+        loader = ctypes.WinDLL
+    else:
+        candidates = ("libcublas.so.12", "libcublas.so.11", "libcublas.so")
+        loader = ctypes.CDLL
 
+    for candidate in candidates:
+        try:
+            loader(candidate)
+        except OSError:
+            continue
+        return {
+            "state": "ok",
+            "detail": f"Found {candidate} on the system library path.",
+            "libraries": [candidate],
+        }
+
+    from .transcribe import _venv_pip
+
+    fix_command = f"{_venv_pip()} install {CUDA_PIP_PACKAGES}"
     return {
         "state": "missing",
         "detail": (
             "A CUDA GPU is present but its runtime libraries are not installed, "
-            "so jobs will run on the CPU. Install them with: "
-            f"pip install {CUDA_PIP_PACKAGES} (about 1.2 GB)."
+            f"so jobs will run on the CPU. Install them with: {fix_command} "
+            "(about 1.2 GB)."
         ),
+        # Supplied by the server rather than written into the page, because the
+        # path to pip differs per platform and the UI has no business guessing.
+        "fix_command": fix_command,
         "libraries": [],
     }
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -209,10 +211,17 @@ class GpuUnavailableError(RuntimeError):
     """The GPU was asked for but cannot actually run a model."""
 
 
+def _venv_pip() -> str:
+    """The pip command for this venv, written the way this platform writes it."""
+    if sys.platform == "win32":
+        return "app\\.venv\\Scripts\\pip"
+    return "app/.venv/bin/pip"
+
+
 CUDA_FIX_HINT = (
     "The NVIDIA driver reports a GPU, but CTranslate2 could not load the CUDA "
     "runtime libraries it needs. Install them into this venv with:\n"
-    "    .venv\\Scripts\\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12\n"
+    f"    {_venv_pip()} install nvidia-cublas-cu12 nvidia-cudnn-cu12\n"
     "(about 1.2 GB), or set Device to cpu."
 )
 
@@ -249,36 +258,35 @@ def reset_cuda_state() -> None:
 
 
 def nvidia_library_dirs() -> list[Path]:
-    """Where `pip install nvidia-cublas-cu12` puts its DLLs, if installed."""
+    """Where `pip install nvidia-cublas-cu12` puts its libraries, if installed.
+
+    The wheels use a different subfolder per platform - `nvidia/*/bin` on
+    Windows, `nvidia/*/lib` on Linux - so both are checked rather than guessed
+    at from the running platform.
+    """
     try:
         import nvidia
     except ImportError:
         return []
     return [
-        binary_dir
+        library_dir
         for root in getattr(nvidia, "__path__", [])
-        for binary_dir in sorted(Path(root).glob("*/bin"))
-        if binary_dir.is_dir()
+        for pattern in ("*/bin", "*/lib")
+        for library_dir in sorted(Path(root).glob(pattern))
+        if library_dir.is_dir()
     ]
 
 
-def register_cuda_dll_directories() -> list[str]:
-    """Put the pip-installed NVIDIA DLLs where CTranslate2 will actually find them.
+def _register_windows(directories: list[Path]) -> list[str]:
+    """Prepend the NVIDIA folders to PATH so a plain LoadLibrary finds them.
 
-    `pip install nvidia-cublas-cu12` drops its DLLs in `site-packages/nvidia/*/bin`,
-    which Windows does not search, so the libraries end up installed and still
-    "not found".
-
-    Prepending to PATH is what does the work here. `os.add_dll_directory` alone is
-    not enough: it only affects loads that opt into LOAD_LIBRARY_SEARCH_USER_DIRS,
-    and CTranslate2 loads cuBLAS with a plain LoadLibrary, which uses the standard
-    search order - and that includes PATH. Verified the hard way.
+    `os.add_dll_directory` alone is not enough: it only affects loads that opt
+    into LOAD_LIBRARY_SEARCH_USER_DIRS, and CTranslate2 loads cuBLAS with a
+    plain LoadLibrary, which uses the standard search order - and that includes
+    PATH. Verified the hard way.
     """
-    if os.name != "nt":
-        return []
-
     added = []
-    for binary_dir in nvidia_library_dirs():
+    for binary_dir in directories:
         text = str(binary_dir)
         try:
             os.add_dll_directory(text)  # helps anything that does opt in
@@ -287,9 +295,65 @@ def register_cuda_dll_directories() -> list[str]:
         if text not in os.environ.get("PATH", "").split(os.pathsep):
             os.environ["PATH"] = text + os.pathsep + os.environ.get("PATH", "")
         added.append(text)
-    if added:
-        log.info("put %d NVIDIA library folder(s) on PATH", len(added))
     return added
+
+
+def _register_linux(directories: list[Path]) -> list[str]:
+    """Load the NVIDIA shared objects into the process, globally.
+
+    The Windows trick has no Linux equivalent: the dynamic loader reads
+    LD_LIBRARY_PATH once at exec, so setting it from inside a running process
+    changes nothing. What does work is opening each library with RTLD_GLOBAL,
+    which puts its symbols in the global namespace where CTranslate2's own
+    dlopen of cuBLAS/cuDNN will resolve against them.
+
+    Order matters: cuDNN needs cuBLAS already loaded, so the sort puts `cublas`
+    before `cudnn`. Failures are logged and skipped - a library that will not
+    load here would have failed at first encode anyway, and the `auto` device
+    proves the GPU with a real transcription before trusting it.
+    """
+    added = []
+    for library_dir in sorted(directories, key=lambda p: "cudnn" in str(p)):
+        for library in sorted(library_dir.glob("lib*.so*")):
+            try:
+                ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
+            except OSError as exc:
+                log.debug("could not preload %s: %s", library.name, exc)
+                continue
+            added.append(str(library))
+    return added
+
+
+def register_cuda_dll_directories() -> list[str]:
+    """Make the pip-installed NVIDIA libraries findable by CTranslate2.
+
+    `pip install nvidia-cublas-cu12` drops its libraries inside site-packages,
+    which neither platform's loader searches on its own - so they end up
+    installed and still "not found". The mechanism that fixes that differs by
+    platform; see the two helpers.
+
+    macOS never has any of this: there is no CUDA on Apple hardware.
+    """
+    directories = nvidia_library_dirs()
+    if not directories:
+        return []
+
+    # Keyed off sys.platform rather than os.name: pathlib picks its flavour from
+    # os.name, so anything that stubs os.name to exercise the other branch stops
+    # Path working underneath it.
+    if sys.platform == "win32":
+        added = _register_windows(directories)
+        if added:
+            log.info("put %d NVIDIA library folder(s) on PATH", len(added))
+        return added
+
+    if sys.platform.startswith("linux"):
+        added = _register_linux(directories)
+        if added:
+            log.info("preloaded %d NVIDIA shared object(s)", len(added))
+        return added
+
+    return []
 
 
 class WhisperTranscriber:

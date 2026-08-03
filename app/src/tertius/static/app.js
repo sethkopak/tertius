@@ -1062,8 +1062,10 @@ function renderCudaBanner(sys) {
     `${sys.gpu_name || 'A CUDA GPU'} was detected, but the CUDA runtime libraries ` +
     `it needs aren't installed. Install them (about 1.2 GB) by running this in the ` +
     `Tertius folder:`;
+  // The server sends the command because the path to pip is not the same on
+  // Windows and Linux, and this page has no way to know which it is running on.
   $('panel-cuda-command').textContent =
-    '.venv\\Scripts\\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12';
+    runtime.fix_command || 'pip install nvidia-cublas-cu12 nvidia-cudnn-cu12';
   showPanel('panel-cuda');
 }
 

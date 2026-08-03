@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Tertius">
+  <rect x="0"  y="9"  width="100" height="9"  fill="#C8794E"/>
+  <rect x="12" y="29" width="76"  height="9"  fill="#C8794E" opacity="0.42"/>
+  <rect x="42" y="9"  width="16"  height="91" fill="#C8794E"/>
+</svg>

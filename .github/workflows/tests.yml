@@ -1,0 +1,86 @@
+name: tests
+
+# Tertius is developed on Windows and there is no Mac or Linux machine to try it
+# on, so this is the only evidence that the other two platforms work at all. The
+# suite mocks faster-whisper throughout: it downloads no models and decodes no
+# audio, which is what makes it safe to run on a hosted runner.
+#
+# What this does NOT prove, and must not be read as proving: real audio decode,
+# the CUDA path on Linux, the tkinter folder picker, or any Mac throughput
+# figure. Those need hardware.
+
+on:
+  push:
+    branches: [main, cross-platform]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.11', '3.13']
+        include:
+          # The version actually in use on the development machine.
+          - os: windows-latest
+            python: '3.14'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install
+        working-directory: app
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: app
+        run: python -m pytest -q
+
+      - name: Check the launcher imports and finds its own folders
+        working-directory: app
+        run: |
+          python -c "import sys; sys.path.insert(0, 'src'); from tertius import launcher; assert launcher.app_dir().name == 'app'; assert (launcher.app_dir() / 'requirements.txt').is_file(); print('launcher OK on', sys.platform)"
+
+  shellcheck:
+    name: shell launchers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The Unix launchers must be executable and LF
+        run: |
+          set -eu
+          fail=0
+          for f in "start-tertius.sh" "Tertius.app/Contents/MacOS/Tertius"; do
+            if [ ! -x "$f" ]; then
+              echo "::error file=$f::not executable - Finder and the shell both need the +x bit"
+              fail=1
+            fi
+            if grep -qU $'\r' "$f"; then
+              echo "::error file=$f::has CRLF line endings, so the shebang names an interpreter that does not exist"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Lint them
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck start-tertius.sh "Tertius.app/Contents/MacOS/Tertius"
+
+      - name: They must at least parse
+        run: |
+          bash -n start-tertius.sh
+          sh -n "Tertius.app/Contents/MacOS/Tertius"

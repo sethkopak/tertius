@@ -1,0 +1,27 @@
+# Line endings decide whether the launchers run at all.
+#
+# A shell script committed with CRLF fails on macOS and Linux with a baffling
+# error, because the kernel reads the shebang as "/bin/sh\r" and there is no
+# such interpreter. This repo is developed on Windows, where Git's autocrlf
+# would do exactly that, so the shell side is pinned to LF explicitly.
+
+* text=auto
+
+# Must be LF - they are executed by a Unix kernel.
+*.sh              text eol=lf
+*.command         text eol=lf
+*.desktop         text eol=lf
+Tertius.app/Contents/MacOS/Tertius text eol=lf
+
+# Must be CRLF - cmd.exe mis-parses multi-line blocks with LF endings.
+*.bat             text eol=crlf
+*.cmd             text eol=crlf
+
+# Leave binaries alone.
+*.png             binary
+*.ico             binary
+*.icns            binary
+*.woff2           binary
+*.zip             binary
+*.mp3             binary
+*.wav             binary

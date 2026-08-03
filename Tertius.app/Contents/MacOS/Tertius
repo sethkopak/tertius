@@ -1,0 +1,23 @@
+#!/bin/sh
+# The whole macOS app: open a Terminal window running the shared launcher.
+#
+# A Terminal rather than a silent background start, because the first run
+# installs a few hundred MB and the window is where that progress - and any
+# failure - is visible. Closing the window stops Tertius, which is the same
+# contract as the Windows launcher.
+#
+# This file is Tertius.app/Contents/MacOS/Tertius, so the project folder is
+# three levels up.
+
+set -eu
+
+here="$(cd "$(dirname "$0")/../../.." && pwd)"
+script="$here/start-tertius.sh"
+
+if [ ! -x "$script" ]; then
+    # Git preserves the executable bit, but a folder that arrived by zip or by
+    # copy from a Windows machine may not have it.
+    chmod +x "$script" 2>/dev/null || true
+fi
+
+exec /usr/bin/open -a Terminal "$script"

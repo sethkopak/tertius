@@ -15,4 +15,10 @@ _uploads/
 !requirements.txt
 
 # the design bundle is kept unpacked; the archive is a duplicate
-Tertius Transcription App Design.zip
+app/design/*.zip
+
+# Written by the launcher on every run. All three hold absolute paths to this
+# folder on this machine, so they are never the same on two computers.
+/Tertius.lnk
+/desktop.ini
+/Tertius.desktop

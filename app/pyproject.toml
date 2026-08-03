@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tertius"
+version = "0.1.0"
+description = "Tertius - local, offline batch audio/video transcription with faster-whisper and a Flask queue UI"
+# No `readme`: README.md sits at the top of the folder next to the launchers,
+# where a user will actually find it, and setuptools will not read a file from
+# outside the project directory.
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=3.0",
+    "faster-whisper>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+# The CUDA runtime libraries CTranslate2 needs to actually use an NVIDIA GPU.
+# About 1.2 GB, and deliberately not a base dependency: most machines do not
+# have a CUDA GPU, and a Mac never can. The markers keep pip from even trying
+# on macOS, where these wheels do not exist.
+gpu = [
+    "nvidia-cublas-cu12; platform_system != 'Darwin'",
+    "nvidia-cudnn-cu12; platform_system != 'Darwin'",
+]
+
+[project.scripts]
+tertius = "tertius.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tertius = ["templates/*.html", "static/*", "static/fonts/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# So `pytest` works from this folder with nothing installed and no PYTHONPATH
+# set - which is what CI does on all three platforms.
+pythonpath = ["src"]

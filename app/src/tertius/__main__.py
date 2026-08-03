@@ -130,10 +130,15 @@ def main(argv: list[str] | None = None) -> int:
         from .system import describe_system
 
         runtime = describe_system().get("cuda_runtime", {})
-        if runtime.get("state") == "missing":
+        state = runtime.get("state")
+        if state == "missing":
             log.warning("GPU detected but unusable - %s", runtime.get("detail"))
-        elif runtime.get("state") == "ok":
+        elif state == "ok":
             log.info("CUDA runtime libraries found; the GPU is available")
+        elif state == "cpu_only":
+            # Stated plainly, not as a warning: on a Mac this is the normal
+            # state of affairs, not a problem waiting to be solved.
+            log.info("%s", runtime.get("detail"))
     except Exception as exc:  # a capability probe must never stop the server
         log.debug("could not check the CUDA runtime: %s", exc)
     if status.get("can_resume"):

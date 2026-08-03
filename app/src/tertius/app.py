@@ -30,6 +30,7 @@ from .config import (
     language_choices,
     scan_directory,
 )
+from . import folder_picker
 from .jobs import JobError, JobManager
 from .media import probe_durations_in_background
 from .system import assess_model, check_compute_type, describe_system
@@ -40,6 +41,28 @@ log = logging.getLogger(__name__)
 
 def _error(message: str, code: int = 400):
     return jsonify({"error": message}), code
+
+
+def _picker_failure(returncode: int) -> str:
+    """Turn the picker's exit code into something the user can act on.
+
+    Both of these are ordinary on Linux and neither is the app's fault, so the
+    message names the actual cause and the fix instead of shrugging.
+    """
+    if returncode == folder_picker.EXIT_NO_TKINTER:
+        return (
+            "This Python has no tkinter, so the folder picker cannot open. "
+            "Install it (Debian/Ubuntu: sudo apt install python3-tk, "
+            "Fedora: sudo dnf install python3-tkinter, macOS: brew install "
+            "python-tk) or just paste the folder path into the box."
+        )
+    if returncode == folder_picker.EXIT_NO_DISPLAY:
+        return (
+            "There is no desktop session to open a window on - Tertius looks "
+            "to be running headless, over SSH, or in WSL without an X server. "
+            "Paste the folder path into the box instead."
+        )
+    return "no folder picker available on this machine - paste the path instead"
 
 
 def create_app(output_dir: str | Path | None = None, manager: JobManager | None = None):
@@ -148,10 +171,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             return _error(f"could not start the folder picker: {exc}", 503)
         if finished.returncode != 0:
             log.warning("folder picker failed: %s", finished.stderr.strip())
-            return _error(
-                "no folder picker available on this machine - paste the path instead",
-                503,
-            )
+            return _error(_picker_failure(finished.returncode), 503)
         chosen = finished.stdout.strip()
         if not chosen:
             return jsonify({"cancelled": True, "path": None})

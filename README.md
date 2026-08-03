@@ -8,10 +8,73 @@ Runs entirely on your machine: no API calls, no cloud services, no telemetry. Th
 only network access it ever makes is the one-time model download from Hugging Face
 (see [Models](#models) — you can pre-download and then run air-gapped).
 
+## Launch
+
+Everything is in the launcher for your platform. It builds the virtual
+environment and installs dependencies on first run, then starts the server and
+opens the UI.
+
+| Platform | What to do | Tested? |
+| --- | --- | --- |
+| **Windows** | Double-click **`Start Tertius.bat`** | Yes — this is the development machine |
+| **macOS** | Double-click **`Tertius.app`** | **No — see below** |
+| **Linux** | Run **`./start-tertius.sh`** | **No — see below** |
+
+> **Only Windows has been run on real hardware.** There was no Mac or Linux
+> machine available while the cross-platform support was written. The test
+> suite passes on all three in CI, and the platform-specific decisions have
+> tests, but nothing on macOS or Linux has transcribed a real file. Treat the
+> first run on either as untested — and please report what breaks.
+
+A console/Terminal window stays open while it runs — that window *is* the
+server. Leave it open while transcribing; closing it (or Ctrl+C) stops the
+server. Transcripts go to `transcripts/` next to the launcher.
+
+The install step is skipped on later runs, so subsequent launches are quick.
+
+### The icon
+
+Your file manager shows the Tertius **T** on the launcher where the OS allows
+it, which is not everywhere:
+
+- **Linux** — the first run writes a `Tertius.desktop` entry beside the script,
+  carrying the icon. Most file managers need you to mark it executable and
+  click "Allow Launching" once. Because the entry stores absolute paths it is
+  regenerated on every launch, so moving the folder fixes itself.
+- **macOS** — `Tertius.app` carries its icon in the bundle. Nothing to do.
+- **Windows** — a `.bat` file *cannot* have its own icon; Windows takes the
+  icon from the file type and offers no per-file override. Instead the launcher
+  writes a `Tertius.lnk` shortcut beside itself on every run (shortcuts store
+  absolute paths, so it is rewritten rather than committed), and sets the
+  folder's own icon via `desktop.ini`.
+
+### Closed the tab by accident?
+
+**Start Tertius again.** It notices the server is already running, re-opens the
+tab, and exits without starting a second server. If a batch is mid-run it is
+left strictly alone. Or bookmark
+<http://127.0.0.1:5005> and open it whenever you like — the page reconnects to
+whatever the job is doing, including a batch that is mid-run.
+
+This matters beyond convenience: on Windows a second process *can* bind a port
+that is already in use, so without that check you would end up with two servers
+sharing one state file. If you start the server by hand, pass `--reuse-existing`
+to get the same protection, and never point two servers at one output directory.
+
+From a terminal instead:
+
+```bash
+python -m tertius --output-dir "D:/transcripts" --open-browser
+# or, if installed:
+tertius --output-dir "D:/transcripts"
+```
+
+Then open <http://127.0.0.1:5005>.
+
 ## Install
 
-Nothing to do if you use `Start Tertius.bat` — it sets this up on first run.
-Manually:
+Nothing to do if you use a launcher — it sets this up on first run. Manually,
+from the `app/` folder:
 
 ```bash
 python -m venv .venv
@@ -31,45 +94,24 @@ pip install -e ".[dev]"
 
 `faster-whisper` pulls in `ctranslate2` and `av` (prebuilt wheels for both). Audio
 decoding goes through `av`, so no separate FFmpeg install is required. Verified on
-Python 3.14 with faster-whisper 1.2.1 / ctranslate2 4.8.1. If `pip install
-faster-whisper` ever fails with "no matching distribution", your Python is newer
-than the available `ctranslate2` wheels — drop back a minor version.
+Python 3.14 with faster-whisper 1.2.1 / ctranslate2 4.8.1. ctranslate2 4.8.1
+publishes wheels for Windows x86-64, Linux x86-64 and arm64, and macOS Intel and
+Apple Silicon, on Python 3.9–3.14, so nothing needs building from source. If
+`pip install faster-whisper` ever fails with "no matching distribution", your
+Python is newer than the available `ctranslate2` wheels — drop back a minor
+version.
 
-## Launch
-
-**Double-click `Start Tertius.bat`.** It creates the virtual environment and
-installs dependencies if they're missing (first run only), starts the server, and
-opens the UI in your browser.
-
-A console window stays open while it runs — that window *is* the server. Leave it
-open while transcribing; closing it (or Ctrl+C) stops the server. Transcripts go to
-`transcripts\` next to the .bat. To change the port or output folder, edit the two
-settings at the top of the file.
-
-The install step is skipped on later runs, so subsequent launches are quick.
-
-### Closed the tab by accident?
-
-**Double-click `Start Tertius.bat` again.** It notices the server is already
-running, re-opens the tab, and exits without starting a second server. The console
-window just flashes; the original one keeps running. Or bookmark
-<http://127.0.0.1:5005> and open it whenever you like — the page reconnects to
-whatever the job is doing, including a batch that is mid-run.
-
-This matters beyond convenience: on Windows a second process *can* bind a port
-that is already in use, so without that check you would end up with two servers
-sharing one state file. If you start the server by hand, pass `--reuse-existing`
-to get the same protection, and never point two servers at one output directory.
-
-From a terminal instead:
+**Linux also needs tkinter** for the *Browse* button, which is packaged
+separately from Python on most distributions:
 
 ```bash
-python -m tertius --output-dir "D:/transcripts" --open-browser
-# or, if installed:
-tertius --output-dir "D:/transcripts"
+sudo apt install python3-tk        # Debian / Ubuntu
+sudo dnf install python3-tkinter   # Fedora
+brew install python-tk             # macOS, if you use Homebrew's Python
 ```
 
-Then open <http://127.0.0.1:5005>.
+Without it everything still works — you paste the folder path into the box
+instead of picking it, and Tertius says so rather than failing vaguely.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -246,13 +288,33 @@ used, so a GPU that cannot run is not counted in your favour.
 > maths. Install them into the venv:
 >
 > ```bash
-> .venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+> app\.venv\Scripts\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12   # Windows
+> app/.venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12       # Linux
 > ```
 >
-> That is about 1.2 GB. Tertius adds those packages' `bin` folders to Windows'
-> DLL search path at startup, which Windows does not do on its own — installing
-> them without that leaves the libraries present and still "not found". Or just
-> set **Device** to `cpu` and accept the slower run.
+> That is about 1.2 GB, and it is also available as the `gpu` extra:
+> `pip install -e ".[gpu]"`. The banner in the UI shows whichever command suits
+> the machine you are on. Or just set **Device** to `cpu` and accept the slower
+> run.
+>
+> Installing the packages is not sufficient on its own — they land inside
+> `site-packages`, which no platform's library loader searches. Tertius wires
+> them up at startup, differently per platform because the mechanisms differ:
+> on Windows it prepends the packages' `bin` folders to `PATH` (`add_dll_directory`
+> alone is not enough — CTranslate2 uses a plain `LoadLibrary`, which ignores it),
+> and on Linux it opens each `.so` in `lib` with `RTLD_GLOBAL`, because
+> `LD_LIBRARY_PATH` is read once at exec and cannot be changed from inside a
+> running process.
+
+### On a Mac
+
+There is no CUDA on Apple hardware and CTranslate2 has no Metal backend, so
+**transcription on a Mac runs on the CPU.** Tertius says this plainly at startup
+rather than showing a "runtime libraries missing" banner you could never act on.
+
+Use `int8` and a smaller model there. **No Mac throughput number is given here
+because none has been measured** — the ~22x-realtime figure quoted elsewhere is
+from an RTX 2060 and does not transfer.
 
 
 Set **Device** to `cuda` and **Compute** to `float16` (or `int8_float16` on smaller
@@ -428,29 +490,47 @@ straight into the output directory with no subfolder, as before.
 ## Tests
 
 ```bash
-pytest
+cd app && pytest
 ```
 
-111 tests. The whisper model is mocked throughout — the suite downloads nothing
-and decodes no audio. Coverage is aimed at what is easy to get wrong: state
-tracking and resume semantics, the job's independence from the HTTP request that
-started it, download-progress aggregation, and machine-suitability verdicts.
+229 tests. The whisper model is mocked throughout — the suite downloads nothing
+and decodes no audio, which is also what makes it safe to run in CI. Coverage is
+aimed at what is easy to get wrong: state tracking and resume semantics, the
+job's independence from the HTTP request that started it, download-progress
+aggregation, machine-suitability verdicts, and the per-platform branches.
+
+CI runs the suite on ubuntu, macOS and Windows (`.github/workflows/tests.yml`).
+That is the only cross-platform evidence there is, and it is worth being precise
+about its limits: it proves the logic runs everywhere, **not** that audio decodes
+on a Mac, that CUDA works on Linux, or that the folder picker opens.
 
 ## Layout
 
 ```
-Start Tertius.bat   double-click launcher (setup + run + open browser)
-src/tertius/
-  config.py        options, validation, media-file scanning
-  state.py         StateStore — atomic JSON state, status transitions
-  transcribe.py    faster-whisper wrapper, model download + progress, txt/srt output
-  jobs.py          JobManager — the background worker, its phase and status
-  system.py        RAM/GPU detection, model catalogue, per-machine verdicts
-  folder_picker.py native folder dialog, run as its own process
-  app.py           Flask routes (they queue and report; they never transcribe)
-  __main__.py      CLI entry point, logging, browser opening
-tests/             state, jobs, HTTP, downloads, system advice, output formats
+Start Tertius.bat    Windows launcher — double-click
+Tertius.app/         macOS launcher — double-click (script inside, no compiler)
+start-tertius.sh     Linux launcher
+README.md
+transcripts/         output, the resume state file, and the log
+app/
+  src/tertius/
+    launcher.py      setup + takeover logic shared by all three launchers
+    config.py        options, validation, media-file scanning
+    state.py         StateStore — atomic JSON state, status transitions
+    transcribe.py    faster-whisper wrapper, model download + progress, txt/srt
+    jobs.py          JobManager — the background worker, its phase and status
+    system.py        RAM/GPU detection, model catalogue, per-machine verdicts
+    folder_picker.py native folder dialog, run as its own process
+    app.py           Flask routes (they queue and report; they never transcribe)
+    __main__.py      CLI entry point, logging, browser opening
+  tests/             state, jobs, HTTP, downloads, system advice, platforms
+  assets/            the T mark as .svg/.png/.ico/.icns, plus its generator
+  design/            UI design handoff and the original build spec
+  .venv/             created on first run
 ```
+
+The launchers sit at the top because they are the only thing most people need.
+Everything the app is made of lives under `app/`.
 
 ## Not included
 
