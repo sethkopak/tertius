@@ -12,7 +12,13 @@ from pathlib import Path
 
 import pytest
 from tertius.alignment import AlignmentResult, Chunk, render_json
-from tertius.config import OUTPUT_FORMATS, TranscriptionOptions
+from tertius.config import (
+    ALIGNMENT_SHAPE,
+    JSON_SHAPE_VERSION,
+    OUTPUT_FORMATS,
+    TRANSCRIPTION_SHAPE,
+    TranscriptionOptions,
+)
 from tertius.transcribe import (
     Segment,
     TranscriptionResult,
@@ -25,6 +31,59 @@ from tertius.transcribe import (
 def test_json_is_an_offerable_format():
     assert "json" in OUTPUT_FORMATS
     assert TranscriptionOptions(formats=["json"]).formats == ["json"]
+
+
+# ------------------------------------------------------------- shape data
+#
+# The shape used to say nothing about itself: a reader could not tell which of
+# the two payloads it held, nor that either might change under it.
+
+def test_a_transcription_declares_its_shape():
+    payload = json.loads(result_to_json(sample_result(), Path("a.wav")))
+
+    assert payload["version"] == JSON_SHAPE_VERSION
+    assert payload["kind"] == TRANSCRIPTION_SHAPE
+
+
+def test_an_alignment_declares_its_shape():
+    payload = json.loads(render_json(AlignmentResult(chunks=[], granularity="sentence")))
+
+    assert payload["version"] == JSON_SHAPE_VERSION
+    assert payload["kind"] == ALIGNMENT_SHAPE
+
+
+def test_the_two_shapes_are_told_apart_by_kind_alone():
+    """Both land as `.json` beside the audio; the extension cannot say which."""
+    transcription = json.loads(result_to_json(sample_result(), Path("a.wav")))
+    alignment = json.loads(render_json(AlignmentResult(chunks=[], granularity="auto")))
+
+    assert transcription["kind"] != alignment["kind"]
+    assert "segments" in transcription and "chunks" not in transcription
+    assert "chunks" in alignment and "segments" not in alignment
+
+
+def test_both_renderers_stamp_the_same_version():
+    """One constant, two writers - the drift this key exists to catch."""
+    transcription = json.loads(result_to_json(sample_result(), Path("a.wav")))
+    alignment = json.loads(render_json(AlignmentResult(chunks=[], granularity="auto")))
+
+    assert transcription["version"] == alignment["version"]
+
+
+def assert_shape_keys_lead(rendered: str) -> None:
+    """Line 0 is the opening brace; the two shape keys follow it."""
+    lines = rendered.splitlines()
+
+    assert '"version"' in lines[1]
+    assert '"kind"' in lines[2]
+
+
+def test_a_transcription_meets_the_reader_with_its_shape_keys():
+    assert_shape_keys_lead(result_to_json(sample_result(), Path("a.wav")))
+
+
+def test_an_alignment_meets_the_reader_with_its_shape_keys():
+    assert_shape_keys_lead(render_json(AlignmentResult(chunks=[], granularity="auto")))
 
 
 # ------------------------------------------------------------- transcription

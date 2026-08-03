@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from .alignment import split_sentences
-from .config import TranscriptionOptions
+from .config import JSON_SHAPE_VERSION, TRANSCRIPTION_SHAPE, TranscriptionOptions
 
 log = logging.getLogger(__name__)
 
@@ -112,8 +112,15 @@ def result_to_json(result: TranscriptionResult, source: Path) -> str:
     Only what was actually measured goes in. `language` is null when the model
     did not report one rather than being guessed at, and `duration` is absent
     for the same reason.
+
+    `version` and `kind` come first so a reader knows what it has before it
+    reads any of it. `kind` matters because timestamped supplied text writes a
+    genuinely different shape - chunks, not segments - and the file extension
+    alone cannot tell the two apart.
     """
     payload = {
+        "version": JSON_SHAPE_VERSION,
+        "kind": TRANSCRIPTION_SHAPE,
         "source": source.name,
         "language": result.language,
         "duration": result.duration,

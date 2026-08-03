@@ -52,6 +52,17 @@ DEVICES = ("auto", "cpu", "cuda")
 COMPUTE_TYPES = ("default", "int8", "int8_float16", "float16", "float32")
 OUTPUT_FORMATS = ("txt", "srt", "json")
 
+# The `.json` output carries this so a reader can tell what it is holding. Two
+# different shapes are written - a fresh transcription's segments and supplied
+# text's chunks - and neither used to say which it was or that it might change.
+# Bump it whenever an existing key is renamed, removed, or changes meaning;
+# adding a new key does not need a bump, since a reader keyed on the old ones
+# still works. Lives here rather than in either renderer so the two cannot
+# drift apart silently, which is the failure this exists to prevent.
+JSON_SHAPE_VERSION = 1
+TRANSCRIPTION_SHAPE = "transcription"
+ALIGNMENT_SHAPE = "alignment"
+
 STATE_FILENAME = "transcription_state.json"
 LOG_FILENAME = "tertius.log"
 UPLOAD_DIRNAME = "_uploads"

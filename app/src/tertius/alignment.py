@@ -21,6 +21,12 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+# The only thing this module takes from the rest of Tertius. The JSON shape
+# version is shared rather than restated here so the two renderers that stamp
+# it cannot fall out of step. `config` pulls in nothing but the standard
+# library at import time, so this stays cycle-free.
+from .config import ALIGNMENT_SHAPE, JSON_SHAPE_VERSION
+
 AUTO = "auto"
 PARAGRAPH = "paragraph"
 SENTENCE = "sentence"
@@ -268,8 +274,13 @@ def render_json(result: AlignmentResult) -> str:
     every chunk in order and marks which ones were matched. Text that is never
     spoken - a title page, a page number, a footnote - is part of the document,
     and silently dropping it here would misrepresent what you supplied.
+
+    `version` and `kind` lead, as in a fresh transcription's JSON, so a reader
+    can tell the two shapes apart: this one has `chunks`, that one `segments`.
     """
     payload = {
+        "version": JSON_SHAPE_VERSION,
+        "kind": ALIGNMENT_SHAPE,
         "granularity": result.granularity,
         "summary": result.summary(),
         "chunks": [

@@ -9,7 +9,7 @@ requested since: the launcher, folder picker, model download progress, model
 comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, and macOS/Linux support.
 
-**290 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**296 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout — the suite downloads nothing and decodes no
 audio, which is what makes it safe to run on a hosted runner.
 
@@ -55,7 +55,8 @@ Repo: `github.com/sethkopak/tertius` (private), branch `main`.
 - **Three output formats.** `.txt` one sentence per line — Whisper's segments
   are cut for timing, not for reading, so they are rejoined and re-split on
   sentence ends without a word changing. `.srt` unchanged, its lines being
-  timing units. `.json` the transcript as data, off by default.
+  timing units. `.json` the transcript as data, off by default, stamped with a
+  `version` and a `kind` so a reader can tell which shape it has.
 - **The queue follows you** when the output folder changes. Each folder keeps
   its own history, but files you have lined up are what you are pointing at.
 
@@ -298,6 +299,33 @@ fresh (the queue lives in the state file, so nothing is lost); busy Tertius →
 open its tab and say plainly that an update needs a relaunch after the batch;
 nothing there → start normally.
 
+## 2026-08-03 — the `.json` says what it is
+
+The `.json` carried data but nothing *about* the data. Two problems, both only
+visible from the outside:
+
+1. Two different shapes are written — a fresh transcription's `segments`, and
+   supplied text's `chunks` — and both land as a `.json` beside the audio. The
+   extension cannot tell them apart; a reader had to guess from which keys it
+   found.
+2. Nothing said the shape might change. Anything built on it would have broken
+   silently the first time a key was renamed, with no way to detect it.
+
+Both payloads now open with `version` (currently `1`) and `kind`
+(`transcription` / `alignment`), first keys, so a reader meets them before
+reading anything else. The rule for the number: bump when a key is renamed,
+removed, or changes meaning; adding a key does not bump, since code keyed on
+the old ones still works.
+
+The version lives in `config.py`, not in either renderer. Two writers stamping
+their own copy is exactly the drift this key exists to catch, and it is why
+`alignment.py` — otherwise free of internal imports — now takes one from
+`config` (which imports nothing but the standard library, so it stays
+cycle-free).
+
+Written up in the README with a sample of each shape, including the advice to
+refuse an unknown `version` rather than misread the file.
+
 ## Not verified — read this before trusting it
 
 - Only one transcript and one aligned output have been read closely. Accuracy
@@ -334,8 +362,6 @@ nothing there → start normally.
   transcribes. The library supports it — it is just not exposed.
 - Alignment reports how many chunks went untimed in the log, but the UI does not
   show it per file. Worth surfacing if a text ever aligns badly.
-- The `.json` shape is not versioned. If anything ever depends on it, it will
-  want a `version` key before the shape changes under it.
 - No live microphone input; file/batch only, as the original spec required.
 
 ## Gotchas worth remembering

@@ -380,6 +380,8 @@ clock-format case. It is off by default; tick `.json` under **Write**.
 
 ```json
 {
+  "version": 1,
+  "kind": "transcription",
   "source": "talk.wav",
   "language": "en",
   "duration": 9.423,
@@ -393,6 +395,26 @@ Timestamping supplied text writes a different shape, because it has different
 things to say: your chunks in order, each with `timed: true|false`. Text that is
 never spoken keeps its place with a null start — the `.srt` can only carry cues
 that have times, so it is the `.json` that tells you the whole document.
+
+```json
+{
+  "version": 1,
+  "kind": "alignment",
+  "granularity": "sentence",
+  "summary": { "granularity": "sentence", "chunks": 2, "timed": 1, "unmatched": 1 },
+  "chunks": [
+    { "id": 0, "start": null, "end": null, "timed": false, "text": "A title page" }
+  ]
+}
+```
+
+Both files open with the same two keys, so a reader can tell what it has before
+it reads any of it. `kind` says which of the two shapes this is — they both
+arrive as `.json` beside the audio and the extension cannot distinguish them.
+`version` is bumped whenever a key is renamed, removed, or changes meaning; a
+newly *added* key does not bump it, so code keyed on the existing ones keeps
+working. If you build anything on this output, check `version` and refuse a
+number you do not know rather than misreading the file.
 
 Timestamped supplied text is untouched by this too — that feature keeps your
 wording *and* your layout exactly as you wrote it.
