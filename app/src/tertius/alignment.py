@@ -16,6 +16,7 @@ finds no match and is kept without a timestamp rather than being forced onto one
 from __future__ import annotations
 
 import difflib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -258,6 +259,31 @@ def render_timestamped_text(result: AlignmentResult) -> str:
             lines.append(chunk.text)
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def render_json(result: AlignmentResult) -> str:
+    """The aligned text as data, keeping the untimed chunks too.
+
+    Unlike the `.srt`, which can only carry cues that have times, this keeps
+    every chunk in order and marks which ones were matched. Text that is never
+    spoken - a title page, a page number, a footnote - is part of the document,
+    and silently dropping it here would misrepresent what you supplied.
+    """
+    payload = {
+        "granularity": result.granularity,
+        "summary": result.summary(),
+        "chunks": [
+            {
+                "id": index,
+                "start": None if chunk.start is None else round(chunk.start, 3),
+                "end": None if chunk.end is None else round(chunk.end, 3),
+                "timed": chunk.is_timed,
+                "text": chunk.text,
+            }
+            for index, chunk in enumerate(result.chunks)
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
 def render_srt(result: AlignmentResult) -> str:

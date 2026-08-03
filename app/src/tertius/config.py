@@ -50,7 +50,7 @@ GRANULARITIES = ("auto", "paragraph", "sentence")
 
 DEVICES = ("auto", "cpu", "cuda")
 COMPUTE_TYPES = ("default", "int8", "int8_float16", "float16", "float32")
-OUTPUT_FORMATS = ("txt", "srt")
+OUTPUT_FORMATS = ("txt", "srt", "json")
 
 STATE_FILENAME = "transcription_state.json"
 LOG_FILENAME = "tertius.log"

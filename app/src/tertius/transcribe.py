@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import logging
 import os
 import sys
@@ -100,7 +101,65 @@ def segments_to_srt(segments: Sequence[Segment]) -> str:
     return "\n".join(blocks)
 
 
-RENDERERS = {"txt": segments_to_txt, "srt": segments_to_srt}
+def result_to_json(result: TranscriptionResult, source: Path) -> str:
+    """The transcript as data: every segment with its timings, plus what is known.
+
+    For feeding another tool rather than for reading - a search index, a player
+    that wants to seek to a phrase, a diff between two runs. Times are seconds
+    as floats, which is what everything downstream wants; the `.srt` already
+    covers the HH:MM:SS,mmm case.
+
+    Only what was actually measured goes in. `language` is null when the model
+    did not report one rather than being guessed at, and `duration` is absent
+    for the same reason.
+    """
+    payload = {
+        "source": source.name,
+        "language": result.language,
+        "duration": result.duration,
+        "segments": [
+            {
+                "id": index,
+                "start": round(segment.start, 3),
+                "end": round(segment.end, 3),
+                "text": segment.text.strip(),
+            }
+            for index, segment in enumerate(result.segments)
+            if segment.text and segment.text.strip()
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+# Every renderer takes (result, source) so the JSON one can name its file and
+# carry the language; the text ones simply ignore what they do not need.
+RENDERERS = {
+    "txt": lambda result, source: segments_to_txt(result.segments),
+    "srt": lambda result, source: segments_to_srt(result.segments),
+    "json": result_to_json,
+}
+
+
+def safe_output_path(output_dir: Path, stem: str, fmt: str) -> Path:
+    """Where a transcript goes, never on top of one of Tertius's own files.
+
+    Adding `.json` as an output format made this reachable: a recording called
+    `transcription_state.mp3` would otherwise write its transcript straight over
+    the queue's state file, part-way through the very run that is using it.
+    Same shape as the existing guard against overwriting supplied text.
+    """
+    from .config import LOG_FILENAME, STATE_FILENAME
+
+    reserved = {STATE_FILENAME.lower(), LOG_FILENAME.lower()}
+    target = output_dir / f"{stem}.{fmt}"
+    if target.name.lower() in reserved:
+        target = output_dir / f"{stem}.transcript.{fmt}"
+        log.warning(
+            "a transcript would have overwritten Tertius's own %s; writing %s",
+            f"{stem}.{fmt}",
+            target.name,
+        )
+    return target
 
 
 def write_outputs(
@@ -119,9 +178,9 @@ def write_outputs(
     written: list[str] = []
     for fmt in formats:
         render = RENDERERS[fmt]
-        target = output_dir / f"{source.stem}.{fmt}"
+        target = safe_output_path(output_dir, source.stem, fmt)
         tmp = target.with_name(target.name + ".partial")
-        tmp.write_text(render(result.segments), encoding="utf-8")
+        tmp.write_text(render(result, source), encoding="utf-8")
         tmp.replace(target)
         written.append(str(target))
     return written
@@ -535,7 +594,7 @@ def align_file(
     on_segment: Callable | None = None,
 ) -> tuple[list[str], TranscriptionResult]:
     """Timestamp the supplied text instead of writing a fresh transcript."""
-    from .alignment import align, render_srt, render_timestamped_text
+    from .alignment import align, render_json, render_srt, render_timestamped_text
 
     source = Path(source)
     reference_path = Path(reference_path)
@@ -544,7 +603,11 @@ def align_file(
     if not reference_path.is_file():
         raise FileNotFoundError(f"text file not found: {reference_path}")
 
-    reference_text = reference_path.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig, not utf-8: Notepad and PowerShell both write a BOM, and read as
+    # plain utf-8 it survives as an invisible character glued to the first word -
+    # which then appears in the output and stops that chunk matching the audio.
+    # Files without a BOM are unaffected.
+    reference_text = reference_path.read_text(encoding="utf-8-sig", errors="replace")
     result = transcriber.transcribe(
         source, word_timestamps=True, on_segment=on_segment
     )
@@ -557,13 +620,17 @@ def align_file(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    renderers = {"txt": render_timestamped_text, "srt": render_srt}
+    renderers = {
+        "txt": render_timestamped_text,
+        "srt": render_srt,
+        "json": render_json,
+    }
     written: list[str] = []
     for fmt in transcriber.options.formats:
         render = renderers.get(fmt)
         if render is None:
             continue
-        target = output_dir / f"{source.stem}.{fmt}"
+        target = safe_output_path(output_dir, source.stem, fmt)
         # Never write over the very text we were given.
         if target.resolve() == reference_path.resolve():
             target = output_dir / f"{source.stem}.timestamped.{fmt}"

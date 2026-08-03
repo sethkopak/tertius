@@ -122,8 +122,9 @@
         <span id="write-label">Write</span>
         <div class="chips" id="format-chips" role="group" aria-labelledby="write-label">
           {% for f in formats %}
-          <button type="button" class="chip" data-format="{{ f }}" aria-pressed="true"
-                  title="{% if f == 'txt' %}Plain text, one line per spoken segment, no timings{% else %}Subtitles with start and end timestamps{% endif %}">.{{ f }}</button>
+          <button type="button" class="chip" data-format="{{ f }}"
+                  aria-pressed="{{ 'true' if f in default_formats else 'false' }}"
+                  title="{% if f == 'txt' %}Plain text, one sentence per line, no timings{% elif f == 'srt' %}Subtitles with start and end timestamps{% else %}Every segment with its times, as data — for feeding another tool rather than for reading{% endif %}">.{{ f }}</button>
           {% endfor %}
         </div>
 

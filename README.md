@@ -148,6 +148,8 @@ Every button and field has a tooltip — hover if something is unclear. The
 **Dark / Light** toggle beside the wordmark switches theme; it follows your
 system preference on first run and your choice is remembered in that browser.
 
+Output formats: `.txt`, `.srt`, `.json` — pick any combination under **Write**.
+
 Recognised input extensions: `.mp3 .wav .m4a .mp4 .flac .ogg .opus .webm .mkv
 .mov .aac .wma .avi`.
 
@@ -371,6 +373,27 @@ No word is changed, only where the lines fall.
 `.srt` is standard numbered subtitles with `HH:MM:SS,mmm` timings, and is *not*
 reflowed: its lines are timing units and have to stay matched to their cues.
 
+`.json` is the transcript as data — every segment with `start`, `end` and
+`text`, plus the detected language and the audio duration. Times are seconds as
+floats, which is what anything downstream wants; the `.srt` already covers the
+clock-format case. It is off by default; tick `.json` under **Write**.
+
+```json
+{
+  "source": "talk.wav",
+  "language": "en",
+  "duration": 9.423,
+  "segments": [
+    { "id": 0, "start": 0.0, "end": 2.16, "text": "The first study examines the plan." }
+  ]
+}
+```
+
+Timestamping supplied text writes a different shape, because it has different
+things to say: your chunks in order, each with `timed: true|false`. Text that is
+never spoken keeps its place with a null start — the `.srt` can only carry cues
+that have times, so it is the `.json` that tells you the whole document.
+
 Timestamped supplied text is untouched by this too — that feature keeps your
 wording *and* your layout exactly as you wrote it.
 
@@ -528,7 +551,7 @@ straight into the output directory with no subfolder, as before.
 cd app && pytest
 ```
 
-274 tests. The whisper model is mocked throughout — the suite downloads nothing
+290 tests. The whisper model is mocked throughout — the suite downloads nothing
 and decodes no audio, which is also what makes it safe to run in CI. Coverage is
 aimed at what is easy to get wrong: state tracking and resume semantics, the
 job's independence from the HTTP request that started it, download-progress

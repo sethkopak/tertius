@@ -98,7 +98,13 @@ applyTheme(currentTheme());
 // --- settings in the rail --------------------------------------------------
 
 let device = 'auto';
-const formats = new Set([...document.querySelectorAll('.chip')].map((c) => c.dataset.format));
+// Seeded from the chips the server marked pressed, not from every chip on the
+// row - otherwise adding a new output format would turn it on for everyone.
+const formats = new Set(
+  [...document.querySelectorAll('.chip')]
+    .filter((c) => c.getAttribute('aria-pressed') === 'true')
+    .map((c) => c.dataset.format),
+);
 
 function paintDevice() {
   document.querySelectorAll('.seg').forEach((seg) => {

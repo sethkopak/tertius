@@ -89,6 +89,10 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             devices=DEVICES,
             compute_types=COMPUTE_TYPES,
             formats=OUTPUT_FORMATS,
+            # Which chips start pressed. Without this the page seeded the set
+            # from every chip on the row, so adding a format silently switched
+            # it on for everyone with no saved settings.
+            default_formats=TranscriptionOptions().formats,
             granularities=GRANULARITIES,
             languages=language_choices(),
             app_version=__version__,
@@ -546,7 +550,14 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             return _error("transcript not found", 404)
         return send_file(
             str(target),
-            mimetype="text/plain",
+            # Served as text/plain so the browser shows a transcript rather than
+            # offering to save it. JSON is the exception: sending it as plain
+            # text loses the viewer's formatting and folding.
+            mimetype=(
+                "application/json"
+                if target.suffix.lower() == ".json"
+                else "text/plain"
+            ),
             as_attachment=download,
             download_name=target.name,
         )
