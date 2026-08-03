@@ -248,7 +248,12 @@ def test_cancel_reports_how_long_it_has_been_waiting(tmp_path):
     assert status["force_stop_suggested"] is False
 
     # Once the wait exceeds our patience, the UI is told to offer a force stop.
-    assert manager.force_stop_is_the_only_way_out(patience=0) is True
+    # The clock is wound back rather than raced: with patience=0 this needs a
+    # strictly positive elapsed time, and time.time() only gained sub-millisecond
+    # resolution on Windows in Python 3.13 - below that the elapsed time here can
+    # still read as exactly 0.0. Caught by CI on windows/3.11.
+    manager._cancel_requested_at -= 30
+    assert manager.force_stop_is_the_only_way_out(patience=20) is True
 
     gate.set()
     manager.join(10)

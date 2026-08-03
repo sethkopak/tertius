@@ -176,9 +176,17 @@ class StateStore:
             return str(exact)
         wanted = stem.lower()
         try:
-            entries = directory.rglob("*.txt") if recursive else directory.glob("*.txt")
+            # Globbed as "*" and filtered by hand, not as "*.txt": glob is
+            # case-insensitive on Windows and case-sensitive everywhere else, so
+            # a "*.txt" pattern quietly stops finding "talk.TXT" on Linux and
+            # macOS. Lower-casing the stem while leaving the extension
+            # case-sensitive is exactly the half-measure the docstring below
+            # promises nobody has to think about.
+            entries = directory.rglob("*") if recursive else directory.glob("*")
             for candidate in entries:
-                if candidate.is_file() and candidate.stem.lower() == wanted:
+                if candidate.suffix.lower() != ".txt":
+                    continue
+                if candidate.stem.lower() == wanted and candidate.is_file():
                     return str(candidate)
         except OSError:
             pass

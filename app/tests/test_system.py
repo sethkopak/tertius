@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+from tertius import system as system_module
 from tertius.config import MODEL_SIZES
 from tertius.system import (
     GB,
@@ -83,18 +86,29 @@ def test_model_verdicts_use_ram_when_the_gpu_cannot_be_used():
     assert assess_model("large-v3", "auto", working)["verdict"] == "ok"
 
 
-def test_cuda_runtime_status_says_no_gpu_when_there_is_none():
+def test_cuda_runtime_status_says_no_gpu_when_there_is_none(monkeypatch):
+    # Pinned to a non-Mac platform: a Mac answers "cpu_only" before it ever
+    # looks at the device count, because there is no CUDA there to look for.
+    monkeypatch.setattr(system_module.sys, "platform", "linux")
     status = cuda_runtime_status(0)
     assert status["state"] == "no_gpu"
+
+
+def test_a_mac_says_cpu_only_rather_than_no_gpu(monkeypatch):
+    """"No GPU detected" reads like something is missing. On a Mac nothing is."""
+    monkeypatch.setattr(system_module.sys, "platform", "darwin")
+    assert cuda_runtime_status(0)["state"] == "cpu_only"
 
 
 def test_cuda_runtime_status_on_this_machine():
     """Whatever this machine has, the answer must be one of the known states."""
     info = describe_system()
     runtime = info["cuda_runtime"]
-    assert runtime["state"] in {"ok", "missing", "no_gpu"}
+    assert runtime["state"] in {"ok", "missing", "no_gpu", "cpu_only"}
     assert runtime["detail"]
-    if info["cuda_devices"] == 0:
+    if sys.platform == "darwin":
+        assert runtime["state"] == "cpu_only"
+    elif info["cuda_devices"] == 0:
         assert runtime["state"] == "no_gpu"
 
 

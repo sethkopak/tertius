@@ -287,6 +287,64 @@ def test_desktop_integration_is_skipped_off_its_own_platform(monkeypatch):
     assert launcher.refresh_windows_shortcut(say=lambda *a: None) is None
 
 
+# --------------------------------------------------------- case-insensitive text
+
+@pytest.mark.parametrize(
+    "text_name",
+    ["VolA01.txt", "vola01.txt", "VolA01.TXT", "vola01.TXT", "VolA01.Txt"],
+)
+def test_text_pairing_ignores_case_in_the_extension_too(tmp_path, text_name):
+    """Found by CI on Linux, invisible on Windows.
+
+    The stem was compared case-insensitively but the candidates were gathered
+    with a `*.txt` glob - and glob is case-insensitive on Windows and
+    case-sensitive everywhere else. So `talk.TXT` beside `talk.mp3` paired fine
+    on Windows and silently did not on Linux or macOS.
+    """
+    from tertius.state import StateStore
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    audio = audio_dir / "VolA01.mp3"
+    audio.write_bytes(b"\x00")
+    (audio_dir / text_name).write_text("some words", encoding="utf-8")
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+
+    assert store.find_reference_text(audio) is not None
+
+
+def test_text_pairing_still_refuses_a_near_miss_whatever_the_case(tmp_path):
+    """Case-insensitivity must not turn into matching the wrong file."""
+    from tertius.state import StateStore
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    audio = audio_dir / "VolA01.mp3"
+    audio.write_bytes(b"\x00")
+    (audio_dir / "VOLA02.TXT").write_text("the next talk", encoding="utf-8")
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+
+    assert store.find_reference_text(audio) is None
+
+
+def test_a_non_text_file_with_a_matching_name_is_not_picked_up(tmp_path):
+    """Widening the glob to "*" must not widen what counts as a text file."""
+    from tertius.state import StateStore
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    audio = audio_dir / "VolA01.mp3"
+    audio.write_bytes(b"\x00")
+    (audio_dir / "VolA01.pdf").write_bytes(b"%PDF")
+    (audio_dir / "VolA01.txtx").write_text("not a transcript", encoding="utf-8")
+
+    store = StateStore.for_output_dir(tmp_path / "out")
+
+    assert store.find_reference_text(audio) is None
+
+
 # ------------------------------------------------------------------ shipped files
 
 def test_the_shell_launchers_are_committed_with_unix_line_endings():
