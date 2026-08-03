@@ -363,8 +363,16 @@ lecture1.mp3  ->  lecture1.txt
                   lecture1.srt
 ```
 
-`.txt` is one line per segment. `.srt` is standard numbered subtitles with
-`HH:MM:SS,mmm` timings.
+`.txt` is **one sentence per line**. Whisper's own segments are cut for timing
+rather than for reading — they run on, break mid-sentence, and sometimes hold
+three sentences at once — so the text is rejoined and re-split on sentence ends.
+No word is changed, only where the lines fall.
+
+`.srt` is standard numbered subtitles with `HH:MM:SS,mmm` timings, and is *not*
+reflowed: its lines are timing units and have to stay matched to their cues.
+
+Timestamped supplied text is untouched by this too — that feature keeps your
+wording *and* your layout exactly as you wrote it.
 
 Also in the output directory: `transcription_state.json` (the queue), and
 `tertius.log` (per-file start/end plus errors, mirrored to the console).
@@ -520,7 +528,7 @@ straight into the output directory with no subfolder, as before.
 cd app && pytest
 ```
 
-269 tests. The whisper model is mocked throughout — the suite downloads nothing
+274 tests. The whisper model is mocked throughout — the suite downloads nothing
 and decodes no audio, which is also what makes it safe to run in CI. Coverage is
 aimed at what is easy to get wrong: state tracking and resume semantics, the
 job's independence from the HTTP request that started it, download-progress

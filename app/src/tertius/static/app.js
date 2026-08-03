@@ -182,12 +182,17 @@ function restoreSettings(status) {
     paintFormats();
   }
   if (options.alignment_granularity) $('opt-granularity').value = options.alignment_granularity;
-  // The queue is the honest answer here: options only change when a job starts,
-  // so a file already set to be timestamped means the mode is on, whatever the
-  // last run happened to use.
+  // Off unless the queue in front of you actually uses it. The saved option
+  // alone is not enough: `use_reference_text` sticks in the state file from
+  // whenever it was last run, so honouring it meant opening a folder full of
+  // ordinary transcription work with the box already ticked, weeks later.
+  //
+  // The queue is the honest answer. A file set to be timestamped, or waiting
+  // on a decision about its text, means the mode is genuinely in use — and
+  // those are exactly the files that would break if the box came up clear.
   const queueWantsText = (status.files || [])
     .some((f) => f.mode === 'align' || f.mode === 'undecided');
-  if (options.use_reference_text || queueWantsText) {
+  if (queueWantsText) {
     $('opt-use-text').checked = true;
     $('granularity-row').hidden = false;
     $('textdir-row').hidden = false;

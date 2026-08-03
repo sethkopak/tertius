@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from .alignment import split_sentences
 from .config import TranscriptionOptions
 
 log = logging.getLogger(__name__)
@@ -66,8 +67,21 @@ def format_timestamp(seconds: float, separator: str = ",") -> str:
 
 
 def segments_to_txt(segments: Sequence[Segment]) -> str:
-    lines = [s.text.strip() for s in segments if s.text and s.text.strip()]
-    return "\n".join(lines) + ("\n" if lines else "")
+    """The transcript, one sentence per line.
+
+    Whisper's segments are cut for timing, not for reading: they run on, break
+    mid-sentence, and sometimes carry three sentences at once. Joining them back
+    into one block and re-splitting on sentence ends gives something you can
+    actually read and diff, without changing a single word.
+
+    The `.srt` is deliberately not treated this way - its lines are timing units
+    and have to stay matched to their cues.
+    """
+    text = " ".join(s.text.strip() for s in segments if s.text and s.text.strip())
+    if not text:
+        return ""
+    lines = split_sentences(text)
+    return "\n".join(lines) + "\n" if lines else ""
 
 
 def segments_to_srt(segments: Sequence[Segment]) -> str:
