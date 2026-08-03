@@ -23,7 +23,7 @@ tertius = "tertius.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tertius = ["templates/*.html", "static/*"]
+tertius = ["templates/*.html", "static/*", "static/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

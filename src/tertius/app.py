@@ -16,6 +16,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
+from . import __version__
 from .config import (
     COMPUTE_TYPES,
     DEVICES,
@@ -26,9 +27,11 @@ from .config import (
     TranscriptionOptions,
     default_output_dir,
     is_media_file,
+    language_choices,
     scan_directory,
 )
 from .jobs import JobError, JobManager
+from .media import probe_durations_in_background
 from .system import assess_model, check_compute_type, describe_system
 from .transcribe import is_model_cached
 
@@ -64,6 +67,8 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             compute_types=COMPUTE_TYPES,
             formats=OUTPUT_FORMATS,
             granularities=GRANULARITIES,
+            languages=language_choices(),
+            app_version=__version__,
             default_output_dir=str(manager.output_dir or out),
         )
 
@@ -174,6 +179,9 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         added = store.add_files(
             paths, base_dir=base_dir, match_reference_text=match_text
         )
+        # Lengths fill in behind the queue: the files appear at once, and the
+        # Length column and the estimate catch up a moment later.
+        probe_durations_in_background(store, added)
         status = manager.status()
         return jsonify(
             {
@@ -273,6 +281,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         # Save every file before matching, so order of upload does not matter.
         if saved:
             store.add_files(saved, match_reference_text=match_text)
+            probe_durations_in_background(store, saved)
         status = manager.status()
         return jsonify(
             {
@@ -420,6 +429,22 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         retried = store.retry_failed()
         return jsonify({"retried": len(retried), "status": manager.status()})
 
+    @app.post("/api/queue/retry")
+    def api_queue_retry():
+        """Put one failed file back in the queue, leaving the others alone."""
+        body = request.get_json(silent=True) or {}
+        path = body.get("path")
+        store = manager.store
+        if not path or store is None:
+            return _error("path is required")
+        entry = store.get(path)
+        if entry is None:
+            return _error("file is not in the queue", 404)
+        if entry.get("status") != "failed":
+            return _error("only a failed file can be retried", 409)
+        store.mark_pending(path)
+        return jsonify({"status": manager.status()})
+
     @app.post("/api/queue/remove")
     def api_queue_remove():
         body = request.get_json(silent=True) or {}
@@ -430,6 +455,29 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if manager.is_running():
             return _error("cannot edit the queue while a job is running", 409)
         return jsonify({"removed": store.remove_file(path), "status": manager.status()})
+
+    @app.post("/api/open-output")
+    def api_open_output():
+        """Show the output folder in the desktop file manager.
+
+        The app runs in a browser tab but on the user's own machine, so the
+        finished-batch button can genuinely open Explorer/Finder rather than
+        printing a path to be copied by hand.
+        """
+        target = manager.output_dir
+        if target is None:
+            return _error("no output directory attached", 409)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(target))  # noqa: S606 - a folder, on this machine
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except OSError as exc:
+            return _error(f"could not open {target}: {exc}", 503)
+        return jsonify({"opened": str(target)})
 
     @app.get("/api/transcript")
     def api_transcript():

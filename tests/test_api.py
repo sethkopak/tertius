@@ -247,6 +247,47 @@ def test_retry_failed_endpoint(api, tmp_path):
     assert res["status"]["summary"]["pending"] == 1
 
 
+def test_retrying_one_file_leaves_the_other_failure_alone(api, tmp_path):
+    files = make_audio(tmp_path / "audio", "a.mp3", "b.mp3")
+    api.client.post("/api/job/start", json={"files": [str(f) for f in files]})
+    api.wait_done()
+    for path in files:
+        api.manager.store.mark_failed(path, "boom")
+
+    res = api.client.post("/api/queue/retry", json={"path": str(files[0])})
+
+    assert res.status_code == 200
+    assert api.manager.store.status_of(files[0]) == "pending"
+    assert api.manager.store.status_of(files[1]) == "failed"
+
+
+def test_only_a_failed_file_can_be_retried(api, tmp_path):
+    files = make_audio(tmp_path / "audio", "a.mp3")
+    api.client.post("/api/queue", json={"files": [str(f) for f in files]})
+
+    res = api.client.post("/api/queue/retry", json={"path": str(files[0])})
+
+    assert res.status_code == 409
+    assert api.manager.store.status_of(files[0]) == "pending"
+
+
+def test_retrying_a_file_that_is_not_queued_is_a_404(api, tmp_path):
+    res = api.client.post("/api/queue/retry", json={"path": str(tmp_path / "gone.mp3")})
+    assert res.status_code == 404
+
+
+def test_open_output_hands_the_folder_to_the_desktop(api, monkeypatch):
+    opened = []
+    # Never actually spawn a file manager during a test run.
+    monkeypatch.setattr("tertius.app.sys.platform", "win32")
+    monkeypatch.setattr("tertius.app.os.startfile", opened.append, raising=False)
+
+    res = api.client.post("/api/open-output", json={})
+
+    assert res.status_code == 200
+    assert opened == [str(api.output_dir.resolve())]
+
+
 def test_queue_remove_is_blocked_while_running(api, tmp_path):
     files = make_audio(tmp_path / "audio", "a.mp3", "b.mp3")
     gate = api.block(files[0])

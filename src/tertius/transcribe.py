@@ -400,8 +400,17 @@ class WhisperTranscriber:
         _ = self.model
 
     def transcribe(
-        self, path: str | Path, word_timestamps: bool = False
+        self,
+        path: str | Path,
+        word_timestamps: bool = False,
+        on_segment: Callable[[Segment, float | None], None] | None = None,
     ) -> TranscriptionResult:
+        """Transcribe one file.
+
+        `on_segment(segment, audio_seconds)` is called as each segment lands, so
+        a caller can report progress through a long file. `audio_seconds` is the
+        length faster-whisper measured, and is known before the first segment.
+        """
         segments_iter, info = self.model.transcribe(
             str(path),
             language=self.options.language,
@@ -409,13 +418,19 @@ class WhisperTranscriber:
             vad_filter=self.options.vad_filter,
             word_timestamps=word_timestamps,
         )
+        audio_seconds = getattr(info, "duration", None)
         # faster-whisper returns a generator; consuming it is what does the work.
         segments = []
         words: list[TimedWord] = []
         for segment in segments_iter:
-            segments.append(
-                Segment(start=segment.start, end=segment.end, text=segment.text)
-            )
+            done = Segment(start=segment.start, end=segment.end, text=segment.text)
+            segments.append(done)
+            if on_segment is not None:
+                # A reporting callback must never be able to fail a transcription.
+                try:
+                    on_segment(done, audio_seconds)
+                except Exception:  # pragma: no cover - defensive
+                    log.debug("segment callback failed", exc_info=True)
             for word in getattr(segment, "words", None) or ():
                 words.append(
                     TimedWord(
@@ -425,7 +440,7 @@ class WhisperTranscriber:
         return TranscriptionResult(
             segments=segments,
             language=getattr(info, "language", None),
-            duration=getattr(info, "duration", None),
+            duration=audio_seconds,
             words=words,
         )
 
@@ -439,6 +454,7 @@ def align_file(
     output_dir: str | Path,
     reference_path: str | Path,
     granularity: str = "auto",
+    on_segment: Callable | None = None,
 ) -> tuple[list[str], TranscriptionResult]:
     """Timestamp the supplied text instead of writing a fresh transcript."""
     from .alignment import align, render_srt, render_timestamped_text
@@ -451,7 +467,9 @@ def align_file(
         raise FileNotFoundError(f"text file not found: {reference_path}")
 
     reference_text = reference_path.read_text(encoding="utf-8", errors="replace")
-    result = transcriber.transcribe(source, word_timestamps=True)
+    result = transcriber.transcribe(
+        source, word_timestamps=True, on_segment=on_segment
+    )
     if not result.words:
         raise RuntimeError(
             "the model returned no word timings, so the text cannot be aligned"
@@ -497,12 +515,13 @@ def transcribe_file(
     transcriber: WhisperTranscriber,
     source: str | Path,
     output_dir: str | Path,
+    on_segment: Callable | None = None,
 ) -> tuple[list[str], TranscriptionResult]:
     """Transcribe one file and write its transcripts. Raises on failure."""
     source = Path(source)
     if not source.is_file():
         raise FileNotFoundError(f"file not found: {source}")
-    result = transcriber.transcribe(source)
+    result = transcriber.transcribe(source, on_segment=on_segment)
     outputs = write_outputs(
         source, result, Path(output_dir), transcriber.options.formats
     )

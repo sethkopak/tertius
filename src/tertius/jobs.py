@@ -44,6 +44,23 @@ TRANSCRIBING = "transcribing"
 # that is the environment being broken, not a run of bad files.
 REPEATED_FAILURE_LIMIT = 3
 
+# How much of the transcript-so-far to keep for the UI's live excerpt. Enough to
+# fill two or three lines; the point is to show the thing is alive, not to be a
+# second copy of the transcript.
+EXCERPT_WORDS = 34
+
+
+def _accepts(fn: Callable, name: str) -> bool:
+    """Does `fn` take a keyword argument called `name`?
+
+    Asked by signature rather than by catching TypeError, which would mistake a
+    function's own TypeError for a signature mismatch.
+    """
+    try:
+        return name in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
 
 class JobError(RuntimeError):
     """Raised for invalid job control requests (e.g. start while running)."""
@@ -79,12 +96,19 @@ class JobManager:
         self._cancel_requested_at: float | None = None
         self._notice: str | None = None
         self._active_device: str | None = None
+        self._active = self._empty_active()
 
     # ------------------------------------------------------------------ setup
 
     @staticmethod
     def _empty_run() -> dict:
         return {"total": 0, "processed": 0, "completed": 0, "failed": 0, "skipped": 0}
+
+    @staticmethod
+    def _empty_active() -> dict:
+        # What the worker is doing *inside* the current file, so the UI can show
+        # progress through a 70-minute recording rather than a still frame.
+        return {"path": None, "progress": None, "audio_seconds": None, "excerpt": ""}
 
     @staticmethod
     def _empty_download() -> dict:
@@ -108,6 +132,18 @@ class JobManager:
         with self._lock:
             self._download["downloaded"] = downloaded
             self._download["total"] = total
+
+    def _note_segment(self, segment, audio_seconds: float | None) -> None:
+        """Called by the transcriber as each segment lands."""
+        with self._lock:
+            if audio_seconds:
+                self._active["audio_seconds"] = audio_seconds
+                fraction = (segment.end or 0) / audio_seconds
+                self._active["progress"] = max(0.0, min(1.0, fraction))
+            text = (segment.text or "").strip()
+            if text:
+                words = f"{self._active['excerpt']} {text}".split()
+                self._active["excerpt"] = " ".join(words[-EXCERPT_WORDS:])
 
     def is_running(self) -> bool:
         with self._lock:
@@ -213,6 +249,7 @@ class JobManager:
             self._current_file = None
             self._phase = None
             self._download = self._empty_download()
+            self._active = self._empty_active()
             self._cancel_requested_at = None
             self._notice = None
             self._active_device = None
@@ -272,15 +309,11 @@ class JobManager:
         options = self._options
         assert store is not None and output_dir is not None
 
-        # Ask by signature rather than catching TypeError, which would silently
-        # retry a factory that raised TypeError for its own reasons.
-        try:
-            takes_progress = (
-                "on_download_progress"
-                in inspect.signature(self._transcriber_factory).parameters
-            )
-        except (TypeError, ValueError):
-            takes_progress = False
+        takes_progress = _accepts(self._transcriber_factory, "on_download_progress")
+        # Test doubles stand in for these, and are not obliged to report progress
+        # through a file; only offer the callback to something that asked for it.
+        transcribe_watches = _accepts(self._transcribe_fn, "on_segment")
+        align_watches = _accepts(self._align_fn, "on_segment")
         transcriber = (
             self._transcriber_factory(
                 options, on_download_progress=self._note_download_progress
@@ -351,6 +384,9 @@ class JobManager:
                 entry = store.mark_in_progress(path)
                 with self._lock:
                     self._current_file = path
+                    self._active = self._empty_active()
+                    self._active["path"] = path
+                    self._active["audio_seconds"] = (entry or {}).get("duration")
                 log.info("transcribing %s", path)
                 started = time.time()
                 # Mirror the scanned folder's layout under the output directory,
@@ -366,10 +402,18 @@ class JobManager:
                             target_dir,
                             entry["reference_text"],
                             options.alignment_granularity,
+                            **({"on_segment": self._note_segment} if align_watches else {}),
                         )
                     else:
                         outputs, result = self._transcribe_fn(
-                            transcriber, path, target_dir
+                            transcriber,
+                            path,
+                            target_dir,
+                            **(
+                                {"on_segment": self._note_segment}
+                                if transcribe_watches
+                                else {}
+                            ),
                         )
                 except Exception as exc:  # one bad file must not stop the batch
                     log.exception("failed: %s", path)
@@ -378,6 +422,7 @@ class JobManager:
                     with self._lock:
                         self._run["failed"] += 1
                         self._run["processed"] += 1
+                        self._active = self._empty_active()
                         if message == last_error:
                             repeated += 1
                         else:
@@ -401,13 +446,16 @@ class JobManager:
                             self._finished_at = time.time()
                             self._current_file = None
                             self._phase = None
+                            self._active = self._empty_active()
                         return
                     continue
+                segments = getattr(result, "segments", None) or ()
                 store.mark_done(
                     path,
                     outputs=outputs,
                     language=getattr(result, "language", None),
                     duration=getattr(result, "duration", None),
+                    words=sum(len((s.text or "").split()) for s in segments),
                 )
                 log.info(
                     "done: %s (%.1fs) -> %s",
@@ -418,6 +466,7 @@ class JobManager:
                 with self._lock:
                     self._run["completed"] += 1
                     self._run["processed"] += 1
+                    self._active = self._empty_active()
         except Exception as exc:  # pragma: no cover - defensive
             log.exception("batch aborted")
             with self._lock:
@@ -426,6 +475,7 @@ class JobManager:
                 self._finished_at = time.time()
                 self._current_file = None
                 self._phase = None
+                self._active = self._empty_active()
             return
         finally:
             unload = getattr(transcriber, "unload", None)
@@ -435,6 +485,7 @@ class JobManager:
         with self._lock:
             self._current_file = None
             self._phase = None
+            self._active = self._empty_active()
             self._finished_at = time.time()
             self._state = CANCELLED if self._cancel.is_set() else COMPLETED
             run = dict(self._run)
@@ -473,6 +524,12 @@ class JobManager:
                 ),
                 "notice": self._notice,
                 "active_device": self._active_device,
+                "active": dict(self._active),
+                "elapsed_seconds": (
+                    round((self._finished_at or time.time()) - self._started_at, 1)
+                    if self._started_at
+                    else None
+                ),
             }
         payload["force_stop_suggested"] = self.force_stop_is_the_only_way_out()
         if store is not None:

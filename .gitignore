@@ -13,3 +13,6 @@ _uploads/
 *.srt
 *.txt
 !requirements.txt
+
+# the design bundle is kept unpacked; the archive is a duplicate
+Tertius Transcription App Design.zip

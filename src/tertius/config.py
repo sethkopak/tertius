@@ -57,6 +57,14 @@ LOG_FILENAME = "tertius.log"
 UPLOAD_DIRNAME = "_uploads"
 
 
+# Shown in the Language menu when faster-whisper is not installed to tell us the
+# real list. Every one of these is in Whisper's own set.
+FALLBACK_LANGUAGE_CODES = (
+    "ar", "de", "el", "en", "es", "fr", "he", "hi", "it", "ja",
+    "ko", "la", "nl", "pl", "pt", "ru", "sw", "tr", "uk", "zh",
+)
+
+
 @functools.lru_cache(maxsize=1)
 def known_language_codes() -> frozenset[str] | None:
     """The ~100 codes Whisper accepts, or None if faster-whisper isn't installed.
@@ -70,6 +78,16 @@ def known_language_codes() -> frozenset[str] | None:
         return frozenset(_LANGUAGE_CODES)
     except Exception:
         return None
+
+
+def language_choices() -> tuple[str, ...]:
+    """Codes to offer in the Language menu, sorted.
+
+    Whisper's own list when faster-whisper can tell us, so the menu can never
+    offer a code the model would reject.
+    """
+    codes = known_language_codes()
+    return tuple(sorted(codes)) if codes else FALLBACK_LANGUAGE_CODES
 
 
 @dataclass

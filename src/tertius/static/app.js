@@ -1,10 +1,17 @@
 // Polls /api/status. Holds no job state of its own: the server is the truth,
-// so a reload or a second tab picks up exactly where the job actually is.
+// so a reload or a second tab picks up exactly where the job actually is. The
+// only client-owned state is what has not been submitted yet — the settings in
+// the rail, and whether a cancel is waiting on its confirmation.
 const $ = (id) => document.getElementById(id);
 
 const POLL_IDLE = 2000;
 const POLL_RUNNING = 1000;
 let pollTimer = null;
+
+let confirmingCancel = false;
+let settingsRestored = false;
+let lastRunState = null;
+let missedPolls = 0;
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -21,39 +28,219 @@ const jsonPost = (path, payload) =>
     body: JSON.stringify(payload || {}),
   });
 
+// --- formatting ------------------------------------------------------------
+
+const esc = (value) =>
+  String(value == null ? '' : value).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const basename = (p) => String(p).split(/[\\/]/).pop();
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** 41:20, or 1:12:38 once it passes an hour. */
+function clock(seconds) {
+  if (!seconds && seconds !== 0) return null;
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/** "6 h 42 m" for spans of hours, "18 min" below that. */
+function span(seconds) {
+  if (!seconds && seconds !== 0) return null;
+  const total = Math.round(seconds);
+  if (total < 60) return `${total} s`;
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  return h ? `${h} h ${String(m).padStart(2, '0')} m` : `${m} min`;
+}
+
+function formatBytes(n) {
+  if (!n) return '0 MB';
+  const mb = n / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+}
+
+function note(id, message, isError) {
+  const el = $(id);
+  el.textContent = message || '';
+  el.className = `caption${isError ? ' error-text' : ''}`;
+}
+
+// --- theme -----------------------------------------------------------------
+// Dark is the default; the choice sticks across reloads. The switch is instant
+// on purpose — a cross-fade looks cheap.
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.querySelectorAll('[data-theme-choice]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.themeChoice === theme));
+  });
+}
+
+document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+  button.onclick = () => {
+    localStorage.setItem('tertius-theme', button.dataset.themeChoice);
+    applyTheme(button.dataset.themeChoice);
+  };
+});
+applyTheme(currentTheme());
+
+// --- settings in the rail --------------------------------------------------
+
+let device = 'auto';
+const formats = new Set([...document.querySelectorAll('.chip')].map((c) => c.dataset.format));
+
+function paintDevice() {
+  document.querySelectorAll('.seg').forEach((seg) => {
+    seg.setAttribute('aria-checked', String(seg.dataset.device === device));
+  });
+}
+
+function paintFormats() {
+  document.querySelectorAll('.chip').forEach((chip) => {
+    chip.setAttribute('aria-pressed', String(formats.has(chip.dataset.format)));
+  });
+}
+
+document.querySelectorAll('.seg').forEach((seg) => {
+  seg.onclick = () => {
+    if (seg.disabled) return;
+    device = seg.dataset.device;
+    paintDevice();
+    refreshModelAdvice();
+  };
+});
+
+document.querySelectorAll('.chip').forEach((chip) => {
+  chip.onclick = () => {
+    const format = chip.dataset.format;
+    if (formats.has(format)) {
+      // At least one format has to survive, or a run would write nothing.
+      if (formats.size === 1) return note('add-note', 'At least one output format is needed.', true);
+      formats.delete(format);
+    } else {
+      formats.add(format);
+    }
+    paintFormats();
+  };
+});
+
+paintDevice();
+paintFormats();
+
+// Language codes come from Whisper's own list; the browser knows their names,
+// so no hand-written table can go stale or wrong.
+(function nameLanguages() {
+  const select = $('opt-language');
+  let display = null;
+  try { display = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (_) { /* older browser */ }
+  const options = [...select.options].slice(1);
+  options.forEach((option) => {
+    let name = option.value;
+    try { name = display ? display.of(option.value) : option.value; } catch (_) { /* not a known tag */ }
+    option.textContent = name === option.value ? option.value : `${name} · ${option.value}`;
+  });
+  options
+    .sort((a, b) => a.textContent.localeCompare(b.textContent))
+    .forEach((option) => select.appendChild(option));
+})();
+
 function collectOptions() {
-  const formats = [...document.querySelectorAll('.opt-format:checked')].map((c) => c.value);
   return {
     model_size: $('opt-model').value,
-    device: $('opt-device').value,
+    device,
     compute_type: $('opt-compute').value,
-    language: $('opt-language').value.trim() || null,
-    formats,
+    language: $('opt-language').value || null,
+    formats: [...formats],
     use_reference_text: $('opt-use-text').checked,
     alignment_granularity: $('opt-granularity').value,
   };
 }
 
-async function applyReferenceMode(enabled) {
-  return jsonPost('/api/queue/reference-mode', {
-    enabled,
-    reference_dir: $('opt-textdir').value.trim(),
-  });
+/** Take the settings the server last ran with, once, at startup. */
+function restoreSettings(status) {
+  const options = status.options;
+  if (settingsRestored || !options) return;
+  settingsRestored = true;
+  if (options.model_size) $('opt-model').value = options.model_size;
+  if (options.compute_type) $('opt-compute').value = options.compute_type;
+  if (options.device) { device = options.device; paintDevice(); }
+  $('opt-language').value = options.language || '';
+  if (Array.isArray(options.formats) && options.formats.length) {
+    formats.clear();
+    options.formats.forEach((f) => formats.add(f));
+    paintFormats();
+  }
+  if (options.alignment_granularity) $('opt-granularity').value = options.alignment_granularity;
+  // The queue is the honest answer here: options only change when a job starts,
+  // so a file already set to be timestamped means the mode is on, whatever the
+  // last run happened to use.
+  const queueWantsText = (status.files || [])
+    .some((f) => f.mode === 'align' || f.mode === 'undecided');
+  if (options.use_reference_text || queueWantsText) {
+    $('opt-use-text').checked = true;
+    $('granularity-row').hidden = false;
+    $('textdir-row').hidden = false;
+  }
+  if (status.reference_dir) $('opt-textdir').value = status.reference_dir;
+  const savedDir = localStorage.getItem('tertius-source');
+  if (savedDir && !$('scan-dir').value) $('scan-dir').value = savedDir;
+  const recursive = localStorage.getItem('tertius-recursive');
+  if (recursive !== null) $('scan-recursive').checked = recursive === '1';
 }
 
-$('btn-browse-textdir').onclick = async () => {
-  const button = $('btn-browse-textdir');
+$('scan-recursive').onchange = () =>
+  localStorage.setItem('tertius-recursive', $('scan-recursive').checked ? '1' : '0');
+
+// --- source ----------------------------------------------------------------
+
+async function scanAndQueue(directory) {
+  if (!directory) return note('add-note', 'Choose a folder first.', true);
+  localStorage.setItem('tertius-source', directory);
+  note('add-note', 'Scanning…');
+  try {
+    const found = await jsonPost('/api/scan', {
+      directory,
+      recursive: $('scan-recursive').checked,
+    });
+    if (!found.count) return note('add-note', `No audio or video files in ${found.directory}.`);
+    // Pass the scanned folder so the output directory can mirror its structure.
+    const queued = await jsonPost('/api/queue', {
+      files: found.files,
+      base_dir: found.directory,
+      match_reference_text: $('opt-use-text').checked,
+    });
+    let message = `Found ${plural(found.count, 'file', 'files')}; queued ${queued.added} new.`;
+    if ($('opt-use-text').checked) {
+      message += ` Matched text for ${queued.matched_text}; ${queued.needs_choice} need a choice.`;
+    }
+    note('add-note', message);
+    render(queued.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+}
+
+$('btn-browse').onclick = async () => {
+  const button = $('btn-browse');
   button.disabled = true;
   note('add-note', 'Folder picker open — check for a dialog window.');
   try {
-    const picked = await jsonPost('/api/browse-folder', {
-      initial: $('opt-textdir').value.trim(),
-    });
+    const picked = await jsonPost('/api/browse-folder', { initial: $('scan-dir').value.trim() });
     if (picked.cancelled) {
       note('add-note', 'No folder chosen.');
     } else {
-      $('opt-textdir').value = picked.path;
-      $('btn-apply-textdir').click();
+      $('scan-dir').value = picked.path;
+      await scanAndQueue(picked.path);
     }
   } catch (err) {
     note('add-note', err.message, true);
@@ -62,31 +249,98 @@ $('btn-browse-textdir').onclick = async () => {
   }
 };
 
-$('btn-apply-textdir').onclick = async () => {
+$('scan-dir').onkeydown = (event) => {
+  if (event.key === 'Enter') scanAndQueue($('scan-dir').value.trim());
+};
+
+$('btn-pick-files').onclick = () => $('upload-files').click();
+$('upload-files').onchange = () => {
+  if ($('upload-files').files.length) uploadFiles([...$('upload-files').files]);
+};
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const form = new FormData();
+  files.forEach((f) => form.append('files', f));
+  // .txt files upload alongside the audio and are paired by name.
+  form.append('match_reference_text', $('opt-use-text').checked ? '1' : '0');
+  note('add-note', `Copying ${plural(files.length, 'file', 'files')} in…`);
   try {
-    const res = await applyReferenceMode($('opt-use-text').checked);
-    note('add-note',
-      `Looked in ${res.reference_dir || 'each audio file’s own folder'}: ` +
-      `${res.matched} matched, ${res.needs_choice} still without text.`);
+    const res = await api('/api/upload', { method: 'POST', body: form });
+    const rejected = res.rejected.length ? ` Skipped: ${res.rejected.join(', ')}.` : '';
+    const texts = res.texts.length ? ` and ${plural(res.texts.length, 'text file', 'text files')}` : '';
+    let message = `Queued ${plural(res.saved.length, 'file', 'files')}${texts}.${rejected}`;
+    if ($('opt-use-text').checked) {
+      message += ` Matched text for ${res.matched_text}; ${res.needs_choice} need a choice.`;
+    }
+    note('add-note', message);
+    $('upload-files').value = '';
     render(res.status);
   } catch (err) {
     note('add-note', err.message, true);
   }
-};
+}
+
+// --- drag & drop -----------------------------------------------------------
+// The whole window takes audio. Folders cannot be read from a drop, so those
+// still go through Browse.
+
+let dragDepth = 0;
+
+function showVeil(bad) {
+  const veil = $('drop-veil');
+  veil.hidden = false;
+  veil.classList.toggle('is-bad', Boolean(bad));
+}
+
+function hideVeil() {
+  dragDepth = 0;
+  $('drop-veil').hidden = true;
+}
+
+window.addEventListener('dragenter', (event) => {
+  if (![...event.dataTransfer.types].includes('Files')) return;
+  dragDepth += 1;
+  showVeil(false);
+});
+
+window.addEventListener('dragover', (event) => {
+  if ([...event.dataTransfer.types].includes('Files')) event.preventDefault();
+});
+
+window.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) hideVeil();
+});
+
+window.addEventListener('drop', (event) => {
+  if (![...event.dataTransfer.types].includes('Files')) return;
+  event.preventDefault();
+  hideVeil();
+  const files = [...event.dataTransfer.files];
+  if (files.length) uploadFiles(files);
+});
+
+// --- text timestamping -----------------------------------------------------
+
+const applyReferenceMode = (enabled) =>
+  jsonPost('/api/queue/reference-mode', {
+    enabled,
+    reference_dir: $('opt-textdir').value.trim(),
+  });
 
 $('opt-use-text').onchange = async () => {
   const enabled = $('opt-use-text').checked;
-  $('alignment-options').hidden = !enabled;
-  $('reference-dir-row').hidden = !enabled;
+  $('granularity-row').hidden = !enabled;
+  $('textdir-row').hidden = !enabled;
   // Re-evaluate what is already queued, so ticking the box after adding files
   // does something visible instead of silently nothing.
   try {
     const res = await applyReferenceMode(enabled);
     if (enabled) {
-      note('add-note',
-        `Text matching on: ${res.matched} file(s) matched, ${res.needs_choice} need a choice.`);
+      note('add-note', `Text matching on: ${res.matched} matched, ${res.needs_choice} need a choice.`);
     } else if (res.reverted) {
-      note('add-note', `Text matching off: ${res.reverted} file(s) back to normal transcription.`);
+      note('add-note', `Text matching off: ${res.reverted} back to normal transcription.`);
     } else {
       note('add-note', '');
     }
@@ -96,11 +350,34 @@ $('opt-use-text').onchange = async () => {
   }
 };
 
+$('btn-browse-textdir').onclick = async () => {
+  const button = $('btn-browse-textdir');
+  button.disabled = true;
+  note('add-note', 'Folder picker open — check for a dialog window.');
+  try {
+    const picked = await jsonPost('/api/browse-folder', { initial: $('opt-textdir').value.trim() });
+    if (picked.cancelled) {
+      note('add-note', 'No folder chosen.');
+    } else {
+      $('opt-textdir').value = picked.path;
+      const res = await applyReferenceMode($('opt-use-text').checked);
+      note('add-note',
+        `Looked in ${res.reference_dir || 'each audio file’s own folder'}: ` +
+        `${res.matched} matched, ${res.needs_choice} still without text.`);
+      render(res.status);
+    }
+  } catch (err) {
+    note('add-note', err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
 $('btn-rematch-text').onclick = async () => {
   try {
     const res = await jsonPost('/api/queue/rematch-text', {});
     note('add-note', res.matched
-      ? `Found text files for ${res.matched} more file(s).`
+      ? `Found text files for ${plural(res.matched, 'more file', 'more files')}.`
       : 'Still no matching text files found.');
     render(res.status);
   } catch (err) {
@@ -111,7 +388,7 @@ $('btn-rematch-text').onclick = async () => {
 const decideAll = async (mode) => {
   try {
     const res = await jsonPost('/api/queue/decide-all', { mode });
-    note('add-note', `Set ${res.changed} file(s) to ${mode}.`);
+    note('add-note', `Set ${plural(res.changed, 'file', 'files')} to ${mode}.`);
     render(res.status);
   } catch (err) {
     note('add-note', err.message, true);
@@ -120,244 +397,549 @@ const decideAll = async (mode) => {
 $('btn-all-transcribe').onclick = () => decideAll('transcribe');
 $('btn-all-skip').onclick = () => decideAll('skip');
 
-function note(id, message, isError) {
-  const el = $(id);
-  el.textContent = message || '';
-  el.style.color = isError ? 'var(--bad)' : '';
-}
+// --- job control -----------------------------------------------------------
 
-function basename(p) {
-  const parts = String(p).split(/[\\/]/);
-  return parts[parts.length - 1];
-}
-
-function formatBytes(n) {
-  if (!n) return '0 MB';
-  const mb = n / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
-}
-
-// --- theme -----------------------------------------------------------------
-// Dark is the default; the choice sticks across reloads.
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  $('theme-icon').textContent = theme === 'dark' ? '☀' : '☾';
-  $('theme-label').textContent = theme === 'dark' ? 'Light' : 'Dark';
-}
-
-function currentTheme() {
-  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-}
-
-applyTheme(localStorage.getItem('tertius-theme') === 'light' ? 'light' : 'dark');
-
-$('btn-theme').onclick = () => {
-  const next = currentTheme() === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('tertius-theme', next);
-  applyTheme(next);
-};
-
-// Per-file mode. "undecided" is the interesting one: no text file was found, so
-// the user has to say what should happen rather than us picking for them.
-function renderMode(file, running) {
-  const mode = file.mode || 'transcribe';
-  const attach = running
-    ? ''
-    : ` <button class="tiny" data-attach="${encodeURIComponent(file.path)}" ` +
-      `title="Choose a text file to timestamp for this recording">text…</button>`;
-
-  if (mode === 'align') {
-    const name = basename(file.reference_text || '');
-    return (
-      `<span class="mode-align" title="Will timestamp: ${file.reference_text}">` +
-      `✓ text: ${name}</span>${attach}`
-    );
+async function begin() {
+  hidePanel('panel-error');
+  try {
+    render(await jsonPost('/api/job/start', {
+      options: collectOptions(),
+      output_dir: $('opt-outdir').value.trim() || undefined,
+    }));
+  } catch (err) {
+    showError(err.message);
   }
-  if (mode === 'skip') {
-    return `<span class="mode-skip">skip</span>${running ? '' : modeButtons(file, ['transcribe'])}`;
-  }
-  if (mode === 'undecided') {
-    const where = (file.searched || []).join('\n');
-    return (
-      `<span class="mode-undecided" title="Looked for ${file.name.replace(/\.[^.]+$/, '')}.txt in:\n${where}">✗ no text found</span>` +
-      (running ? '' : modeButtons(file, ['transcribe', 'skip']) + attach)
-    );
-  }
-  return (
-    `<span class="mode-transcribe">transcribe</span>` +
-    (running ? '' : modeButtons(file, ['skip']) + attach)
-  );
+  poll();
 }
 
-const MODE_LABEL = { transcribe: 'transcribe', skip: 'skip' };
-
-function modeButtons(file, modes) {
-  return (
-    ' ' +
-    modes
-      .map(
-        (m) =>
-          `<button class="tiny" data-mode="${m}" data-path="${encodeURIComponent(file.path)}" ` +
-          `title="Set this file to ${MODE_LABEL[m]}">${MODE_LABEL[m]}</button>`,
-      )
-      .join(' ')
-  );
+async function cancelRun() {
+  confirmingCancel = false;
+  try {
+    render(await jsonPost('/api/job/cancel', {}));
+  } catch (err) {
+    showError(err.message);
+  }
 }
 
-function renderDownload(status) {
-  const panel = $('download-panel');
-  const downloading = status.phase === 'downloading_model';
-  const loading = status.phase === 'loading_model';
-  if (!downloading && !loading) {
-    panel.hidden = true;
-    return;
+async function forceStop() {
+  try {
+    const res = await jsonPost('/api/job/force-stop', {});
+    clearTimeout(pollTimer); // the server is going away; stop asking it things
+    showPanel('panel-notice', res.message);
+  } catch (err) {
+    // A server that dies before answering is a successful force stop.
+    clearTimeout(pollTimer);
+    showPanel('panel-notice',
+      'Tertius has stopped. Relaunch it and press Begin to carry on.');
   }
+}
+
+async function retryFailed() {
+  try {
+    const res = await jsonPost('/api/job/retry-failed', {});
+    hidePanel('panel-error');
+    render(res.status);
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function openOutput() {
+  try {
+    await jsonPost('/api/open-output', {});
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+// --- panels ----------------------------------------------------------------
+
+function showPanel(id, text) {
+  const panel = $(id);
   panel.hidden = false;
-  const d = status.download || {};
-  const model = d.model ? ` (${d.model})` : '';
-
-  if (loading) {
-    $('download-title').textContent = `Loading model into memory…${model}`;
-    $('download-bar').style.width = '100%';
-    $('download-text').textContent = 'Already downloaded — just starting it up.';
-    return;
-  }
-
-  $('download-title').textContent = `Downloading model${model}…`;
-  if (d.total) {
-    // Percentage comes from the hub's bars; the size shown is the measured
-    // download size, because those bars overlap and overstate the bytes.
-    const pct = Math.min(100, Math.round((d.downloaded / d.total) * 100));
-    $('download-bar').style.width = `${pct}%`;
-    $('download-text').textContent = d.expected_bytes
-      ? `${pct}% of about ${formatBytes(d.expected_bytes)}`
-      : `${pct}%`;
-  } else {
-    // Sizes arrive with the first byte-progress bar; until then, be honest.
-    $('download-bar').style.width = '0%';
-    $('download-text').textContent = 'Starting download…';
+  if (text != null) {
+    const body = panel.querySelector('.panel-body');
+    if (body) body.textContent = text;
   }
 }
 
-function render(status) {
-  const state = status.state || 'idle';
-  const pill = $('job-state');
-  pill.textContent = status.cancel_requested && status.running ? 'cancelling' : state;
-  pill.className = `pill ${state}`;
+const hidePanel = (id) => { $(id).hidden = true; };
 
-  renderDownload(status);
+function showError(message, title) {
+  $('panel-error-title').textContent = title || 'The run stopped.';
+  showPanel('panel-error', message);
+}
 
-  const run = status.run || {};
-  const total = run.total || 0;
-  const processed = run.processed || 0;
-  $('progress-bar').style.width = total ? `${Math.round((processed / total) * 100)}%` : '0';
-  const waitingOnModel =
-    status.phase === 'downloading_model' || status.phase === 'loading_model';
-  $('progress-text').textContent = total
-    ? `${processed}/${total} processed — ${run.completed || 0} completed, ${run.failed || 0} failed, ${run.skipped || 0} already done` +
-      (status.current_file
-        ? `\nCurrent: ${basename(status.current_file)}`
-        : waitingOnModel
-          ? '\nWaiting for the model — see above.'
-          : '')
-    : 'No job yet.';
-  note('job-error', status.error || '', true);
+// --- the status band -------------------------------------------------------
 
-  // Cancel is cooperative and only checked between files. A file wedged inside
-  // the model's native code cannot be interrupted at all, so say that plainly
-  // instead of showing "cancelling" forever, and offer the thing that works.
-  const stuck = status.force_stop_suggested;
-  $('btn-force-stop').hidden = !stuck;
-  let notice = status.notice || '';
-  if (stuck) {
-    const secs = Math.round(status.cancel_pending_seconds || 0);
-    notice =
-      `Still on "${basename(status.current_file || '')}" ${secs}s after you cancelled. ` +
-      `Cancel only takes effect between files, and a file stuck inside the model ` +
-      `can't be interrupted. Use Force stop — finished work is kept, and you can ` +
-      `Resume afterwards.`;
-  }
-  const noticeEl = $('job-notice');
-  noticeEl.textContent = notice;
-  noticeEl.className = notice ? 'note warn-text' : 'note';
+function elapsedOf(file) {
+  return file.started_at && file.finished_at ? file.finished_at - file.started_at : null;
+}
 
+/** How much faster than realtime this run has been, from finished files. */
+function realtimeFactor(files) {
+  let audio = 0;
+  let wall = 0;
+  files.forEach((f) => {
+    const spent = elapsedOf(f);
+    if (f.status === 'done' && f.duration && spent > 0) {
+      audio += f.duration;
+      wall += spent;
+    }
+  });
+  return wall > 0 ? audio / wall : null;
+}
+
+/** Progress weighted by audio length, not file count: a 72-minute chapter is
+ *  not one twelfth of the work. Files with no known length take the average. */
+function progressOf(status) {
+  const files = status.files || [];
+  const known = files.map((f) => f.duration).filter(Boolean);
+  const average = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+  const active = status.active || {};
+  let total = 0;
+  let done = 0;
+  let failed = 0;
+  files.forEach((f) => {
+    const weight = f.duration || average;
+    total += weight;
+    if (f.status === 'done' || f.status === 'skipped') done += weight;
+    else if (f.status === 'failed') failed += weight;
+    else if (f.status === 'in_progress') done += weight * (active.progress || 0);
+  });
+  return total ? { done: done / total, failed: failed / total } : { done: 0, failed: 0 };
+}
+
+function audioTotal(files) {
+  const seconds = files.reduce((sum, f) => sum + (f.duration || 0), 0);
+  return seconds || null;
+}
+
+function bandModel(status) {
   const s = status.summary || {};
   const files = status.files || [];
-  const withText = files.filter((f) => f.mode === 'align').length;
-  const noText = files.filter((f) => f.mode === 'undecided').length;
-  $('counts').innerHTML =
-    ['total', 'pending', 'in_progress', 'done', 'failed', 'skipped']
-      .map((k) => `<span>${k.replace('_', ' ')}: <b>${s[k] || 0}</b></span>`)
-      .join('') +
-    (withText || noText
-      ? `<span class="mode-align" title="Files that will have your supplied text timestamped">with text: <b>${withText}</b></span>` +
-        `<span class="mode-undecided" title="Files with no matching text file yet">no text: <b>${noText}</b></span>`
-      : '');
+  const done = s.done || 0;
+  const failed = s.failed || 0;
+  const total = s.total || 0;
+  const processed = done + failed + (s.skipped || 0);
+  const audio = audioTotal(files);
 
-  const banner = $('resume-banner');
-  if (status.can_resume) {
-    banner.hidden = false;
-    $('resume-detail').textContent = `${s.pending || 0} of ${s.total || 0} file(s) still pending in ${status.output_dir}.`;
-  } else {
-    banner.hidden = true;
+  if (status.phase === 'downloading_model' || status.phase === 'loading_model') {
+    const d = status.download || {};
+    const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
+    return {
+      tone: 'running',
+      headline: status.phase === 'loading_model' ? 'Loading the model' : 'Fetching the model',
+      counter: status.phase === 'loading_model'
+        ? `${d.model || ''} — already downloaded`
+        : pct === null
+          ? 'starting the download'
+          : `${d.model || ''} · ${pct}% of about ${formatBytes(d.expected_bytes)}`,
+      right: 'one-time, for this model size',
+      progress: pct === null ? 0 : pct / 100,
+      stats: [],
+    };
   }
 
-  $('btn-start').disabled = status.running;
-  $('btn-resume').disabled = status.running;
-  $('btn-retry').disabled = status.running || !(s.failed > 0);
-  $('btn-cancel').disabled = !status.running;
+  if (status.running) {
+    const rate = realtimeFactor(files);
+    const remainingAudio = files
+      .filter((f) => f.status === 'pending')
+      .reduce((sum, f) => sum + (f.duration || 0), 0);
+    const bits = [];
+    if (rate && remainingAudio) bits.push(`≈ ${span(remainingAudio / rate)} remaining`);
+    if (rate) bits.push(`${rate.toFixed(1)}× realtime`);
+    return {
+      tone: 'running',
+      headline: status.cancel_requested ? 'Finishing this file' : 'Transcribing',
+      counter: `${processed + 1} of ${total}`,
+      right: bits.join(' · '),
+      stats: [
+        ['Done', done],
+        ['Pending', s.pending || 0],
+        failed ? ['Failed', failed, 'danger'] : null,
+        audio ? ['Audio', span(audio)] : null,
+      ],
+    };
+  }
 
-  const rows = (status.files || []).map((f) => {
-    // Transcripts mirror the source folders, so links need the path relative to
-    // the output directory, not just the file name.
-    const links = (f.outputs || [])
-      .map((o) => {
-        const name = basename(o);
-        const relative = f.subdir ? `${f.subdir}/${name}` : name;
-        return `<a href="/api/transcript?name=${encodeURIComponent(relative)}" target="_blank">${name}</a>`;
-      })
-      .join(' ');
-    const shownName = f.subdir ? `${f.subdir}/${f.name}` : f.name;
-    const detail = f.error
-      ? f.error
-      : [f.language ? `lang ${f.language}` : '', f.duration ? `${f.duration.toFixed(1)}s` : '']
-          .filter(Boolean)
-          .join(' · ');
-    const remove = status.running
-      ? ''
-      : `<button data-remove="${encodeURIComponent(f.path)}">remove</button>`;
-    return `<tr>
-      <td class="file" title="${f.path}">${shownName}</td>
-      <td class="status-${f.status}">${f.status}</td>
-      <td>${renderMode(f, status.running)}</td>
-      <td class="detail">${detail || ''}</td>
-      <td>${links}</td>
-      <td>${remove}</td>
-    </tr>`;
+  if (status.state === 'error') {
+    return {
+      tone: 'danger',
+      headline: 'The run stopped',
+      counter: `${plural(done, 'file written', 'files written')} · ${s.pending || 0} still pending`,
+      buttons: [['Retry failed', retryFailed, failed ? '' : 'hidden'],
+                ['Open output folder', openOutput, 'filled']],
+      stats: [['Done', done], ['Failed', failed, 'danger'], ['Pending', s.pending || 0]],
+    };
+  }
+
+  if (status.state === 'cancelled' && (s.pending || 0) > 0) {
+    return {
+      tone: 'paused',
+      headline: 'Stopped',
+      counter: `${done} of ${total} · ${plural(s.pending, 'file', 'files')} still to go`,
+      buttons: [['Resume', begin, 'accent']],
+      progressTone: 'paused',
+      stats: [['Done', done], ['Pending', s.pending || 0],
+              audio ? ['Audio', span(audio)] : null],
+    };
+  }
+
+  if (status.state === 'completed' || (total > 0 && processed === total && processed > 0)) {
+    const rate = realtimeFactor(files);
+    const words = files.reduce((sum, f) => sum + (f.words || 0), 0);
+    if (failed) {
+      return {
+        tone: 'danger',
+        headline: failed === 1 ? 'Finished with one failure' : `Finished with ${failed} failures`,
+        counter: `${done} written · ${plural(failed, 'unreadable', 'unreadable')}`,
+        buttons: [['Retry failed', retryFailed, ''], ['Open output folder', openOutput, 'filled']],
+        progressTone: 'success',
+        stats: completionStats(status, files, rate, words),
+      };
+    }
+    return {
+      tone: 'success',
+      headline: 'The batch is finished',
+      counter: `${done} of ${total}${status.elapsed_seconds ? ` · ${span(status.elapsed_seconds)} elapsed` : ''}`,
+      buttons: [['Open output folder', openOutput, 'filled']],
+      progressTone: 'success',
+      stats: completionStats(status, files, rate, words),
+    };
+  }
+
+  if (!total) {
+    return {
+      tone: 'idle',
+      headline: 'Nothing gathered yet',
+      counter: 'choose a folder, or drop files anywhere',
+      stats: [],
+    };
+  }
+
+  return {
+    tone: 'idle',
+    headline: done ? 'Ready to carry on' : 'Ready to write',
+    counter: `${plural(total, 'file', 'files')} gathered`,
+    right: audio ? `${span(audio)} of audio` : '',
+    stats: [
+      ['Pending', s.pending || 0],
+      done ? ['Already done', done, 'success'] : null,
+      failed ? ['Failed', failed, 'danger'] : null,
+      audio ? ['Audio', span(audio)] : null,
+    ],
+  };
+}
+
+function completionStats(status, files, rate, words) {
+  const audio = audioTotal(files);
+  return [
+    status.elapsed_seconds ? ['Elapsed', span(status.elapsed_seconds)] : null,
+    audio ? ['Audio', span(audio)] : null,
+    rate ? ['Average', `${rate.toFixed(1)}× realtime`] : null,
+    words ? ['Words', words.toLocaleString()] : null,
+  ];
+}
+
+function renderBand(status) {
+  const model = bandModel(status);
+  const progress = model.progress != null
+    ? { done: model.progress, failed: 0 }
+    : progressOf(status);
+
+  $('band-dot').dataset.tone = model.tone;
+  const headline = $('band-headline');
+  if (headline.textContent !== model.headline) headline.textContent = model.headline;
+  headline.dataset.tone = model.tone;
+  $('band-counter').textContent = model.counter || '';
+
+  const fill = $('band-fill');
+  fill.style.width = `${Math.round(progress.done * 100)}%`;
+  fill.dataset.tone = model.progressTone || '';
+  $('band-fill-failed').style.width = `${Math.round(progress.failed * 100)}%`;
+  $('band-track').setAttribute('aria-valuenow', Math.round(progress.done * 100));
+
+  const right = $('band-right');
+  right.innerHTML = '';
+  (model.buttons || []).forEach(([label, handler, variant]) => {
+    if (variant === 'hidden') return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn ${variant === 'filled' ? 'btn-filled' : variant === 'accent' ? 'btn-accent' : 'btn-plain'}`;
+    button.textContent = label;
+    button.onclick = handler;
+    right.appendChild(button);
   });
-  $('queue').querySelector('tbody').innerHTML =
-    rows.join('') || '<tr><td colspan="5" class="detail">Queue is empty.</td></tr>';
-
-  // The "no text found" alert, and the bulk answers to it.
-  const undecided = (status.files || []).filter((f) => f.mode === 'undecided');
-  const missingBanner = $('text-missing-banner');
-  missingBanner.hidden = undecided.length === 0;
-  if (undecided.length) {
-    // Say exactly where it looked — "no text found" is useless on its own.
-    const searched = (undecided[0].searched || []).join('  ·  ');
-    $('text-missing-detail').innerHTML =
-      ` No <code>.txt</code> with a matching name was found for ` +
-      `${undecided.length} file(s): ` +
-      `${undecided.slice(0, 3).map((f) => f.name).join(', ')}` +
-      `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}.` +
-      (searched ? `<br><span class="note dim">Looked in: ${searched}</span>` : '') +
-      `<br><span class="note dim">Set a <b>Text folder</b> above if your text files live somewhere else — ` +
-      `uploaded audio is copied into <code>_uploads</code>, so its original folder is not known.</span>`;
+  if (model.right && !(model.buttons || []).length) {
+    right.textContent = model.right;
   }
 
-  document.querySelectorAll('[data-attach]').forEach((btn) => {
-    btn.onclick = async () => {
-      btn.disabled = true;
+  $('band-stats').innerHTML = (model.stats || [])
+    .filter(Boolean)
+    .map(([label, value, tone]) =>
+      `<span>${esc(label)}<b${tone ? ` data-tone="${tone}"` : ''}>${esc(value)}</b></span>`)
+    .join('');
+}
+
+// --- the run section -------------------------------------------------------
+
+function renderRun(status) {
+  const s = status.summary || {};
+  const pending = s.pending || 0;
+  const box = $('run-controls');
+  box.innerHTML = '';
+  const caption = $('run-caption');
+
+  if (status.running) {
+    caption.textContent =
+      'Nothing leaves this machine. You may close the tab; the scribe keeps working.';
+    if (confirmingCancel) {
+      box.innerHTML =
+        `<div class="run-confirm"><p>Stop after the file being transcribed now? ` +
+        `The ${plural(pending, 'file', 'files')} still pending stay in the queue.</p>` +
+        `<div class="run-pair">` +
+        `<button type="button" class="btn" id="btn-confirm-cancel">Stop the run</button>` +
+        `<button type="button" class="btn" id="btn-keep-going">Keep going</button>` +
+        `</div></div>`;
+      $('btn-confirm-cancel').onclick = cancelRun;
+      $('btn-keep-going').onclick = () => { confirmingCancel = false; renderRun(status); };
+      return;
+    }
+    const stopping = status.cancel_requested;
+    const pair = document.createElement('div');
+    pair.className = 'run-pair';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn';
+    cancel.textContent = stopping ? 'Stopping…' : 'Cancel';
+    cancel.disabled = stopping;
+    cancel.title = 'Stop after the file being transcribed now. Finished files are kept.';
+    cancel.onclick = () => { confirmingCancel = true; renderRun(status); };
+    pair.appendChild(cancel);
+    if (status.force_stop_suggested) {
+      const force = document.createElement('button');
+      force.type = 'button';
+      force.className = 'btn btn-danger';
+      force.textContent = 'Force stop';
+      force.title = 'Shut Tertius down now. Finished work is kept; relaunch and press Begin.';
+      force.onclick = forceStop;
+      pair.appendChild(force);
+    }
+    box.appendChild(pair);
+    return;
+  }
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'run-primary';
+  const again = (s.done || 0) > 0 || (s.failed || 0) > 0;
+  button.textContent = pending
+    ? `${again ? 'Begin again' : 'Begin'} — ${plural(pending, 'file', 'files')}`
+    : again ? 'Begin again' : 'Begin';
+  button.disabled = pending === 0;
+  button.title = pending
+    ? 'Transcribe everything still pending. The job runs on this machine; you can close the tab.'
+    : 'Nothing is pending — add files first.';
+  button.onclick = begin;
+  box.appendChild(button);
+
+  caption.textContent = !s.total
+    ? 'Nothing leaves this machine. Choose a folder to begin.'
+    : pending === 0
+      ? 'Nothing leaves this machine. Every file in the queue is finished.'
+      : 'Nothing leaves this machine. The model runs here, on your own hardware.';
+}
+
+// --- the queue -------------------------------------------------------------
+
+const RANK = { in_progress: 0, done: 1, failed: 1, skipped: 1, pending: 2 };
+const MAX_ROWS = 200;
+
+/** 60 bars, deterministic per file: the same recording always draws the same
+ *  waveform. A stand-in for the real envelope, which would mean decoding the
+ *  audio a second time just to draw it. */
+function waveform(path, progress) {
+  let hash = 2166136261;
+  for (let i = 0; i < path.length; i += 1) {
+    hash = Math.imul(hash ^ path.charCodeAt(i), 16777619);
+  }
+  const bars = [];
+  for (let i = 0; i < 60; i += 1) {
+    hash = Math.imul(hash ^ (hash >>> 15), 2246822507);
+    hash ^= hash >>> 13;
+    const noise = ((hash >>> 0) % 1000) / 1000;
+    // A slow swell across the bar so it reads as speech rather than static.
+    const swell = 0.55 + 0.45 * Math.sin((i / 60) * Math.PI * 3.2);
+    const height = Math.round(4 + noise * swell * 24);
+    const lit = i / 60 < progress;
+    bars.push(`<i class="${lit ? 'lit' : ''}" style="height:${height}px"></i>`);
+  }
+  return `<div class="waveform" aria-hidden="true">${bars.join('')}</div>`;
+}
+
+function outputLinks(file) {
+  const links = (file.outputs || []).map((output) => {
+    const name = basename(output);
+    const relative = file.subdir ? `${file.subdir}/${name}` : name;
+    const label = name.split('.').pop();
+    return `<a href="/api/transcript?name=${encodeURIComponent(relative)}" target="_blank"
+              title="Open ${esc(name)}">${esc(label)}</a>`;
+  });
+  return links.join('') || '<span class="em-dash">—</span>';
+}
+
+function stateCell(file, status) {
+  const active = status.active || {};
+  if (file.status === 'in_progress') {
+    const pct = file.path === active.path && active.progress != null
+      ? ` ${Math.round(active.progress * 100)}%`
+      : '';
+    return `<span class="state-running">Transcribing${pct}</span>`;
+  }
+  if (file.status === 'done') {
+    const spent = clock(elapsedOf(file));
+    return `<span class="state-done">Done${spent ? ` · ${spent}` : ''}</span>`;
+  }
+  if (file.status === 'failed') return '<span class="state-failed">Failed</span>';
+  if (file.status === 'skipped') return 'Skipped';
+  return 'Waiting';
+}
+
+/** The cause, without the copy of the file's own path most decoders tack on —
+ *  the row already says which file this is, and the full text stays on hover. */
+function shortError(message) {
+  return String(message || 'Failed.').replace(/:?\s*'[^']*'\s*$/, '');
+}
+
+/** The second line under a file name: why it will be treated the way it is. */
+function subLine(file, running) {
+  const path = encodeURIComponent(file.path);
+  if (file.status === 'failed') {
+    return `<div class="q-sub is-error">
+      <span class="clamp" title="${esc(file.error || '')}">${esc(shortError(file.error))}</span>
+      <button type="button" class="linkish" data-retry="${path}"
+              title="Put this file back in the queue">Retry</button></div>`;
+  }
+  if (file.mode === 'align') {
+    const name = basename(file.reference_text || '');
+    return `<div class="q-sub is-text">Timestamping ${esc(name)}
+      ${running ? '' : `<button type="button" class="linkish" data-attach="${path}"
+        title="Choose a different text file for this recording">change</button>`}</div>`;
+  }
+  if (file.mode === 'undecided') {
+    const where = (file.searched || []).join('\n');
+    return `<div class="q-sub is-ask"><span title="Looked in:\n${esc(where)}">No matching text file.</span>
+      ${running ? '' : `<button type="button" class="linkish" data-mode="transcribe" data-path="${path}"
+          title="Transcribe this one normally">transcribe it</button>
+        <button type="button" class="linkish" data-mode="skip" data-path="${path}"
+          title="Leave this one out of the run">skip it</button>
+        <button type="button" class="linkish" data-attach="${path}"
+          title="Choose the text file for this recording">choose a text file…</button>`}</div>`;
+  }
+  if (file.mode === 'skip' && file.status === 'pending') {
+    return `<div class="q-sub">Set to skip.
+      ${running ? '' : `<button type="button" class="linkish" data-mode="transcribe" data-path="${path}"
+        title="Transcribe this one after all">transcribe it instead</button>`}</div>`;
+  }
+  return '';
+}
+
+function renderQueue(status) {
+  const files = [...(status.files || [])];
+  const running = Boolean(status.running);
+  const active = status.active || {};
+
+  files.sort((a, b) => {
+    const rank = (RANK[a.status] ?? 3) - (RANK[b.status] ?? 3);
+    if (rank) return rank;
+    return (a.finished_at || 0) - (b.finished_at || 0);
+  });
+
+  const shown = files.slice(0, MAX_ROWS);
+  const rows = shown.map((file) => {
+    const name = file.subdir ? `${file.subdir}/${file.name}` : file.name;
+    const length = clock(file.duration) || '<span class="em-dash">—</span>';
+    const kill = running
+      ? ''
+      : `<button type="button" data-remove="${encodeURIComponent(file.path)}"
+                 title="Take this file out of the queue" aria-label="Remove ${esc(name)}">✕</button>`;
+    const cells =
+      `<div class="q-file" title="${esc(file.path)}">${esc(name)}${subLine(file, running)}</div>
+       <div class="q-len">${length}</div>
+       <div class="q-state">${stateCell(file, status)}</div>
+       <div class="q-out">${outputLinks(file)}</div>
+       <div class="q-kill">${kill}</div>`;
+
+    if (file.status === 'in_progress') {
+      const progress = file.path === active.path ? (active.progress || 0) : 0;
+      const excerpt = file.path === active.path ? (active.excerpt || '') : '';
+      return `<div class="qrow is-active" data-status="in_progress">
+        <div class="qrow-main">${cells}</div>
+        ${waveform(file.path, progress)}
+        <p class="excerpt">${excerpt ? `“…${esc(excerpt)}…”` : ''}</p>
+      </div>`;
+    }
+    const failed = file.status === 'failed' ? ' is-failed' : '';
+    return `<div class="qrow${failed}" data-status="${file.status}">${cells}</div>`;
+  });
+
+  if (files.length > shown.length) {
+    rows.push(`<div class="queue-more">…and ${files.length - shown.length} more.</div>`);
+  }
+
+  $('queue').innerHTML = rows.join('') ||
+    `<p class="queue-empty">The queue is empty. Choose a folder in <b>Source</b>,
+      or drop audio files anywhere on this window.</p>`;
+
+  wireQueueButtons();
+}
+
+function wireQueueButtons() {
+  document.querySelectorAll('[data-remove]').forEach((button) => {
+    button.onclick = async () => {
+      try {
+        const res = await jsonPost('/api/queue/remove', {
+          path: decodeURIComponent(button.dataset.remove),
+        });
+        render(res.status);
+      } catch (err) {
+        note('add-note', err.message, true);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-mode]').forEach((button) => {
+    button.onclick = async () => {
+      try {
+        const res = await jsonPost('/api/queue/mode', {
+          path: decodeURIComponent(button.dataset.path),
+          mode: button.dataset.mode,
+        });
+        render(res.status);
+      } catch (err) {
+        showError(err.message);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-retry]').forEach((button) => {
+    button.onclick = async () => {
+      try {
+        const res = await jsonPost('/api/queue/retry', {
+          path: decodeURIComponent(button.dataset.retry),
+        });
+        hidePanel('panel-error');
+        render(res.status);
+      } catch (err) {
+        showError(err.message);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-attach]').forEach((button) => {
+    button.onclick = async () => {
+      button.disabled = true;
       note('add-note', 'File picker open — check for a dialog window.');
       try {
         const picked = await jsonPost('/api/browse-text-file', {});
@@ -365,7 +947,7 @@ function render(status) {
           note('add-note', 'No text file chosen.');
         } else {
           const res = await jsonPost('/api/queue/mode', {
-            path: decodeURIComponent(btn.dataset.attach),
+            path: decodeURIComponent(button.dataset.attach),
             mode: 'align',
             reference_text: picked.path,
           });
@@ -375,53 +957,92 @@ function render(status) {
       } catch (err) {
         note('add-note', err.message, true);
       } finally {
-        btn.disabled = false;
-      }
-    };
-  });
-
-  document.querySelectorAll('[data-mode]').forEach((btn) => {
-    btn.onclick = async () => {
-      try {
-        const res = await jsonPost('/api/queue/mode', {
-          path: decodeURIComponent(btn.dataset.path),
-          mode: btn.dataset.mode,
-        });
-        render(res.status);
-      } catch (err) {
-        note('job-error', err.message, true);
-      }
-    };
-  });
-
-  document.querySelectorAll('[data-remove]').forEach((btn) => {
-    btn.onclick = async () => {
-      try {
-        const status = await jsonPost('/api/queue/remove', {
-          path: decodeURIComponent(btn.dataset.remove),
-        });
-        render(status.status);
-      } catch (err) {
-        note('add-note', err.message, true);
+        button.disabled = false;
       }
     };
   });
 }
+
+// --- render ----------------------------------------------------------------
+
+function render(status) {
+  restoreSettings(status);
+
+  renderBand(status);
+  renderRun(status);
+  renderQueue(status);
+
+  if (status.error) showError(status.error); else hidePanel('panel-error');
+
+  // Cancel is cooperative and only checked between files. A file wedged inside
+  // the model's native code cannot be interrupted at all, so say that plainly
+  // instead of showing "stopping" forever, and offer the thing that works.
+  let notice = status.notice || '';
+  if (status.force_stop_suggested) {
+    const secs = Math.round(status.cancel_pending_seconds || 0);
+    notice =
+      `Still on "${basename(status.current_file || '')}" ${secs}s after you cancelled. ` +
+      `Cancel only takes effect between files, and a file stuck inside the model ` +
+      `can't be interrupted. Use Force stop — finished work is kept, and you can ` +
+      `carry on afterwards.`;
+  }
+  if (notice) showPanel('panel-notice', notice); else hidePanel('panel-notice');
+
+  const undecided = (status.files || []).filter((f) => f.mode === 'undecided');
+  if (undecided.length) {
+    // Say exactly where it looked — "no text found" is useless on its own.
+    const searched = (undecided[0].searched || []).join('  ·  ');
+    $('panel-missing-detail').innerHTML =
+      `No <code>.txt</code> with a matching name was found for ` +
+      `${plural(undecided.length, 'file', 'files')}: ` +
+      `${undecided.slice(0, 3).map((f) => esc(f.name)).join(', ')}` +
+      `${undecided.length > 3 ? `, and ${undecided.length - 3} more` : ''}.` +
+      (searched ? `<br>Looked in: ${esc(searched)}` : '') +
+      `<br>Set a <b>Text folder</b> in Settings if your text files live somewhere else — ` +
+      `uploaded audio is copied into <code>_uploads</code>, so its original folder is not known.`;
+    showPanel('panel-missing-text');
+  } else {
+    hidePanel('panel-missing-text');
+  }
+
+  // The band changing is the notification; a backgrounded tab gets the title.
+  if (lastRunState === 'running' && !status.running && document.hidden) {
+    document.title = status.summary && status.summary.failed
+      ? '! Tertius — finished with failures'
+      : '✓ Tertius — finished';
+  }
+  if (status.running) document.title = 'Tertius';
+  lastRunState = status.running ? 'running' : status.state;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) document.title = 'Tertius';
+});
 
 async function poll() {
   clearTimeout(pollTimer);
   let interval = POLL_IDLE;
   try {
     const status = await api('/api/status');
+    missedPolls = 0;
     render(status);
     interval = status.running ? POLL_RUNNING : POLL_IDLE;
   } catch (err) {
-    note('job-error', `lost contact with the server: ${err.message}`, true);
+    // One dropped poll is a reload or a hiccup, not a dead server; only say so
+    // once it has actually stopped answering.
+    missedPolls += 1;
+    if (missedPolls > 2) {
+      showError(
+        `${err.message}. The job itself is unaffected — it runs in the Tertius ` +
+        `process, not in this tab.`,
+        'Lost contact with Tertius.');
+    }
   }
   pollTimer = setTimeout(poll, interval);
 }
 
 // --- model comparison + machine suitability ---------------------------------
+
 const VERDICT_LABEL = {
   ok: ['Fine', 'ok'],
   tight: ['Tight', 'warn'],
@@ -429,33 +1050,21 @@ const VERDICT_LABEL = {
   unknown: ['Unknown', 'muted'],
 };
 
-let systemCache = null;
-
-async function loadSystem() {
-  const device = $('opt-device').value;
-  const compute = $('opt-compute').value;
-  systemCache = await api(
-    `/api/system?device=${encodeURIComponent(device)}&compute_type=${encodeURIComponent(compute)}`,
-  );
-  return systemCache;
-}
-
-// A GPU existing and a GPU being usable are different things. Say so on load,
-// rather than letting someone discover it part-way through their first batch.
 function renderCudaBanner(sys) {
   const runtime = (sys && sys.cuda_runtime) || {};
-  const banner = $('cuda-banner');
+  // A GPU existing and a GPU being usable are different things. Say so on load,
+  // rather than letting someone discover it part-way through their first batch.
   if (runtime.state !== 'missing') {
-    banner.hidden = true;
+    hidePanel('panel-cuda');
     return;
   }
-  banner.hidden = false;
-  $('cuda-detail').textContent =
-    ` ${sys.gpu_name || 'A CUDA GPU'} was detected, but the CUDA runtime libraries ` +
+  $('panel-cuda-detail').textContent =
+    `${sys.gpu_name || 'A CUDA GPU'} was detected, but the CUDA runtime libraries ` +
     `it needs aren't installed. Install them (about 1.2 GB) by running this in the ` +
     `Tertius folder:`;
-  $('cuda-command').textContent =
+  $('panel-cuda-command').textContent =
     '.venv\\Scripts\\pip install nvidia-cublas-cu12 nvidia-cudnn-cu12';
+  showPanel('panel-cuda');
 }
 
 function describeMachine(sys) {
@@ -472,183 +1081,65 @@ function describeMachine(sys) {
 
 function renderModelTable(data) {
   $('system-summary').textContent = describeMachine(data.system);
-  const rows = data.models.map((m) => {
+  $('model-table').querySelector('tbody').innerHTML = data.models.map((m) => {
     const [label, cls] = VERDICT_LABEL[m.verdict] || VERDICT_LABEL.unknown;
-    const reason = m.reason ? ` title="${m.reason.replace(/"/g, '&quot;')}"` : '';
+    const reason = m.reason ? ` title="${esc(m.reason)}"` : '';
     return `<tr>
-      <td><code>${m.model}</code></td>
+      <td class="name">${esc(m.model)}</td>
       <td>${formatBytes(m.download_bytes)}</td>
       <td>${m.cached === null ? '?' : m.cached ? 'yes' : 'not yet'}</td>
-      <td>${m.speed || ''}</td>
-      <td class="detail">${m.quality || ''}</td>
+      <td>${esc(m.speed || '')}</td>
+      <td>${esc(m.quality || '')}</td>
       <td class="verdict-${cls}"${reason}>${label}${m.reason ? ' ⓘ' : ''}</td>
     </tr>`;
-  });
-  $('model-table').querySelector('tbody').innerHTML = rows.join('');
+  }).join('');
 }
 
 async function refreshModelAdvice() {
   try {
-    const data = await loadSystem();
+    const data = await api(
+      `/api/system?device=${encodeURIComponent(device)}` +
+      `&compute_type=${encodeURIComponent($('opt-compute').value)}`);
     renderCudaBanner(data.system);
     renderModelTable(data);
-    const chosen = data.models.find((m) => m.model === $('opt-model').value);
+
+    // Offering a device the machine does not have is a trap; disable it instead.
+    const cuda = document.querySelector('.seg[data-device="cuda"]');
+    if (cuda) {
+      cuda.disabled = !data.system.cuda_devices;
+      cuda.title = data.system.cuda_devices
+        ? 'Force the GPU. Much faster on the bigger models.'
+        : 'No CUDA GPU was detected on this machine.';
+    }
+
     const messages = [];
+    const chosen = data.models.find((m) => m.model === $('opt-model').value);
     if (chosen && chosen.verdict !== 'ok' && chosen.reason) {
       messages.push(`${chosen.model}: ${chosen.reason}`);
     }
     if (data.compute_warning) messages.push(data.compute_warning);
-    if ($('opt-device').value === 'cuda' && !data.system.cuda_devices) {
+    if (device === 'cuda' && !data.system.cuda_devices) {
       messages.push('Device is set to cuda but no CUDA GPU was detected — the job will fail to start.');
     }
     const warning = $('model-warning');
     warning.textContent = messages.join('  ');
-    warning.className = messages.length ? 'note warn-text' : 'note';
+    warning.className = messages.length ? 'caption warn-text' : 'caption';
   } catch (err) {
     $('model-warning').textContent = '';
   }
 }
 
 $('btn-model-info').onclick = async () => {
-  const panel = $('model-info');
+  const panel = $('panel-model-info');
   panel.hidden = !panel.hidden;
+  $('btn-model-info').setAttribute('aria-expanded', String(!panel.hidden));
   if (!panel.hidden) await refreshModelAdvice();
 };
 $('btn-model-info-close').onclick = () => {
-  $('model-info').hidden = true;
+  $('panel-model-info').hidden = true;
+  $('btn-model-info').setAttribute('aria-expanded', 'false');
 };
-['opt-model', 'opt-device', 'opt-compute'].forEach((id) => {
-  $(id).onchange = refreshModelAdvice;
-});
-
-$('btn-browse').onclick = async () => {
-  const button = $('btn-browse');
-  button.disabled = true;
-  note('add-note', 'Folder picker open — check for a dialog window.');
-  try {
-    const res = await jsonPost('/api/browse-folder', { initial: $('scan-dir').value.trim() });
-    if (res.cancelled) {
-      note('add-note', 'No folder chosen.');
-    } else {
-      $('scan-dir').value = res.path;
-      note('add-note', `Selected ${res.path} — now press "Scan & queue".`);
-    }
-  } catch (err) {
-    note('add-note', err.message, true);
-  } finally {
-    button.disabled = false;
-  }
-};
-
-$('btn-scan').onclick = async () => {
-  const directory = $('scan-dir').value.trim();
-  if (!directory) return note('add-note', 'Enter a folder path first.', true);
-  note('add-note', 'Scanning…');
-  try {
-    const found = await api('/api/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory, recursive: $('scan-recursive').checked }),
-    });
-    if (!found.count) return note('add-note', `No media files found in ${found.directory}.`);
-    // Pass the scanned folder so the output directory can mirror its structure.
-    const queued = await jsonPost('/api/queue', {
-      files: found.files,
-      base_dir: found.directory,
-      match_reference_text: $('opt-use-text').checked,
-    });
-    let message = `Found ${found.count} file(s); queued ${queued.added} new.`;
-    if ($('opt-use-text').checked) {
-      message += ` Matched text for ${queued.matched_text}; ${queued.needs_choice} need a choice.`;
-    }
-    note('add-note', message);
-    render(queued.status);
-  } catch (err) {
-    note('add-note', err.message, true);
-  }
-};
-
-$('btn-upload').onclick = async () => {
-  const input = $('upload-files');
-  if (!input.files.length) return note('add-note', 'Choose files to upload first.', true);
-  const form = new FormData();
-  [...input.files].forEach((f) => form.append('files', f));
-  // Upload .txt files alongside the audio and they are paired by name.
-  form.append('match_reference_text', $('opt-use-text').checked ? '1' : '0');
-  note('add-note', `Uploading ${input.files.length} file(s)…`);
-  try {
-    const res = await api('/api/upload', { method: 'POST', body: form });
-    const rejected = res.rejected.length ? ` (skipped: ${res.rejected.join(', ')})` : '';
-    const texts = res.texts && res.texts.length ? ` and ${res.texts.length} text file(s)` : '';
-    let message = `Queued ${res.saved.length} uploaded file(s)${texts}${rejected}.`;
-    if ($('opt-use-text').checked) {
-      message += ` Matched text for ${res.matched_text}; ${res.needs_choice} need a choice.`;
-    }
-    note('add-note', message);
-    input.value = '';
-    render(res.status);
-  } catch (err) {
-    note('add-note', err.message, true);
-  }
-};
-
-$('btn-start').onclick = async () => {
-  note('job-error', '');
-  try {
-    render(await jsonPost('/api/job/start', {
-      options: collectOptions(),
-      output_dir: $('opt-outdir').value.trim() || undefined,
-    }));
-  } catch (err) {
-    note('job-error', err.message, true);
-  }
-  poll();
-};
-
-$('btn-resume').onclick = async () => {
-  note('job-error', '');
-  try {
-    render(await jsonPost('/api/job/resume', {}));
-  } catch (err) {
-    note('job-error', err.message, true);
-  }
-  poll();
-};
-
-$('btn-cancel').onclick = async () => {
-  try {
-    render(await jsonPost('/api/job/cancel', {}));
-  } catch (err) {
-    note('job-error', err.message, true);
-  }
-};
-
-$('btn-force-stop').onclick = async () => {
-  const button = $('btn-force-stop');
-  button.disabled = true;
-  try {
-    const res = await jsonPost('/api/job/force-stop', {});
-    clearTimeout(pollTimer); // the server is going away; stop asking it things
-    note('job-error', '');
-    $('job-notice').textContent = res.message;
-    $('job-state').textContent = 'stopped';
-  } catch (err) {
-    // A server that dies before answering is a successful force stop.
-    clearTimeout(pollTimer);
-    $('job-notice').textContent =
-      'Tertius has stopped. Relaunch it and press Resume to carry on.';
-  }
-};
-
-$('btn-retry').onclick = async () => {
-  try {
-    const res = await jsonPost('/api/job/retry-failed', {});
-    note('job-error', '');
-    render(res.status);
-  } catch (err) {
-    note('job-error', err.message, true);
-  }
-};
+['opt-model', 'opt-compute'].forEach((id) => { $(id).onchange = refreshModelAdvice; });
 
 poll();
 // Tell the user up front if their default model suits this machine.

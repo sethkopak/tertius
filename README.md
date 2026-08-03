@@ -82,29 +82,37 @@ Then open <http://127.0.0.1:5005>.
 
 ## Using it
 
-1. **Add files** — either point it at a folder (**Browse…** opens a normal Windows
-   folder picker, or paste the path yourself) and hit *Scan & queue*, or upload
-   individual files, which are copied into `<output-dir>/_uploads/`.
-2. **Options** — model size (default `large-v3-turbo`), device, compute type,
-   language, output formats. The **i** button next to the model dropdown opens a
-   comparison table; see [Which model?](#which-model).
-3. **Start batch.** The request returns immediately; the work happens on a
-   background worker thread.
-4. Watch the queue table. Completed transcripts are downloadable from the UI;
-   failed files show their error message inline and can be re-queued with
-   *Retry failed*.
+The window is two columns: the setup rail on the left, and the status band over
+the file queue on the right.
+
+1. **Source** — point it at a folder. **Browse** opens a normal Windows folder
+   picker and queues everything it finds; typing or pasting a path and pressing
+   Enter does the same. Individual files can be dropped anywhere on the window
+   (or chosen with *drop files here*), which copies them into
+   `<output-dir>/_uploads/`.
+2. **Settings** — model size (default `large-v3-turbo`), device, language,
+   precision, output formats, and where transcripts are written. The **i** button
+   beside the model menu opens a comparison table; see
+   [Which model?](#which-model).
+3. **Run** — press **Begin**. The request returns immediately; the work happens
+   on a background worker thread. The button reads *Begin again* once part of the
+   queue is already done, and always says how many files are still pending.
+4. Watch the queue. The file being transcribed expands to show how far through it
+   is, plus the last few words it has written. Finished transcripts open from the
+   **Output** column; a failed file shows its error inline with a **Retry** link,
+   and the batch carries on regardless.
 
 Every button and field has a tooltip — hover if something is unclear. The
-**☀ Light / ☾ Dark** button in the top right switches theme; dark is the default
-and your choice is remembered in that browser.
+**Dark / Light** toggle beside the wordmark switches theme; it follows your
+system preference on first run and your choice is remembered in that browser.
 
 Recognised input extensions: `.mp3 .wav .m4a .mp4 .flac .ogg .opus .webm .mkv
 .mov .aac .wma .avi`.
 
-### What "Scan & queue" actually does
+### What choosing a folder actually does
 
 It finds every recognised audio/video file in that folder and adds **all of them**
-to the queue — then transcribes the lot when you press *Start batch*. It is not a
+to the queue — then transcribes the lot when you press *Begin*. It is not a
 sample or a first-N.
 
 **Include subfolders** (ticked by default) controls how deep it looks:
@@ -152,8 +160,9 @@ On startup the server reads that file and:
 - **`failed` files stay failed** so you can see what went wrong. *Retry failed*
   puts them back in the queue.
 
-If anything is pending, the UI shows a **"Unfinished job found"** banner with a
-*Resume* button, and the console logs the same thing at startup.
+If anything is pending, the status band says so — the headline reads *Ready to
+carry on*, and the Run button becomes **Begin again** with the outstanding count.
+The console logs the same thing at startup.
 
 One file failing never stops the batch: the error is logged, that file is marked
 `failed`, and the run continues with the next file. A *model* failure (bad model
@@ -274,8 +283,9 @@ at all — Python cannot interrupt a native call.
 
 After 20 seconds of waiting, Tertius stops pretending: it explains the situation
 and shows a **Force stop** button, which kills the server outright. That is safe
-here by design — the state file is durable, so relaunch, press **Resume**, and the
-interrupted file is transcribed again from scratch while finished work is kept.
+here by design — the state file is durable, so relaunch, press **Begin again**,
+and the interrupted file is transcribed again from scratch while finished work is
+kept.
 
 Relatedly, if three files in a row fail with the *same* error, the batch stops
 instead of grinding through the rest of the queue to fail every one of them. The
@@ -315,9 +325,9 @@ Tick **Timestamp my own text**, then pick how finely to timestamp:
 beside it (case-insensitive). Near misses are not matched: `VolA01.mp3` will never
 grab `VolA02.txt`.
 
-You can see at a glance whether that worked. The queue header counts **with text**
-and **no text**, and each row shows either `✓ text: VolA01.txt` or `✗ no text
-found`. Every row also has a **text…** button to pick a file by hand, for when the
+You can see at a glance whether that worked. Under each file name the queue says
+either *Timestamping VolA01.txt* or *No matching text file*, and an unmatched row
+offers **transcribe it**, **skip it**, and **choose a text file…** for when the
 names don't match.
 
 ## Where Tertius looks for text files
@@ -328,17 +338,18 @@ For each audio file it looks for a `.txt` with the same name, in this order:
 2. **The Text folder**, if you set one — searched recursively, so your texts can
    sit in their own tree.
 
-The queue tells you where it looked: hover **✗ no text found**, and the alert
-lists the folders searched.
+The queue tells you where it looked: hover *No matching text file*, and the panel
+above the queue lists the folders searched.
 
 **Uploaded files are the catch.** A browser never tells the server where a file
-came from, so **Upload & queue** copies the audio into `<output-dir>/_uploads/`
+came from, so dropping or choosing files copies the audio into
+`<output-dir>/_uploads/`
 and that becomes "beside the audio". Your original folder is unknown to Tertius.
 So if you upload `V1_01.mp3` and its `V1_01.txt` is sitting next to the original,
 it will not be found. Three ways round it:
 
-- Use **Scan & queue** with the folder path instead of uploading — then the audio
-  stays where it is and the text beside it is found.
+- Point **Source** at the folder instead of uploading — then the audio stays
+  where it is and the text beside it is found.
 - Upload the `.txt` together with the audio; they land in `_uploads` side by side
   and pair by name.
 - Set the **Text folder** to wherever your text files live.

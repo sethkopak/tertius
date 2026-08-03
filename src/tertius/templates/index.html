@@ -4,213 +4,273 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tertius</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='0' y='9' width='100' height='9' fill='%23C8794E'/%3E%3Crect x='42' y='9' width='16' height='91' fill='%23C8794E'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='fonts.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script>
     // Set before first paint so a saved light theme does not flash dark.
     document.documentElement.dataset.theme =
-      localStorage.getItem('tertius-theme') === 'light' ? 'light' : 'dark';
+      localStorage.getItem('tertius-theme')
+      || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   </script>
 </head>
 <body>
-<header>
-  <div class="header-row">
-    <div>
-      <h1>Tertius</h1>
-      <p class="sub">Offline batch transcription — faster-whisper. The job runs on the
-         server; you can close this tab and come back.</p>
-    </div>
-    <button id="btn-theme" class="theme-toggle" title="Switch between dark and light">
-      <span id="theme-icon">☀</span><span id="theme-label">Light</span>
-    </button>
-  </div>
-</header>
 
-<main>
-  <section class="card warn-card" id="cuda-banner" hidden>
-    <strong>GPU found, but it can't be used yet.</strong>
-    <span id="cuda-detail"></span>
-    <code id="cuda-command"></code>
-    <span class="note dim">Until then everything runs on the CPU, which works but is
-      much slower. Restart Tertius after installing.</span>
-  </section>
+<div class="shell">
 
-  <section class="card" id="resume-banner" hidden>
-    <strong>Unfinished job found.</strong>
-    <span id="resume-detail"></span>
-    <button id="btn-resume" class="primary"
-            title="Carry on with the files still pending. Already-transcribed files are skipped; a file interrupted mid-way is done again from scratch.">Resume</button>
-  </section>
+  <!-- ══ setup rail ══════════════════════════════════════════════════════ -->
+  <aside class="rail">
 
-  <section class="card">
-    <h2>1. Add files</h2>
-    <div class="row">
-      <label for="scan-dir" title="A folder on this computer containing audio or video files">Folder</label>
-      <input type="text" id="scan-dir" placeholder="C:\path\to\audio" size="40"
-             title="Full path to a folder of audio/video files. Type it, paste it, or use Browse.">
-      <button id="btn-browse" title="Open a folder picker window on this computer and fill in the path">Browse…</button>
-      <label class="inline"
-             title="Ticked: also search every subfolder, however deep. Unticked: only files sitting directly in the chosen folder.">
-        <input type="checkbox" id="scan-recursive" checked> include subfolders</label>
-      <button id="btn-scan"
-              title="Find every audio/video file in that folder and add them all to the queue. This does not start transcribing.">Scan &amp; queue</button>
-    </div>
-    <div class="row">
-      <label for="upload-files" title="Pick individual files instead of a whole folder">Upload</label>
-      <input type="file" id="upload-files" multiple
-             title="Choose one or more audio/video files. They are copied into the output folder's _uploads directory.">
-      <button id="btn-upload"
-              title="Copy the chosen files to this computer's output folder and add them to the queue">Upload &amp; queue</button>
-    </div>
-    <p class="note" id="add-note"></p>
-  </section>
-
-  <section class="card">
-    <h2>2. Options</h2>
-    <div class="row">
-      <label for="opt-model" title="Which Whisper model transcribes your audio. Bigger = more accurate and slower.">Model</label>
-      <select id="opt-model"
-              title="Bigger models are more accurate but slower and need more memory. Each size downloads once on first use. Click i to compare.">
-        {% for m in model_sizes %}<option value="{{ m }}" {% if m == 'large-v3-turbo' %}selected{% endif %}>{{ m }}</option>{% endfor %}
-      </select>
-      <button id="btn-model-info" class="icon-button" title="Compare the models and see which suit this machine">i</button>
-      <label for="opt-device"
-             title="Which hardware runs the model. auto tries the GPU first.">Device</label>
-      <select id="opt-device"
-              title="auto — tries the GPU first, and falls back to the CPU if there is no CUDA GPU. The safe choice.&#10;cuda — forces the GPU. Much faster, but the job fails to start if no NVIDIA GPU is present.&#10;cpu — forces the CPU. Always works, noticeably slower on the bigger models.">
-        {% for d in devices %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-      </select>
-      <label for="opt-compute" title="Numeric precision used for the maths.">Compute</label>
-      <select id="opt-compute"
-              title="Lower precision is faster and uses less memory, with a small accuracy cost. default lets the library pick a safe one — leave it alone unless you have a reason.">
-        {% for c in compute_types %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="row">
-      <label class="inline"
-             title="Instead of writing a fresh transcript, take text you already have and add timestamps to it. Your wording is kept exactly; only timings are added.">
-        <input type="checkbox" id="opt-use-text"> Timestamp my own text</label>
-      <span id="alignment-options" hidden>
-        <label for="opt-granularity" title="How finely to timestamp your text">Timestamp</label>
-        <select id="opt-granularity"
-                title="Auto — paragraphs if your text has them, sentences otherwise.&#10;Per Paragraph — one timestamp per blank-line-separated block.&#10;Per Sentence — one timestamp per sentence (more precise, more lines).">
-          {% for g in granularities %}<option value="{{ g }}">{% if g == 'auto' %}Auto{% elif g == 'paragraph' %}Per Paragraph{% else %}Per Sentence{% endif %}</option>{% endfor %}
-        </select>
-        <span class="note dim">Matched by name: <code>VolA01.mp3</code> → <code>VolA01.txt</code></span>
-      </span>
-    </div>
-    <div class="row" id="reference-dir-row" hidden>
-      <label for="opt-textdir"
-             title="Where to look for the text files. Leave blank to look only beside each audio file.">Text folder</label>
-      <input type="text" id="opt-textdir" size="44"
-             placeholder="(optional) folder holding the .txt files"
-             title="Searched recursively, matching by file name. Needed when the text files are not beside the audio — including for uploaded files, which are copied into _uploads and lose their original location.">
-      <button id="btn-browse-textdir" title="Pick the folder holding your text files">Browse…</button>
-      <button id="btn-apply-textdir" title="Look again using this folder">Apply</button>
-    </div>
-    <p class="note" id="model-warning"></p>
-
-    <div class="card inner" id="model-info" hidden>
-      <div class="row space-between">
-        <h3>Model comparison</h3>
-        <button id="btn-model-info-close" class="icon-button" title="Hide this table">✕</button>
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 100 100" role="img" aria-label="Tertius">
+        <rect x="0"  y="9"  width="100" height="9"  fill="currentColor"/>
+        <rect x="12" y="29" width="76"  height="9"  fill="currentColor" opacity="0.42"/>
+        <rect x="42" y="9"  width="16"  height="91" fill="currentColor"/>
+      </svg>
+      <div class="brand-text">
+        <span class="wordmark">Tertius</span>
+        <span class="brand-sub">Offline transcription</span>
       </div>
-      <p class="note" id="system-summary"></p>
-      <div class="table-scroll">
-        <table id="model-table">
-          <thead>
-            <tr>
-              <th title="Name to pick in the Model dropdown">Model</th>
-              <th title="One-time download size for this model">Download</th>
-              <th title="Whether it is already downloaded on this machine">On disk</th>
-              <th title="Rough transcription speed relative to the others">Speed</th>
-              <th title="What to expect from the transcript">Accuracy</th>
-              <th title="Whether this machine can run it comfortably. Judged against the hardware it will actually land on — with Device set to auto that means the GPU, which is tried first, and the CPU only if there is no CUDA GPU.">On this machine</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div class="theme-toggle" role="group" aria-label="Colour theme">
+        <button type="button" data-theme-choice="dark"
+                title="Dark parchment">Dark</button>
+        <button type="button" data-theme-choice="light"
+                title="Light parchment">Light</button>
       </div>
-      <p class="note dim">Memory estimates assume the weights plus about 1 GB of
-         working room. Speed is relative, not measured on your hardware.</p>
     </div>
-    <div class="row">
-      <label for="opt-language" title="Spoken language of your audio">Language</label>
-      <input type="text" id="opt-language" placeholder="auto-detect" size="10"
-             title="Leave blank to detect the language automatically per file, or enter a Whisper code (en, es, fr, de, zh, ja…). Setting it explicitly is more reliable than detection when a file starts with music or silence.">
-      <label title="Which transcript files to write for each input">Formats</label>
-      {% for f in formats %}
-      <label class="inline"
-             title="{% if f == 'txt' %}Plain text, one line per spoken segment, no timings{% else %}Subtitles with start/end timestamps, for video players and editors{% endif %}">
-        <input type="checkbox" class="opt-format" value="{{ f }}" checked> .{{ f }}</label>
-      {% endfor %}
-      <label for="opt-outdir" title="Where transcripts are written">Output dir</label>
-      <input type="text" id="opt-outdir" size="36" value="{{ default_output_dir }}"
-             title="Folder for transcripts, the resume state file, and the log. Changing it starts a separate queue with its own history.">
-    </div>
-  </section>
 
-  <section class="card">
-    <h2>3. Run</h2>
-    <div class="row">
-      <button id="btn-start" class="primary"
-              title="Start transcribing everything pending in the queue. Runs on the server — you can close this tab.">Start batch</button>
-      <button id="btn-cancel"
-              title="Stop after the file currently being transcribed. Finished files are kept; the rest stay pending so you can resume.">Cancel</button>
-      <button id="btn-retry"
-              title="Put every failed file back in the queue to try again">Retry failed</button>
-      <button id="btn-force-stop" class="danger" hidden
-              title="Shut Tertius down immediately. Use when Cancel will not take — a file stuck inside the model cannot be interrupted any other way. Finished work is kept; relaunch and press Resume.">Force stop</button>
-      <span id="job-state" class="pill idle"
-            title="Current job state: idle, running, completed, cancelled, or error">idle</span>
-    </div>
-    <div class="download" id="download-panel" hidden>
-      <div class="download-head">
-        <span class="spinner"></span>
-        <strong id="download-title">Downloading model…</strong>
+    <!-- 1 · source -->
+    <section class="rail-section">
+      <h2 class="section-head">
+        <span class="numeral">1.</span><span class="section-label">Source</span>
+        <span class="rule"></span>
+      </h2>
+
+      <div class="path-row">
+        <input type="text" id="scan-dir" class="field data" spellcheck="false"
+               placeholder="C:\path\to\audio"
+               title="Full path to a folder of audio or video files. Type it, paste it and press Enter, or use Browse.">
+        <button type="button" id="btn-browse" class="btn"
+                title="Open a folder picker on this computer, then queue everything in the folder">Browse</button>
       </div>
-      <div class="progress"><div class="bar download-bar" id="download-bar"></div></div>
-      <p class="note" id="download-text"></p>
-      <p class="note dim">One-time download for this model size. Transcription starts
-         automatically when it finishes — this is not a hang.</p>
+
+      <div class="opt-row">
+        <label class="check"
+               title="Ticked: search every subfolder, however deep. Unticked: only files sitting directly in the chosen folder.">
+          <input type="checkbox" id="scan-recursive" class="tick" checked>
+          Include subfolders
+        </label>
+        <span class="hint">or
+          <button type="button" id="btn-pick-files" class="linkish"
+                  title="Choose individual files, or drag them anywhere onto this window">drop files here</button>
+        </span>
+      </div>
+
+      <p class="caption" id="add-note" role="status"></p>
+      <input type="file" id="upload-files" multiple hidden>
+    </section>
+
+    <!-- 2 · settings -->
+    <section class="rail-section">
+      <h2 class="section-head">
+        <span class="numeral">2.</span><span class="section-label">Settings</span>
+        <span class="rule"></span>
+      </h2>
+
+      <div class="settings-grid">
+
+        <label for="opt-model">Model</label>
+        <div class="with-info">
+          <div class="select">
+            <select id="opt-model"
+                    title="Bigger models are more accurate but slower and need more memory. Each size downloads once on first use.">
+              {% for m in model_sizes %}<option value="{{ m }}" {% if m == 'large-v3-turbo' %}selected{% endif %}>{{ m }}</option>{% endfor %}
+            </select>
+            <span class="chev" aria-hidden="true">⌄</span>
+          </div>
+          <button type="button" id="btn-model-info" class="info" aria-expanded="false"
+                  title="Compare the models and see which suit this machine">i</button>
+        </div>
+
+        <span id="device-label">Device</span>
+        <div class="segments" id="device-segments" role="radiogroup" aria-labelledby="device-label">
+          {% for d in devices %}
+          <button type="button" class="seg" data-device="{{ d }}" role="radio" aria-checked="false"
+                  title="{% if d == 'auto' %}Try the GPU first, fall back to the CPU. The safe choice.{% elif d == 'cpu' %}Always works, noticeably slower on the bigger models.{% else %}Force the GPU. Much faster, but the job fails to start without a CUDA GPU.{% endif %}">{{ d }}</button>
+          {% endfor %}
+        </div>
+
+        <label for="opt-language">Language</label>
+        <div class="select">
+          <select id="opt-language"
+                  title="Leave on auto-detect to work it out per file, or name the language — more reliable when a file starts with music or silence.">
+            <option value="">auto-detect</option>
+            {% for code in languages %}<option value="{{ code }}">{{ code }}</option>{% endfor %}
+          </select>
+          <span class="chev" aria-hidden="true">⌄</span>
+        </div>
+
+        <label for="opt-compute">Precision</label>
+        <div class="select">
+          <select id="opt-compute"
+                  title="Lower precision is faster and uses less memory, with a small accuracy cost. default lets the library pick a safe one.">
+            {% for c in compute_types %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+          <span class="chev" aria-hidden="true">⌄</span>
+        </div>
+
+        <span id="write-label">Write</span>
+        <div class="chips" id="format-chips" role="group" aria-labelledby="write-label">
+          {% for f in formats %}
+          <button type="button" class="chip" data-format="{{ f }}" aria-pressed="true"
+                  title="{% if f == 'txt' %}Plain text, one line per spoken segment, no timings{% else %}Subtitles with start and end timestamps{% endif %}">.{{ f }}</button>
+          {% endfor %}
+        </div>
+
+        <span>Text</span>
+        <label class="check"
+               title="Instead of writing a fresh transcript, take text you already have and add timestamps to it. Your wording is kept exactly.">
+          <input type="checkbox" id="opt-use-text" class="tick">
+          Timestamp my own text
+        </label>
+
+        <div class="row-pair" id="granularity-row" hidden>
+          <label for="opt-granularity">Timestamp</label>
+          <div class="select">
+            <select id="opt-granularity"
+                    title="Auto — paragraphs if your text has them, sentences otherwise.">
+              {% for g in granularities %}<option value="{{ g }}">{% if g == 'auto' %}auto{% elif g == 'paragraph' %}per paragraph{% else %}per sentence{% endif %}</option>{% endfor %}
+            </select>
+            <span class="chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+
+        <div class="row-pair" id="textdir-row" hidden>
+          <label for="opt-textdir">Text folder</label>
+          <div class="path-row">
+            <input type="text" id="opt-textdir" class="field data" spellcheck="false"
+                   placeholder="beside each audio file"
+                   title="Where to look for the .txt files, searched recursively and matched by name. Needed when they do not sit beside the audio.">
+            <button type="button" id="btn-browse-textdir" class="btn"
+                    title="Pick the folder holding your text files">Browse</button>
+          </div>
+        </div>
+
+        <label for="opt-outdir">Output</label>
+        <input type="text" id="opt-outdir" class="field data" spellcheck="false"
+               value="{{ default_output_dir }}"
+               title="Folder for transcripts, the resume state file, and the log. Changing it starts a separate queue with its own history.">
+      </div>
+
+      <p class="caption warn-text" id="model-warning"></p>
+    </section>
+
+    <!-- 3 · run -->
+    <section class="rail-section">
+      <h2 class="section-head">
+        <span class="numeral">3.</span><span class="section-label">Run</span>
+        <span class="rule"></span>
+      </h2>
+      <div id="run-controls"></div>
+      <p class="caption" id="run-caption">Nothing leaves this machine.</p>
+    </section>
+
+    <footer class="rail-foot">
+      <span>faster-whisper</span>
+      <span>v{{ app_version }}</span>
+    </footer>
+  </aside>
+
+  <!-- ══ status + queue ══════════════════════════════════════════════════ -->
+  <main class="column" id="column">
+
+    <div class="band">
+      <div class="band-top">
+        <span class="dot" id="band-dot" aria-hidden="true"></span>
+        <h1 class="headline" id="band-headline" role="status" aria-live="polite">Ready to write</h1>
+        <span class="counter data" id="band-counter"></span>
+        <div class="band-right" id="band-right"></div>
+      </div>
+      <div class="track" id="band-track" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Batch progress">
+        <div class="fill" id="band-fill"></div>
+        <div class="fill fill-failed" id="band-fill-failed"></div>
+      </div>
+      <div class="stats" id="band-stats"></div>
     </div>
 
-    <div class="progress"><div class="bar" id="progress-bar"></div></div>
-    <p class="note" id="progress-text">No job yet.</p>
-    <p class="note" id="job-notice"></p>
-    <p class="note" id="job-error"></p>
-  </section>
+    <div class="panels">
 
-  <section class="card warn-card" id="text-missing-banner" hidden>
-    <strong>Some files have no matching text file.</strong>
-    <span id="text-missing-detail"></span>
-    <div class="row">
-      <button id="btn-rematch-text"
-              title="Look again — use this after adding the missing .txt files next to the audio">Check again</button>
-      <button id="btn-all-transcribe"
-              title="Transcribe all of these normally instead of timestamping supplied text">Transcribe them normally</button>
-      <button id="btn-all-skip"
-              title="Leave all of these out of the run entirely">Skip them all</button>
+      <section class="panel danger" id="panel-error" hidden>
+        <strong id="panel-error-title">The run stopped.</strong>
+        <p class="panel-body" id="panel-error-text"></p>
+      </section>
+
+      <section class="panel" id="panel-notice" hidden>
+        <p class="panel-body" id="panel-notice-text"></p>
+      </section>
+
+      <section class="panel" id="panel-cuda" hidden>
+        <strong>A GPU is here, but it cannot be used yet.</strong>
+        <p class="panel-body" id="panel-cuda-detail"></p>
+        <code class="panel-code" id="panel-cuda-command"></code>
+        <p class="panel-body dim">Until then everything runs on the CPU, which works but is
+          much slower. Restart Tertius after installing.</p>
+      </section>
+
+      <section class="panel" id="panel-missing-text" hidden>
+        <strong>Some files have no matching text file.</strong>
+        <p class="panel-body" id="panel-missing-detail"></p>
+        <div class="panel-actions">
+          <button type="button" id="btn-rematch-text" class="btn"
+                  title="Look again — use this after adding the missing .txt files">Check again</button>
+          <button type="button" id="btn-all-transcribe" class="btn"
+                  title="Transcribe all of these normally instead of timestamping supplied text">Transcribe them normally</button>
+          <button type="button" id="btn-all-skip" class="btn"
+                  title="Leave all of these out of the run entirely">Skip them all</button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-model-info" hidden>
+        <div class="panel-head">
+          <strong>Model comparison</strong>
+          <button type="button" id="btn-model-info-close" class="info" title="Hide this table">✕</button>
+        </div>
+        <p class="panel-body" id="system-summary"></p>
+        <div class="table-scroll">
+          <table id="model-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Download</th>
+                <th>On disk</th>
+                <th>Speed</th>
+                <th>Accuracy</th>
+                <th title="Judged against the hardware it will actually land on.">On this machine</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="panel-body dim">Memory estimates assume the weights plus about 1 GB of
+          working room. Speed is relative, not measured on your hardware.</p>
+      </section>
+
     </div>
-  </section>
 
-  <section class="card">
-    <h2>Queue</h2>
-    <div class="counts" id="counts"></div>
-    <table id="queue">
-      <thead>
-        <tr>
-          <th title="Input file name — hover a row to see its full path">File</th>
-          <th title="pending: waiting · in_progress: being transcribed now · done: finished · failed: errored, see Detail · skipped: was already done">Status</th>
-          <th title="What will happen to this file: timestamp your supplied text, transcribe it normally, or skip it">Mode</th>
-          <th title="Detected language and audio duration, or the error message if it failed">Detail</th>
-          <th title="Click to open a finished transcript">Transcripts</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
-</main>
+    <div class="qhead">
+      <span class="q-file">File</span>
+      <span class="q-len">Length</span>
+      <span class="q-state">State</span>
+      <span class="q-out">Output</span>
+      <span class="q-kill" aria-hidden="true"></span>
+    </div>
+
+    <div class="queue" id="queue"></div>
+  </main>
+</div>
+
+<div class="drop-veil" id="drop-veil" hidden aria-hidden="true"></div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

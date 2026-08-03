@@ -246,6 +246,7 @@ class StateStore:
                     "outputs": [],
                     "language": None,
                     "duration": None,
+                    "words": None,
                 }
                 added.append(key)
             if added:
@@ -322,6 +323,25 @@ class StateStore:
                 self._flush()
         return found
 
+    def set_durations(self, durations: dict) -> int:
+        """Record media lengths for files that have none yet.
+
+        Takes the whole batch at once: probing a scanned folder would otherwise
+        flush the state file once per file. Files that have since been removed,
+        or already have a length, are left alone.
+        """
+        written = 0
+        with self._lock:
+            for path, seconds in durations.items():
+                entry = self._data["files"].get(_key(path))
+                if entry is None or entry.get("duration") or not seconds:
+                    continue
+                entry["duration"] = float(seconds)
+                written += 1
+            if written:
+                self._flush()
+        return written
+
     def remove_file(self, path: str | os.PathLike) -> bool:
         with self._lock:
             if self._data["files"].pop(_key(path), None) is None:
@@ -355,6 +375,7 @@ class StateStore:
         outputs: Iterable[str | os.PathLike] = (),
         language: str | None = None,
         duration: float | None = None,
+        words: int | None = None,
     ) -> dict:
         return self._update(
             path,
@@ -364,6 +385,7 @@ class StateStore:
             outputs=[str(o) for o in outputs],
             language=language,
             duration=duration,
+            words=words,
         )
 
     def mark_failed(self, path, error: str) -> dict:
