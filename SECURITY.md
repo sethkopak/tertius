@@ -15,8 +15,7 @@ guessing.
 
 Tertius is a **single-user tool that runs on your own machine.** It starts a
 Flask server bound to `127.0.0.1` and you drive it from a browser tab on that
-same machine. It has no accounts, no authentication, and no multi-user support,
-by design and not by oversight.
+same machine. It has no accounts, no authentication, and no multi-user support.
 
 The security boundary is therefore *the machine*. Anything that can already run
 code as your user can already do everything Tertius can do.
