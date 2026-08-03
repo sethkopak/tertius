@@ -6,10 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "tertius"
 version = "0.1.0"
 description = "Tertius - local, offline batch audio/video transcription with faster-whisper and a Flask queue UI"
-# No `readme`: README.md sits at the top of the folder next to the launchers,
-# where a user will actually find it, and setuptools will not read a file from
-# outside the project directory.
-requires-python = ">=3.9"
+# No `readme`, and no `license = {file = ...}`: README.md and LICENSE both sit
+# at the top of the folder next to the launchers, where a user will actually
+# find them, and setuptools will not read a file from outside the project
+# directory. The classifier below carries the licence instead.
+classifiers = ["License :: OSI Approved :: MIT License"]
+# 3.11 because that is the floor CI actually exercises (3.11 / 3.13, plus 3.14
+# on Windows). This said >=3.9 while nothing had ever been run on 3.9 or 3.10 -
+# a promise to pip that no test backed.
+requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "faster-whisper>=1.0",

@@ -86,6 +86,9 @@ Not just by tests:
   finished-with-one-failure all seen in both themes. Also checked against the
   real `transcripts/` state file, where a run predating word counts simply omits
   the Words stat rather than showing a zero.
+- **Drag-and-drop onto the window** (2026-08-03). Reported working by Seth after
+  an actual drag, not through the file picker. Windows only, like everything
+  else in this list.
 
 ## 2026-08-02 — GPU incident, fixed
 
@@ -326,6 +329,42 @@ cycle-free).
 Written up in the README with a sample of each shape, including the advice to
 refuse an unknown `version` rather than misread the file.
 
+## 2026-08-03 — made publishable
+
+Decided to release this as open source under MIT. An audit of what publishing
+would actually mean turned up two things that had to be fixed first, both about
+other people's rights rather than about the code:
+
+1. **No licence at all.** Without one, a public repo is not open source — it is
+   source-visible under default copyright, and nobody may legally use, modify or
+   redistribute it. `LICENSE` now carries MIT, taken verbatim from SPDX's
+   canonical text.
+2. **Fourteen bundled font files with none of their notices.** The interface
+   fonts are self-hosted so an offline tool never fetches its own UI over the
+   network — good for the app, but it makes publishing an act of font
+   redistribution, and OFL 1.1 requires each copy to carry the copyright notice
+   and licence. Nothing in the repo named either holder.
+   `THIRD-PARTY-NOTICES.md` now does, with the OFL reproduced verbatim.
+
+Both licence texts were fetched from upstream and copied byte-for-byte rather
+than retyped. Worth knowing for next time: a web search got Cardo's copyright
+wrong (it said 2004-2010 with a reserved font name). The notice Google Fonts
+actually ships — which is where these files came from — reads
+`Copyright (c) 2002-2011, David J. Perry`, and Cardo declares **no** reserved
+font name. Only IBM Plex does. Checking the source rather than the summary is
+the difference between a correct notice and a wrong one.
+
+Also, and separately:
+
+- `requires-python` said `>=3.9`, which no test had ever backed — CI runs 3.11,
+  3.13 and 3.14. Raised to `>=3.11`, the floor actually exercised, and the
+  README now states it. The `3.9-3.14` figure still in the install notes is
+  about ctranslate2's wheel coverage, not Tertius's own floor.
+- `SECURITY.md` added: reports go through GitHub's private advisories rather
+  than an email address, with the threat model spelled out — the boundary is
+  the machine, and binding to `0.0.0.0` is a documented consequence rather than
+  a vulnerability.
+
 ## Not verified — read this before trusting it
 
 - Only one transcript and one aligned output have been read closely. Accuracy
@@ -345,16 +384,17 @@ refuse an unknown `version` rather than misread the file.
 - The UI's narrow-window behaviour (below 1180px, and the collapsed rail below
   1000px) is written but unseen — the browser could not be given a small enough
   viewport to check it.
-- Drag-and-drop of files onto the window is wired but has only been exercised
-  through the file picker, not by an actual drag.
 
 ## Next steps
 
 1. Run a full volume through and read a few outputs properly.
 2. Get this in front of a real Mac and a real Linux box. Everything in
    *Not verified* about those two stays open until someone does.
-3. Decide what this is: personal tool, or something that ships. Settled so far
-   only that cross-platform support is run-from-source; packaging is untouched.
+3. Decided (2026-08-03): this ships, as open source under MIT. The legal
+   groundwork is in; what is left before flipping the repo public is below.
+4. Packaging is still untouched — run-from-source only, no wheel, no installer.
+   Strangers on macOS and Linux will arrive before either platform has been run
+   by hand, which is the risk to weigh before publishing.
 
 ## Ideas not built
 
@@ -443,6 +483,9 @@ app is made of lives under `app/`.
 Start Tertius.bat    Windows launcher
 Tertius.app/         macOS launcher (a shell script in a bundle, no compiler)
 start-tertius.sh     Linux launcher
+LICENSE              MIT
+THIRD-PARTY-NOTICES.md   bundled fonts (OFL 1.1) and dependency licences
+SECURITY.md          how to report something exploitable
 transcripts/         output, the resume state file, and the log
 app/
   src/tertius/       the app

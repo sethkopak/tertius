@@ -92,6 +92,10 @@ Or install the package itself (gives you the `tertius` command):
 pip install -e ".[dev]"
 ```
 
+Tertius needs **Python 3.11 or newer** — that is the floor CI actually exercises
+(3.11 and 3.13 on all three platforms, plus 3.14 on Windows). Older versions are
+not claimed because none has ever been run.
+
 `faster-whisper` pulls in `ctranslate2` and `av` (prebuilt wheels for both). Audio
 decoding goes through `av`, so no separate FFmpeg install is required. Verified on
 Python 3.14 with faster-whisper 1.2.1 / ctranslate2 4.8.1. ctranslate2 4.8.1
@@ -591,6 +595,9 @@ Start Tertius.bat    Windows launcher — double-click
 Tertius.app/         macOS launcher — double-click (script inside, no compiler)
 start-tertius.sh     Linux launcher
 README.md
+LICENSE              MIT
+THIRD-PARTY-NOTICES.md   bundled fonts (OFL 1.1) and dependency licences
+SECURITY.md          how to report something exploitable
 transcripts/         output, the resume state file, and the log
 app/
   src/tertius/
@@ -619,3 +626,19 @@ No live microphone transcription (file/batch only) and no auth or multi-user
 support — this is a single-user local tool. Don't bind it to `0.0.0.0` on an
 untrusted network: the scan and queue endpoints will read any path the server
 process can read.
+
+Found something exploitable? [SECURITY.md](SECURITY.md) says where to send it
+and what counts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The interface fonts bundled under `app/src/tertius/static/fonts/` are not mine:
+IBM Plex and Cardo, both under the SIL Open Font License 1.1, self-hosted so the
+app never fetches them over the network. Their notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), along with the licences of the
+runtime dependencies.
+
+Whisper models are downloaded from Hugging Face on first use and are not part of
+this repository; each carries its own terms from its publisher.
