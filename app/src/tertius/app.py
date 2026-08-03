@@ -476,6 +476,38 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             return _error("cannot edit the queue while a job is running", 409)
         return jsonify({"removed": store.remove_file(path), "status": manager.status()})
 
+    @app.post("/api/queue/clear")
+    def api_queue_clear():
+        """Empty the queue.
+
+        Refused while a job is running, like every other queue edit - pulling
+        the list out from under the worker mid-batch is not something the user
+        can have meant. Transcripts already written are untouched; this only
+        forgets what was lined up.
+
+        Uploaded copies belonging to those entries are cleared too. Nothing else
+        will ever refer to them, and leaving them would mean the state file's
+        one link to gigabytes on disk had just been deleted.
+        """
+        store = manager.store
+        if store is None:
+            return _error("no output directory attached", 409)
+        if manager.is_running():
+            return _error("cannot clear the queue while a job is running", 409)
+        cleared = store.clear()
+        removed, reclaimed = store.purge_uploads()
+        log.info(
+            "queue cleared: %d entr(ies), %d uploaded file(s) removed", cleared, removed
+        )
+        return jsonify(
+            {
+                "cleared": cleared,
+                "uploads_removed": removed,
+                "bytes_reclaimed": reclaimed,
+                "status": manager.status(),
+            }
+        )
+
     @app.post("/api/open-output")
     def api_open_output():
         """Show the output folder in the desktop file manager.

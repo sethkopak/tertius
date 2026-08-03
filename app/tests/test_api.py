@@ -12,49 +12,8 @@ from tertius.app import create_app
 from tertius.jobs import COMPLETED, JobManager
 from tertius.state import StateStore
 
-from .fakes import FakeTranscriber, fake_transcribe_file, make_audio, wait_until
-
-
-class ApiHarness:
-    def __init__(self, tmp_path: Path):
-        self.output_dir = tmp_path / "out"
-        self.tertius: FakeTranscriber | None = None
-        self.gates: dict[str, threading.Event] = {}
-        self.manager = JobManager(
-            transcriber_factory=self._factory, transcribe_fn=fake_transcribe_file
-        )
-        self.app = create_app(self.output_dir, manager=self.manager)
-        self.app.config["TESTING"] = True
-        self.client = self.app.test_client()
-
-    def _factory(self, options):
-        self.tertius = FakeTranscriber(options)
-        self.tertius.block_paths.update(self.gates)
-        return self.tertius
-
-    def block(self, path) -> threading.Event:
-        gate = threading.Event()
-        self.gates[str(Path(path).resolve())] = gate
-        return gate
-
-    def wait_done(self, timeout: float = 10.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if not self.manager.is_running():
-                self.manager.join(1)
-                return
-            time.sleep(0.01)
-        raise AssertionError("job did not finish in time")
-
-
-@pytest.fixture()
-def api(tmp_path):
-    h = ApiHarness(tmp_path)
-    yield h
-    h.manager.cancel()
-    for gate in h.gates.values():
-        gate.set()
-    h.manager.join(5)
+from .conftest import ApiHarness
+from .fakes import make_audio, wait_until
 
 
 def test_index_renders(api):

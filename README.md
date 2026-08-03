@@ -117,7 +117,7 @@ instead of picking it, and Tertius says so rather than failing vaguely.
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Bind address. Localhost only by default — this app has no auth. |
 | `--port` | `5005` | Port. |
-| `--output-dir` | `./transcripts` (or `$TERTIUS_OUTPUT_DIR`) | Transcripts, state file, and log all live here. |
+| `--output-dir` | the folder you last used, else `transcripts/` beside the launcher (or `$TERTIUS_OUTPUT_DIR`) | Transcripts, state file, and log all live here. Each folder keeps its own queue. |
 | `--open-browser` | off | Open the UI once the server answers. What the .bat uses. |
 | `--reuse-existing` | off | If a server is already on this port, show it and exit instead of starting a second one. |
 | `--verbose` | off | Debug logging. |
@@ -369,6 +369,28 @@ lecture1.mp3  ->  lecture1.txt
 Also in the output directory: `transcription_state.json` (the queue), and
 `tertius.log` (per-file start/end plus errors, mirrored to the console).
 
+### Each output directory has its own queue
+
+This matters more than it sounds. Change the output folder and you are looking
+at a **different queue**, with its own history of what has been done.
+
+**Tertius remembers the folder you last used** and returns to it on the next
+launch, recorded in `app/.tertius-session.json`. Without that, every restart
+dropped you back at the default folder — where a batch you had finished
+elsewhere reappeared as a pile of pending files, and starting it would quietly
+re-transcribe work that was already complete.
+
+Pass `--output-dir` to override for one run, or set `TERTIUS_OUTPUT_DIR`. An
+explicit `--output-dir` always wins and becomes the new remembered folder.
+
+### Clearing the queue
+
+**Clear queue**, above the file list, empties the queue after a confirmation
+that spells out what goes — including how many files were already transcribed.
+It only forgets the list: transcripts already written stay on disk, and your
+settings are kept. Uploaded copies belonging to those entries are deleted, since
+nothing will refer to them again. It is refused while a job is running.
+
 ## Timestamping text you already have
 
 If you already have the words — a script, a chapter, a prepared reading — Tertius
@@ -493,7 +515,7 @@ straight into the output directory with no subfolder, as before.
 cd app && pytest
 ```
 
-229 tests. The whisper model is mocked throughout — the suite downloads nothing
+262 tests. The whisper model is mocked throughout — the suite downloads nothing
 and decodes no audio, which is also what makes it safe to run in CI. Coverage is
 aimed at what is easy to get wrong: state tracking and resume semantics, the
 job's independence from the HTTP request that started it, download-progress
@@ -515,6 +537,7 @@ transcripts/         output, the resume state file, and the log
 app/
   src/tertius/
     launcher.py      setup + takeover logic shared by all three launchers
+    settings.py      what Tertius remembers between sessions
     config.py        options, validation, media-file scanning
     state.py         StateStore — atomic JSON state, status transitions
     transcribe.py    faster-whisper wrapper, model download + progress, txt/srt

@@ -19,12 +19,12 @@ from tertius.state import (
 )
 
 from .fakes import make_audio
-from .test_api import ApiHarness  # noqa: F401  (fixture machinery)
+from .conftest import ApiHarness  # noqa: F401  (fixture machinery)
 
 
 @pytest.fixture()
 def api(tmp_path):
-    from .test_api import ApiHarness as Harness
+    from .conftest import ApiHarness as Harness
 
     harness = Harness(tmp_path)
     yield harness

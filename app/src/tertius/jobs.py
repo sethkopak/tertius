@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .config import STATE_FILENAME, TranscriptionOptions
+from .settings import remember_output_dir
 from .state import (
     DONE,
     MODE_ALIGN,
@@ -164,6 +165,11 @@ class JobManager:
                 log.info("reset %d interrupted file(s) to pending", len(reset))
             self._store = store
             self._output_dir = Path(output_dir).expanduser().resolve()
+            # Every route that changes the output directory ends up here, so
+            # this is the single place that has to remember it. Without that,
+            # the next launch reattaches to the default folder and its separate
+            # queue, and a finished batch looks like unfinished work.
+            remember_output_dir(self._output_dir)
             saved = store.snapshot().get("options") or {}
             if saved:
                 try:

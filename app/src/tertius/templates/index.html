@@ -256,6 +256,25 @@
           working room. Speed is relative, not measured on your hardware.</p>
       </section>
 
+      <section class="panel danger" id="panel-clear-queue" hidden>
+        <strong>Clear the queue?</strong>
+        <p class="panel-body" id="panel-clear-detail"></p>
+        <p class="panel-body dim">Transcripts already written stay where they are. This
+          only forgets what was lined up &mdash; and it cannot be undone.</p>
+        <div class="panel-actions">
+          <button type="button" id="btn-clear-confirm" class="btn"
+                  title="Empty the queue">Yes, clear it</button>
+          <button type="button" id="btn-clear-cancel" class="btn"
+                  title="Leave the queue alone">Keep it</button>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="qbar">
+      <span class="qbar-count" id="qbar-count"></span>
+      <button type="button" id="btn-clear-queue" class="linkish" hidden
+              title="Forget every file in this queue. Transcripts already written are kept.">Clear queue</button>
     </div>
 
     <div class="qhead">

@@ -153,11 +153,18 @@ class TranscriptionOptions:
 
 
 def default_output_dir() -> Path:
-    """Where transcripts land when the user does not say otherwise."""
+    """Where transcripts land when the user does not say otherwise.
+
+    Anchored to where Tertius is installed, not to the current directory. The
+    launcher used to pass `--output-dir` on every start, which hid the fact that
+    this fallback depended on the shell's working directory: start the server
+    from anywhere else and it would quietly attach to a different queue.
+    """
     env = os.environ.get("TERTIUS_OUTPUT_DIR")
     if env:
         return Path(env).expanduser().resolve()
-    return (Path.cwd() / "transcripts").resolve()
+    # This file is app/src/tertius/config.py; transcripts/ sits beside app/.
+    return (Path(__file__).resolve().parents[3] / "transcripts").resolve()
 
 
 def is_media_file(path: Path) -> bool:

@@ -8,6 +8,9 @@ transcription_state.json
 transcription_state.json.corrupt
 tertius.log
 
+# Which output directory you were last using. Machine-specific by nature.
+.tertius-session.json
+
 # transcripts and uploaded media never belong in the repo
 _uploads/
 *.srt

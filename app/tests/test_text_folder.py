@@ -112,7 +112,7 @@ def test_clearing_the_text_folder(tmp_path):
 
 
 def test_endpoint_sets_the_folder_and_rematches(tmp_path):
-    from .test_api import ApiHarness
+    from .conftest import ApiHarness
 
     api = ApiHarness(tmp_path)
     uploads = tmp_path / "out" / "_uploads"
@@ -134,7 +134,7 @@ def test_endpoint_sets_the_folder_and_rematches(tmp_path):
 
 
 def test_endpoint_rejects_a_folder_that_does_not_exist(tmp_path):
-    from .test_api import ApiHarness
+    from .conftest import ApiHarness
 
     api = ApiHarness(tmp_path)
     res = api.client.post(

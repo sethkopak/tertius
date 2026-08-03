@@ -558,11 +558,24 @@ class StateStore:
                 "summary": self.summary(),
             }
 
-    def clear(self) -> None:
+    def clear(self) -> int:
+        """Empty the queue, keeping the settings. Returns how many were dropped.
+
+        Only the queue: transcripts already written are left exactly where they
+        are, under the output directory. Clearing forgets what was lined up, it
+        does not undo finished work - which is what makes it safe enough to
+        offer behind a single confirmation.
+
+        Options and the output directory survive on purpose: clearing the list
+        is not the same as wanting the model, the language and the destination
+        reset back to defaults.
+        """
         with self._lock:
+            dropped = len(self._data.get("files") or {})
             options = self._data.get("options", {})
             output_dir = self._data.get("output_dir")
             self._data = self._empty()
             self._data["options"] = options
             self._data["output_dir"] = output_dir
             self._flush()
+        return dropped

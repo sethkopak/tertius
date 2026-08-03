@@ -965,12 +965,68 @@ function wireQueueButtons() {
 
 // --- render ----------------------------------------------------------------
 
+// --- clearing the queue ----------------------------------------------------
+
+// The last summary seen, so the confirmation can say what is about to go
+// without asking the server again mid-click.
+let lastSummary = {};
+
+function renderQueueBar(status) {
+  lastSummary = status.summary || {};
+  const total = lastSummary.total || 0;
+  const running = !!status.running;
+
+  $('qbar-count').textContent = total
+    ? `${total} file${total === 1 ? '' : 's'}`
+    : '';
+
+  // Hidden with an empty queue because there is nothing to clear, and while a
+  // job runs because the server refuses it anyway - offering a button that can
+  // only fail is worse than not offering one.
+  $('btn-clear-queue').hidden = !total || running;
+  if (!total || running) hidePanel('panel-clear-queue');
+}
+
+$('btn-clear-queue').onclick = () => {
+  const total = lastSummary.total || 0;
+  const done = lastSummary.done || 0;
+  // Spell out what is being thrown away. "Clear queue?" on its own does not
+  // tell you whether it is about to lose an afternoon of finished work.
+  const parts = [`${total} file${total === 1 ? '' : 's'} will be removed from the queue`];
+  if (done) {
+    parts.push(
+      `${done} of them ${done === 1 ? 'is' : 'are'} already transcribed - ` +
+      `${done === 1 ? 'its transcript' : 'their transcripts'} will be kept, but ` +
+      `Tertius will no longer know ${done === 1 ? 'it was' : 'they were'} done`
+    );
+  }
+  $('panel-clear-detail').textContent = `${parts.join('. ')}.`;
+  showPanel('panel-clear-queue');
+};
+
+$('btn-clear-cancel').onclick = () => hidePanel('panel-clear-queue');
+
+$('btn-clear-confirm').onclick = async () => {
+  hidePanel('panel-clear-queue');
+  try {
+    const res = await jsonPost('/api/queue/clear', {});
+    const freed = res.bytes_reclaimed
+      ? `, freeing ${(res.bytes_reclaimed / (1024 * 1024)).toFixed(1)} MB`
+      : '';
+    note('add-note', `Queue cleared — ${res.cleared} file${res.cleared === 1 ? '' : 's'} removed${freed}.`);
+    render(res.status);
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+};
+
 function render(status) {
   restoreSettings(status);
 
   renderBand(status);
   renderRun(status);
   renderQueue(status);
+  renderQueueBar(status);
 
   if (status.error) showError(status.error); else hidePanel('panel-error');
 

@@ -653,6 +653,34 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ── queue ────────────────────────────────────────────────────────────── */
 
+/* Sits above the column headings: how many files are queued, and the one
+   destructive action in the app. Kept quiet - `linkish`, not a button - so it
+   reads as available rather than inviting, and only turns red on hover. */
+.qbar {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 26px 0;
+}
+
+.qbar-count {
+  font-family: var(--data);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.qbar .linkish {
+  font-size: 11px;
+  color: var(--text-3);
+  text-decoration-color: color-mix(in srgb, var(--text-3) 35%, transparent);
+}
+
+.qbar .linkish:hover { color: var(--danger); }
+
 .qhead {
   flex: none;
   display: flex;

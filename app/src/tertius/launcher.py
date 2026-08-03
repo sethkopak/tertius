@@ -55,6 +55,27 @@ def venv_dir() -> Path:
     return app_dir() / ".venv"
 
 
+def remembered_output_dir() -> Path | None:
+    """The output directory from the last session, for the banner only.
+
+    Read here with plain json rather than by importing tertius.settings: this
+    module runs as a standalone script under whatever Python is on PATH, before
+    the virtual environment exists, so package-relative imports are not
+    available. The server does its own resolution - this only decides what the
+    launch message claims, and being wrong there is cosmetic.
+    """
+    session = app_dir() / ".tertius-session.json"
+    try:
+        with open(session, encoding="utf-8") as handle:
+            value = json.load(handle).get("output_dir")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_dir() else None
+
+
 def venv_python(venv: Path | None = None) -> Path:
     """The interpreter inside a virtual environment, per platform layout."""
     venv = venv or venv_dir()
@@ -375,7 +396,7 @@ def main(argv: list[str] | None = None, say=print) -> int:
     output_dir = (
         Path(args.output_dir).expanduser()
         if args.output_dir
-        else project_dir() / "transcripts"
+        else remembered_output_dir() or project_dir() / "transcripts"
     )
 
     banner(say)
@@ -412,13 +433,17 @@ def main(argv: list[str] | None = None, say=print) -> int:
         args.host,
         "--port",
         str(args.port),
-        "--output-dir",
-        str(output_dir),
         # Still passed as a backstop against two launches racing each other: on
         # Windows a second process can bind a port already in use, which would
         # leave two servers writing one state file.
         "--reuse-existing",
     ]
+    # --output-dir is passed only when it was actually asked for. Sending it on
+    # every launch is what made the server forget which folder you were working
+    # in: each output directory keeps its own queue, so snapping back to the
+    # default made a finished batch reappear as pending work.
+    if args.output_dir:
+        command += ["--output-dir", str(output_dir)]
     if not args.no_browser:
         command.append("--open-browser")
 

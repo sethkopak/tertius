@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .app import create_app
 from .config import LOG_FILENAME, default_output_dir
+from .settings import remembered_output_dir
 
 
 def configure_logging(output_dir: Path, verbose: bool = False) -> None:
@@ -98,13 +99,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_output_dir(explicit: str | None) -> tuple[Path, str]:
+    """Where to write, and why - in order of precedence.
+
+    1. `--output-dir`, if given. Saying it explicitly means meaning it.
+    2. The directory chosen last time, if it still exists. Without this, every
+       restart drops you back to the default folder, which keeps its own
+       separate queue - so a batch you finished elsewhere reappears as a pile
+       of pending files, and re-running it silently redoes hours of work.
+    3. The default beside the launcher.
+    """
+    if explicit:
+        return Path(explicit).expanduser().resolve(), "asked for"
+    remembered = remembered_output_dir()
+    if remembered is not None:
+        return remembered, "remembered from last time"
+    return default_output_dir(), "the default"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    output_dir = (
-        Path(args.output_dir).expanduser().resolve()
-        if args.output_dir
-        else default_output_dir()
-    )
+    output_dir, chosen_because = resolve_output_dir(args.output_dir)
     configure_logging(output_dir, args.verbose)
     log = logging.getLogger("tertius")
     url = f"http://{args.host}:{args.port}/"
@@ -121,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app(output_dir)
     manager = app.config["JOB_MANAGER"]
     status = manager.status(include_files=False)
-    log.info("output directory: %s", output_dir)
+    log.info("output directory: %s (%s)", output_dir, chosen_because)
 
     # Clear out uploaded copies left over from previous sessions. Done here,
     # after the store has been attached and interrupted work reset to pending,
