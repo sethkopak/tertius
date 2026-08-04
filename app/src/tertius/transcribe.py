@@ -560,6 +560,7 @@ class WhisperTranscriber:
             language=self.options.language,
             beam_size=self.options.beam_size,
             vad_filter=self.options.vad_filter,
+            condition_on_previous_text=self.options.condition_on_previous_text,
             word_timestamps=word_timestamps,
         )
         audio_seconds = getattr(info, "duration", None)

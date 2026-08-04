@@ -111,6 +111,14 @@ class TranscriptionOptions:
     language: str | None = None  # None => auto-detect
     beam_size: int = 5
     vad_filter: bool = True
+    # faster-whisper defaults this to True: each 30s window is prompted with the
+    # previous window's text. When a window comes back unpunctuated, that becomes
+    # the prompt, and the model keeps being told that is the house style - it
+    # never recovers. Measured on a 38-minute talk: punctuation stopped at 14:45
+    # and the remaining 23 minutes arrived as 2,197 one-word segments. Off by
+    # default; the cost is consistency of rare proper nouns across a long file,
+    # which is a far smaller loss than an unreadable transcript.
+    condition_on_previous_text: bool = False
     formats: list[str] = field(default_factory=lambda: ["txt", "srt"])
     # Timestamp text you supply instead of writing a fresh transcript.
     use_reference_text: bool = False

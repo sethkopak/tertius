@@ -9,7 +9,7 @@ requested since: the launcher, folder picker, model download progress, model
 comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, and macOS/Linux support.
 
-**296 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**298 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout — the suite downloads nothing and decodes no
 audio, which is what makes it safe to run on a hosted runner.
 
@@ -365,6 +365,53 @@ Also, and separately:
   the machine, and binding to `0.0.0.0` is a documented consequence rather than
   a vulnerability.
 
+## 2026-08-03 — the transcript that stopped having sentences
+
+Reported as: the `.txt` stops separating sentences at line 133 and puts the rest
+of the talk on one line. It was not the splitter. Whisper stopped emitting
+punctuation at **00:14:45** of a 38-minute talk, and the splitter did the only
+thing it can with punctuation-free input.
+
+The `.srt` from the same run is the proof, since that format is left alone:
+cue 520 is `gates?`, and the 2,197 cues after it — 23 of the 38 minutes — are one
+or two words each, no punctuation, no capitals. The words stayed right; only the
+formatting collapsed.
+
+`transcribe()` never passed `condition_on_previous_text`, so faster-whisper's
+default of `True` applied: each 30-second window is prompted with the previous
+window's text. One unpunctuated window becomes the prompt for the next, and the
+model keeps being told that is the house style. It never recovers.
+`prompt_reset_on_temperature` cannot rescue it, because the model is not failing
+its confidence checks — it is confidently producing correctly-worded text in the
+wrong shape.
+
+Re-run on the GPU with only that flag changed, on the same file:
+
+| | segments | mean words/segment | punctuation survives to |
+|---|---|---|---|
+| conditioning on (was) | 2,717 | 1.4 | 14.8 min of 38.1 |
+| conditioning off (now) | 499 | 7.8 | 37.5 min of 38.1 |
+
+The baseline reproduced the original failure exactly — same segment, same
+`gates?`, same 885.5s — so it is deterministic, not an unlucky roll. Accuracy
+improved as well, not just layout: the collapsed run dropped "of heaven" from
+"the keys of the kingdom of heaven" and wrote "Bragnot" for "Bragnat".
+
+Off by default now. The cost is consistency of rare proper nouns across a long
+file, which is much the smaller loss. It is a real tradeoff rather than a free
+win, so it is a field on `TranscriptionOptions` and can be turned back on.
+
+**It was never one file.** Scanning all 99 volume transcripts for the same
+signature found it nearly everywhere: `V4_07.txt` had 419 of 723 lines without
+terminal punctuation, `V2_06.txt` a single 3,472-character line, `V4_05.txt`
+collapsed at line 16 of 167. The whole corpus was transcribed with these
+defaults, so the whole corpus had it. Volumes A-F and Tabernacle Shadows are
+being re-transcribed.
+
+The lesson is the one this project keeps relearning in new costumes: nothing
+errored. A library default that is right for short clips is wrong for a
+38-minute talk, and the app inherited it without ever stating a choice.
+
 ## Not verified — read this before trusting it
 
 - Only one transcript and one aligned output have been read closely. Accuracy
@@ -459,6 +506,13 @@ Also, and separately:
   both write a BOM; read as plain utf-8 it survives as an invisible character
   glued to the first word, which then shows up in the output *and* stops that
   chunk matching the audio. Files without a BOM are unaffected.
+- **`condition_on_previous_text` defaults to `True` in faster-whisper, and on a
+  long recording that is a trap.** Each 30s window is prompted with the previous
+  window's text, so one unpunctuated window teaches the model to keep going that
+  way, for the rest of the file. It cost 23 minutes of a 38-minute talk, and
+  quietly damaged 99 transcripts before anyone read far enough down one to
+  notice. Nothing errors; the words stay correct and only the shape goes. Any
+  library default tuned for short clips deserves this suspicion.
 - **A Windows venv cannot be moved** — `pyvenv.cfg` and the `Scripts` shims hold
   absolute paths. Relocating means deleting and recreating. The model cache is
   unaffected; it lives in `~/.cache/huggingface/hub`, outside the app folder.

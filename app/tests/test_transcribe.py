@@ -204,3 +204,50 @@ def test_options_round_trip():
     assert restored == options
     # Unknown keys from an older state file are ignored, not fatal.
     assert TranscriptionOptions.from_dict({"model_size": "tiny", "legacy": 1}).model_size == "tiny"
+
+
+class RecordingModel:
+    """Captures what was actually asked of faster-whisper."""
+
+    def __init__(self):
+        self.kwargs = None
+
+    def transcribe(self, audio, **kwargs):
+        self.kwargs = kwargs
+        return iter(()), object()
+
+
+def _transcriber_with(options):
+    from tertius.transcribe import WhisperTranscriber
+
+    transcriber = WhisperTranscriber(options)
+    model = RecordingModel()
+    transcriber._model = model  # skip loading; we only care about the call
+    return transcriber, model
+
+
+def test_previous_text_conditioning_is_off_by_default():
+    """A 38-minute talk lost every mark of punctuation from 14:45 onward.
+
+    faster-whisper defaults `condition_on_previous_text` to True, prompting each
+    30s window with the last one's text. One unpunctuated window becomes the
+    prompt for the next, and the model never recovers - it kept the words right
+    and emitted 2,197 one-word segments with no punctuation or capitals. The
+    flag must reach the library, so this pins the call rather than the default.
+    """
+    options = TranscriptionOptions()
+    assert options.condition_on_previous_text is False
+
+    transcriber, model = _transcriber_with(options)
+    transcriber.transcribe("talk.mp3")
+
+    assert model.kwargs["condition_on_previous_text"] is False
+
+
+def test_previous_text_conditioning_can_be_turned_back_on():
+    transcriber, model = _transcriber_with(
+        TranscriptionOptions(condition_on_previous_text=True)
+    )
+    transcriber.transcribe("talk.mp3")
+
+    assert model.kwargs["condition_on_previous_text"] is True
