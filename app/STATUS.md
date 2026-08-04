@@ -401,16 +401,38 @@ Off by default now. The cost is consistency of rare proper nouns across a long
 file, which is much the smaller loss. It is a real tradeoff rather than a free
 win, so it is a field on `TranscriptionOptions` and can be turned back on.
 
-**It was never one file.** Scanning all 99 volume transcripts for the same
-signature found it nearly everywhere: `V4_07.txt` had 419 of 723 lines without
-terminal punctuation, `V2_06.txt` a single 3,472-character line, `V4_05.txt`
-collapsed at line 16 of 167. The whole corpus was transcribed with these
-defaults, so the whole corpus had it. Volumes A-F and Tabernacle Shadows are
-being re-transcribed.
+Two short stretches still collapse in the repaired output — 249 characters
+mid-file and the last 366 at the very end — so the failure is an attractor the
+flag makes rare rather than impossible. No words are lost in either; only the
+punctuation goes.
 
-The lesson is the one this project keeps relearning in new costumes: nothing
-errored. A library default that is right for short clips is wrong for a
-38-minute talk, and the app inherited it without ever stating a choice.
+**Alignment turned out to be immune, and the corpus never needed redoing.**
+The first read of this said all 99 volume transcripts had the same signature,
+on the strength of a scan counting lines without terminal punctuation. That
+scan was measuring the wrong thing. Every one of those 99 is an *alignment*
+output — Russell's own published text with timings added — and its line breaks
+are chunk boundaries, not sentence ends. Lines without a full stop are what
+that format normally looks like.
+
+Re-aligning `V1_02.mp3` both ways settled it: 2,414 words against 2,416, and
+**7 of 30 chunks untimed either way**. Alignment consumes only the word stream,
+and the collapse costs punctuation, capitals and segmentation — never the
+words. Segment count moved (169 to 235) and nothing downstream cared.
+
+So the blast radius is fresh transcription only. In this output directory that
+was one file, the Elbert talk, since everything else was supplied text.
+
+Two lessons, and the second is the more expensive:
+
+1. Nothing errored. A library default that is right for short clips is wrong
+   for a 38-minute talk, and the app inherited it without ever stating a choice.
+2. **A proxy metric found a real bug and then invented a fake one.** "Lines
+   with no terminal punctuation" is a fair signal in a transcript and a
+   meaningless one in aligned text, and reading one number across both formats
+   nearly cost 99 files of Russell's text — they were queued for re-transcription
+   as fresh audio, which would have replaced his wording with Whisper's. Three
+   were overwritten before the check that caught it; a backup taken first is why
+   that sentence ends here. Check what a format *is* before measuring it.
 
 ## Not verified — read this before trusting it
 
@@ -509,10 +531,17 @@ errored. A library default that is right for short clips is wrong for a
 - **`condition_on_previous_text` defaults to `True` in faster-whisper, and on a
   long recording that is a trap.** Each 30s window is prompted with the previous
   window's text, so one unpunctuated window teaches the model to keep going that
-  way, for the rest of the file. It cost 23 minutes of a 38-minute talk, and
-  quietly damaged 99 transcripts before anyone read far enough down one to
-  notice. Nothing errors; the words stay correct and only the shape goes. Any
-  library default tuned for short clips deserves this suspicion.
+  way, for the rest of the file. It cost 23 minutes of a 38-minute talk before
+  anyone read far enough down to notice. Nothing errors; the words stay correct
+  and only the shape goes. Any library default tuned for short clips deserves
+  this suspicion. Alignment is unaffected — it reads only the word stream.
+- **Aligned output and transcript output cannot be measured with the same
+  ruler.** A transcript's lines are sentences, so a line with no full stop is a
+  symptom. Aligned text's lines are chunks, so the same line is normal. One scan
+  applied to both reported 99 healthy files as damaged and queued them to be
+  re-transcribed from audio — which discards the supplied text that is the whole
+  point of aligning. Check `kind` in the `.json`, or the timestamp prefix in the
+  `.txt`, before drawing conclusions from a shape.
 - **A Windows venv cannot be moved** — `pyvenv.cfg` and the `Scripts` shims hold
   absolute paths. Relocating means deleting and recreating. The model cache is
   unaffected; it lives in `~/.cache/huggingface/hub`, outside the app folder.
