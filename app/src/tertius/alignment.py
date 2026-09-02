@@ -116,6 +116,12 @@ def split_paragraphs(text: str) -> list[str]:
     return [b.strip() for b in blocks if b.strip()]
 
 
+def _ends_with_abbreviation(piece: str) -> bool:
+    """Does this piece end in one of the abbreviations, as a whole word?"""
+    words = piece.rsplit(None, 1)
+    return bool(words) and words[-1].lower() in _ABBREVIATIONS
+
+
 def split_sentences(text: str) -> list[str]:
     """Sentence-ish splitting, protecting a handful of abbreviations."""
     sentences: list[str] = []
@@ -130,9 +136,14 @@ def split_sentences(text: str) -> list[str]:
         pieces.append(flat[cursor:].strip())
 
         # Re-join pieces that were split after a known abbreviation.
+        #
+        # Matched on the last *word*, not on a suffix. `endswith` here meant any
+        # word ending in one of these counted: "last.", "first." and - in
+        # scripture, constantly - "Christ." all end with "st." and had the
+        # following sentence glued onto them.
         merged: list[str] = []
         for piece in pieces:
-            if merged and merged[-1].lower().endswith(_ABBREVIATIONS):
+            if merged and _ends_with_abbreviation(merged[-1]):
                 merged[-1] = f"{merged[-1]} {piece}"
             else:
                 merged.append(piece)

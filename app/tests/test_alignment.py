@@ -219,3 +219,35 @@ def test_every_granularity_produces_output(granularity):
     assert result.chunks
     assert result.granularity in (PARAGRAPH, SENTENCE)
     assert render_timestamped_text(result).strip()
+
+
+def test_a_word_merely_ending_in_an_abbreviation_is_not_one():
+    """`endswith` matched too much, and scripture is where it showed.
+
+    "last.", "first." and "Christ." all end with "st.", so each had the sentence
+    after it glued on. Measured on a real 38-minute transcript: two sentences
+    wrongly merged out of 204, and "Christ." is far more common elsewhere.
+    """
+    from tertius.alignment import split_sentences
+
+    assert split_sentences("He came at last. A new day had begun.") == [
+        "He came at last.",
+        "A new day had begun.",
+    ]
+    assert split_sentences("We trust in Christ. Amen.") == [
+        "We trust in Christ.",
+        "Amen.",
+    ]
+    assert split_sentences("He was first. Then the rest.") == [
+        "He was first.",
+        "Then the rest.",
+    ]
+
+
+def test_real_abbreviations_are_still_protected():
+    """The other half: the merging rule has to keep doing its job."""
+    from tertius.alignment import split_sentences
+
+    assert split_sentences("Meet Mr. Smith today.") == ["Meet Mr. Smith today."]
+    assert split_sentences("See vol. 2 for more.") == ["See vol. 2 for more."]
+    assert split_sentences("Compare e.g. this one.") == ["Compare e.g. this one."]
