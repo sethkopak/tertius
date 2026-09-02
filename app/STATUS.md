@@ -1,22 +1,25 @@
 # Tertius — status
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 ## Where it stands
 
 Working, and in real use. Built from `design/original-spec.md`, plus everything
 requested since: the launcher, folder picker, model download progress, model
 comparison + machine check, tooltips, light/dark theme, mirrored output folders,
-timestamping of supplied text, the designed UI, and macOS/Linux support.
+timestamping of supplied text, the designed UI, macOS/Linux support, and
+translation.
 
-**379 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
-CI. Whisper is mocked throughout — the suite downloads nothing and decodes no
-audio, which is what makes it safe to run on a hosted runner.
+**382 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+CI. Whisper is mocked throughout, and so is the translator — the suite
+downloads nothing, decodes no audio and converts no checkpoints, which is what
+makes it safe to run on a hosted runner.
 
 Run it: double-click `Start Tertius.bat` (Windows), `Tertius.app` (macOS), or
 run `./start-tertius.sh` (Linux).
 
-Repo: `github.com/sethkopak/tertius` (private), branch `main`.
+Repo: `github.com/sethkopak/tertius` (private), branch `main`. Translation
+merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
 
 **Windows is the only platform anyone has actually run this on.** See
 [Not verified](#not-verified--read-this-before-trusting-it).
@@ -852,12 +855,23 @@ did not.
 
 ## Next steps
 
-1. Run a full volume through and read a few outputs properly.
+1. Read a whole translated volume properly. `V1_01` has been checked closely on
+   three sentences out of 206, and structurally on all of them; that is not the
+   same as having read it.
 2. Get this in front of a real Mac and a real Linux box. Everything in
-   *Not verified* about those two stays open until someone does.
-3. Decided (2026-08-03): this ships, as open source under MIT. The legal
-   groundwork is in; what is left before flipping the repo public is below.
-4. Packaging is still untouched — run-from-source only, no wheel, no installer.
+   *Not verified* about those two stays open until someone does. Translation
+   adds to what is riding on that: the installer shells out to pip, and the
+   `.txt`-source scan has only run on Windows.
+3. Try `madlad400-3b-mt`. It is the whole of the T5 adapter — a different
+   tokenizer and a different way of naming the target language — and not one
+   line of it has met a real model. 400+ languages is the reason to care.
+4. Run a translation on the GPU. Everything so far has been CPU, which is why
+   the translation comparison table has no "on this machine" column: there is
+   nothing honest to put in it yet.
+5. Decided (2026-08-03): this ships, as open source under MIT. The legal
+   groundwork is in, and the translation models were chosen to keep it that way
+   — see the 2026-09-01 entry on NLLB.
+6. Packaging is still untouched — run-from-source only, no wheel, no installer.
    Strangers on macOS and Linux will arrive before either platform has been run
    by hand, which is the risk to weigh before publishing.
 
@@ -985,7 +999,7 @@ THIRD-PARTY-NOTICES.md   bundled fonts (OFL 1.1) and dependency licences
 SECURITY.md          how to report something exploitable
 transcripts/         output, the resume state file, and the log
 app/
-  src/tertius/       the app
+  src/tertius/       the app (transcribe.py and translate.py are the two models)
   tests/             the suite
   assets/            the T mark as .svg/.png/.ico/.icns, plus its generator
   design/            UI handoff and the original build spec

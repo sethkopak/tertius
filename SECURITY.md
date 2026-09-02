@@ -31,9 +31,23 @@ code as your user can already do everything Tertius can do.
   the interesting case here.
 - Code execution triggered by the *content* of a media or text file you
   transcribe.
-- Secrets or transcript content leaving the machine. Tertius makes exactly one
-  network request on purpose: downloading a model from Hugging Face the first
-  time it is used. Anything else is a bug worth reporting.
+- Secrets or transcript content leaving the machine. Tertius makes network
+  requests on purpose in exactly three places, all of them fetches and none of
+  them carrying your content:
+  1. downloading a Whisper model from Hugging Face the first time it is used;
+  2. downloading a translation model from Hugging Face, if you translate;
+  3. installing `torch`, `transformers` and `sentencepiece` from PyPI and the
+     PyTorch CPU index, if you translate and they are missing.
+
+  Anything else — anything that *sends* rather than fetches — is a bug worth
+  reporting.
+- **Reaching `/api/translation/prepare` from a page you merely visit.** It is
+  the one endpoint that installs software, so it is worth aiming at. What
+  limits it today: the package names and index URLs are fixed in the source and
+  not taken from the request, the model name is checked against a fixed
+  catalogue, and it refuses to install outside a virtual environment. If you
+  find a way to make it install something not on that list, or to run outside a
+  venv, that is very much in scope.
 
 ## Out of scope
 
@@ -47,9 +61,11 @@ code as your user can already do everything Tertius can do.
 - The queue reading any path your own user can read. Choosing an input folder
   is the entire point of the app.
 - Denial of service by feeding it enormous files. It is a batch transcriber;
-  it will happily spend hours on what you give it.
-- Vulnerabilities in `faster-whisper`, `ctranslate2`, `av`, or Flask — report
-  those upstream. Tell me anyway if Tertius uses them in a way that makes an
+  it will happily spend hours on what you give it. The same goes for triggering
+  a large model download: it costs bandwidth and disk, and the models it can be
+  asked for are a fixed list.
+- Vulnerabilities in `faster-whisper`, `ctranslate2`, `av`, `transformers`,
+  `torch`, or Flask — report those upstream. Tell me anyway if Tertius uses them in a way that makes an
   upstream issue worse.
 
 ## Supported versions

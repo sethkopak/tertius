@@ -147,11 +147,16 @@ the ones verified in use; each project ships its own licence text.
 
 Installed only when translation is used, and not redistributed here either.
 
-| Package | Licence |
-| --- | --- |
-| transformers | Apache-2.0 |
-| sentencepiece | Apache-2.0 |
-| torch | BSD-3-Clause |
+| Package | Version verified | Licence |
+| --- | --- | --- |
+| transformers | 5.16.1 | Apache-2.0 |
+| sentencepiece | 0.2.2 | Apache-2.0 |
+| torch | 2.14.0+cpu | BSD-3-Clause |
+
+`torch` is installed from <https://download.pytorch.org/whl/cpu> rather than
+PyPI. Conversion loads a checkpoint and writes it back out — it never runs the
+model — so the CPU build is sufficient, and on Linux it avoids a bundled CUDA
+runtime well over a gigabyte.
 
 ## Models
 

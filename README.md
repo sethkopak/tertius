@@ -2,11 +2,15 @@
 
 Offline batch transcription of audio/video files using
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper), with a small Flask UI
-for a resumable queue.
+for a resumable queue. It can also **translate** what it transcribes — or a `.txt`
+you already have — into any of a hundred languages, still without leaving the
+machine.
 
-Runs entirely on your machine: no API calls, no cloud services, no telemetry. The
-only network access it ever makes is the one-time model download from Hugging Face
-(see [Models](#models) — you can pre-download and then run air-gapped).
+Runs entirely on your machine: no API calls, no cloud services, no telemetry. Its
+only network access is fetching models the first time you use them — Whisper from
+Hugging Face (see [Models](#models)), and, if you translate, a translation model
+plus the libraries needed to convert it (see [Translating](#translating)). Once
+they are on disk you can run air-gapped.
 
 ## Launch
 
@@ -139,7 +143,9 @@ the file queue on the right.
 2. **Settings** — model size (default `large-v3-turbo`), device, language,
    precision, output formats, and where transcripts are written. The **i** button
    beside the model menu opens a comparison table; see
-   [Which model?](#which-model).
+   [Which model?](#which-model). **Translate the transcript** adds a second
+   language alongside the original, with its own model menu and **i** button;
+   see [Translating](#translating).
 3. **Run** — press **Begin**. The request returns immediately; the work happens
    on a background worker thread. The button reads *Begin again* once part of the
    queue is already done, and always says how many files are still pending.
@@ -369,6 +375,14 @@ lecture1.mp3  ->  lecture1.txt
                   lecture1.srt
 ```
 
+With translation on, the translated files land beside them, tagged with the
+target language. Nothing is replaced:
+
+```
+lecture1.mp3  ->  lecture1.txt      lecture1.es.txt
+                  lecture1.srt      lecture1.es.srt
+```
+
 `.txt` is **one sentence per line**. Whisper's own segments are cut for timing
 rather than for reading — they run on, break mid-sentence, and sometimes hold
 three sentences at once — so the text is rejoined and re-split on sentence ends.
@@ -551,12 +565,122 @@ files above produce three separate transcripts.
 Files added any other way (uploads, or files outside the scanned folder) go
 straight into the output directory with no subfolder, as before.
 
+## Translating
+
+Tertius can write the transcript in another language as well as the original.
+Both files are produced: `lecture1.txt` stays exactly as transcribed, and the
+translation lands beside it as `lecture1.es.txt`. A bad translation costs you
+nothing you already had.
+
+Tick **Translate the transcript**, choose a translator and a target language,
+and run as normal.
+
+### Whisper cannot do this on its own
+
+Whisper has a `translate` task, and it only ever produces **English** — any
+language in, English out. That is not what "translate this into Spanish" means,
+so translation here is a second model, run after transcription, on the same
+CTranslate2 runtime faster-whisper already uses. Still offline; still nothing
+leaving the machine once the model is on disk.
+
+### The models
+
+| Model | Download | On disk | Languages | Licence |
+| --- | --- | --- | --- | --- |
+| `m2m100-418M` (default) | 1.8 GB | 477 MB | 100 | MIT |
+| `m2m100-1.2B` | 4.6 GB | 1.2 GB | 100 | MIT |
+| `madlad400-3B` | 11.0 GB | — | 400+ | Apache-2.0 |
+
+The **i** button beside the translator menu opens the same comparison table,
+with measured on-disk sizes for whichever you have already prepared.
+
+Weights are downloaded from the publisher — `facebook/…`, `google/…` — and
+converted to CTranslate2 format **here, on your machine**. Ready-made
+conversions of all of these exist on Hugging Face and would have been simpler
+to use, but they are individual accounts with no signature and nothing tying
+their `model.bin` to the weights it claims to be. Converting from the original
+costs one `torch` install and nothing afterwards.
+
+**NLLB-200 is not offered.** It is better than any of these at its size and it
+is CC-BY-NC-4.0 — non-commercial. Tertius is MIT, and a default feature that
+quietly forbids commercial use to everyone downstream is worse than a slightly
+weaker model. Every model above may be used commercially.
+
+### Download and prepare
+
+The target-language menu is read from the converted model's own vocabulary, so
+it can never offer a code the model would reject — which means there is nothing
+to choose from until the model exists. Press **Download and prepare** once per
+model. It:
+
+1. installs `torch`, `transformers` and `sentencepiece` if they are missing
+   (about 150 MB, from the CPU-only PyTorch index — conversion never runs the
+   model, so a CUDA build would buy nothing);
+2. downloads the publisher's weights;
+3. converts them to int8.
+
+It refuses to install anything outside a virtual environment, and nothing else
+in Tertius ever installs anything — a transcription-only run never touches pip.
+You can also do it yourself with `pip install -e app[translate]`.
+
+### Whole sentences, or segments
+
+**Translate the .txt as whole sentences** is on by default, and is worth
+understanding.
+
+Whisper cuts segments for timing, not for meaning. Measured on a 38-minute
+talk: 71% of segments begin mid-sentence, 78% end without a full stop, and 54%
+are fragments at both ends. Handing those to a translator one at a time gives
+it "the doubt and gloom intensified by" with no subject and no end.
+
+So the `.txt` is translated as rejoined sentences. The `.srt` cannot be — its
+timings belong to segments, and only a segment has them — so it is always
+translated segment by segment, and **every cue keeps the timing that was
+actually measured**.
+
+The cost is a second pass over the file. On that same talk: 12s for the segment
+pass, 221s for the sentence pass. Turning the setting off is four times faster
+and gives a `.txt` that reads badly (116 run-on lines where the English had
+206 sentences). The `.srt` is byte-identical either way, and a run that writes
+no `.txt` never pays for the second pass at all.
+
+### Translating text with no audio
+
+Tick **Translate text files, not audio** and Tertius scans for `.txt` instead
+of media. Those files go straight to the translator — Whisper is never loaded —
+and the paragraph and sentence shape of the original is preserved. No `.srt` is
+written however the format chips are set: there are no timings, and invented
+cues would be worse than none.
+
+This is a separate scan rather than an extra extension on the media list,
+because the same `.txt` means two different things depending on why it was
+picked up. Found beside an audio file it is reference text to be *timestamped*
+(see [Timestamping text you already have](#timestamping-text-you-already-have));
+scanned as a source it is text to be *translated*.
+
+### What to expect
+
+`m2m100-418M` is the default because it is a third of the disk and half the
+wait, and it is genuinely the smallest one worth using. It is also small enough
+to show. On real material it rendered "gloom" as *glume* — jokes — in every
+attempt, fragments and whole sentences alike, and invented non-words for
+"doubt". `m2m100-1.2B` fixed both, along with noun gender and register. If the
+output is not good enough, that is the first thing to change.
+
+Honest limits, as of the last time this was written:
+
+- Only the two M2M-100 models have been run. `madlad400-3B` is a different
+  architecture entirely and **has never been tried**.
+- Translation has only ever run on the **CPU**. Whether a model fits on a GPU
+  beside Whisper is unknown, which is why the comparison table has no verdict
+  column.
+
 ## HTTP API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/status` | Full job + queue state (what the UI polls). |
-| `POST` | `/api/scan` | `{directory, recursive}` → media files found. |
+| `POST` | `/api/scan` | `{directory, recursive, kind?}` → source files found. `kind` is `media` (default) or `text`. |
 | `POST` | `/api/queue` | `{files: [...], base_dir?}` → add to queue without starting. `base_dir` is the scanned folder, and makes the output mirror its structure. |
 | `POST` | `/api/upload` | multipart `files` → save to `_uploads/` and queue. |
 | `POST` | `/api/job/start` | `{files?, output_dir?, options?, retry_failed?}` → returns at once. |
@@ -569,6 +693,9 @@ straight into the output directory with no subfolder, as before.
 | `POST` | `/api/queue/decide-all` | `{mode}` → answer every outstanding "no text file" at once. |
 | `GET` | `/api/transcript?name=…&download=1` | Fetch a transcript from the output dir. |
 | `GET` | `/api/system?device=…&compute_type=…` | Machine capabilities + a verdict per model. |
+| `GET` | `/api/translation/models` | The translation models: download size, whether prepared, measured size on disk, languages, licence. |
+| `GET` | `/api/translation/languages?model=…` | What that model translates into, read from its converted vocabulary. Empty until it is prepared. |
+| `POST` | `/api/translation/prepare` | `{model}` → install what is needed, download and convert. Returns at once; watch `/api/status`. |
 | `POST` | `/api/browse-folder` | Open the OS folder picker on this machine, return the path. |
 
 ## Tests
@@ -577,11 +704,14 @@ straight into the output directory with no subfolder, as before.
 cd app && pytest
 ```
 
-290 tests. The whisper model is mocked throughout — the suite downloads nothing
-and decodes no audio, which is also what makes it safe to run in CI. Coverage is
-aimed at what is easy to get wrong: state tracking and resume semantics, the
-job's independence from the HTTP request that started it, download-progress
-aggregation, machine-suitability verdicts, and the per-platform branches.
+382 tests. The whisper model is mocked throughout, and so is the translator —
+the suite downloads nothing, decodes no audio and converts no checkpoints, which
+is also what makes it safe to run in CI. Coverage is aimed at what is easy to
+get wrong: state tracking and resume semantics, the job's independence from the
+HTTP request that started it, download-progress aggregation,
+machine-suitability verdicts, the per-platform branches, and — for translation —
+the exact tokens each model family needs, since getting those wrong produces a
+confident translation into the wrong language rather than an error.
 
 CI runs the suite on ubuntu, macOS and Windows (`.github/workflows/tests.yml`).
 That is the only cross-platform evidence there is, and it is worth being precise
@@ -606,6 +736,7 @@ app/
     config.py        options, validation, media-file scanning
     state.py         StateStore — atomic JSON state, status transitions
     transcribe.py    faster-whisper wrapper, model download + progress, txt/srt
+    translate.py     CTranslate2 translation: convert, load, the two adapters
     jobs.py          JobManager — the background worker, its phase and status
     system.py        RAM/GPU detection, model catalogue, per-machine verdicts
     folder_picker.py native folder dialog, run as its own process
@@ -623,7 +754,9 @@ Everything the app is made of lives under `app/`.
 ## Not included
 
 No live microphone transcription (file/batch only) and no auth or multi-user
-support — this is a single-user local tool. Don't bind it to `0.0.0.0` on an
+support — this is a single-user local tool. Whisper's English-only `translate`
+task is not exposed either; [Translating](#translating) covers that case with a
+model that can also do the other ninety-nine languages. Don't bind it to `0.0.0.0` on an
 untrusted network: the scan and queue endpoints will read any path the server
 process can read.
 
