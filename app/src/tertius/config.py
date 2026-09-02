@@ -27,6 +27,12 @@ MEDIA_EXTENSIONS = frozenset(
     }
 )
 
+# Text that can be queued as a source in its own right, to be translated with
+# no audio involved. Deliberately narrow: a `.txt` sitting beside an audio file
+# is a *reference* to be timestamped, and only ever becomes a source when it is
+# scanned as one.
+TEXT_EXTENSIONS = frozenset({".txt"})
+
 # Names faster-whisper resolves itself (see faster_whisper.utils._MODELS).
 # large-v3-turbo maps to mobiuslabsgmbh/faster-whisper-large-v3-turbo.
 MODEL_SIZES = (
@@ -52,6 +58,75 @@ DEVICES = ("auto", "cpu", "cuda")
 COMPUTE_TYPES = ("default", "int8", "int8_float16", "float16", "float32")
 OUTPUT_FORMATS = ("txt", "srt", "json")
 
+# Translation models, converted here from the original publisher's weights
+# rather than pulled from someone's pre-converted upload.
+#
+# Every one of these is permissively licensed. NLLB-200 is the obvious choice
+# on quality and is deliberately absent: it is CC-BY-NC-4.0, which would forbid
+# commercial use to everyone Tertius is given to. That restriction is Meta's to
+# set, and converting the weights ourselves would not have lifted it.
+#
+# `family` selects the adapter. The two families say "translate into Spanish"
+# in completely different ways - see translate.py.
+TRANSLATION_MODELS = {
+    "m2m100-418M": {
+        "repo": "facebook/m2m100_418M",
+        "family": "m2m100",
+        "license": "MIT",
+        "download_bytes": 1_940_000_000,
+        "languages": 100,
+        "speed": "Fast",
+        "quality": "Serviceable. The smallest here worth using.",
+    },
+    "m2m100-1.2B": {
+        "repo": "facebook/m2m100_1.2B",
+        "family": "m2m100",
+        "license": "MIT",
+        "download_bytes": 4_960_000_000,
+        "languages": 100,
+        "speed": "Moderate",
+        "quality": "Clearly better than 418M.",
+    },
+    "madlad400-3B": {
+        "repo": "google/madlad400-3b-mt",
+        "family": "t5",
+        "license": "Apache-2.0",
+        "download_bytes": 11_780_000_000,
+        "languages": 400,
+        "speed": "Slow",
+        "quality": "Best here, and much the widest language coverage.",
+    },
+}
+
+TRANSLATION_MODEL_SIZES = tuple(TRANSLATION_MODELS)
+DEFAULT_TRANSLATION_MODEL = "m2m100-418M"
+
+# The files each family needs in order to convert. Named explicitly so a
+# download never drags in the duplicate TensorFlow, Flax, Rust and GGUF copies
+# the Hub also carries - on madlad400-3b-mt those alone would add ~4 GB to an
+# already large fetch.
+TRANSLATION_FILE_PATTERNS = {
+    "m2m100": [
+        "pytorch_model.bin",
+        "sentencepiece.bpe.model",
+        "vocab.json",
+        "config.json",
+        "generation_config.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+    ],
+    "t5": [
+        "model.safetensors",
+        "spiece.model",
+        "tokenizer.json",
+        "config.json",
+        "generation_config.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "added_tokens.json",
+    ],
+}
+
 # The `.json` output carries this so a reader can tell what it is holding. Two
 # different shapes are written - a fresh transcription's segments and supplied
 # text's chunks - and neither used to say which it was or that it might change.
@@ -62,6 +137,10 @@ OUTPUT_FORMATS = ("txt", "srt", "json")
 JSON_SHAPE_VERSION = 1
 TRANSCRIPTION_SHAPE = "transcription"
 ALIGNMENT_SHAPE = "alignment"
+# A translated transcript is segments like a transcription, but the text is not
+# what was said - it is a machine's rendering of it into another language. A
+# reader that treats the two alike would quote a translation as a quotation.
+TRANSLATION_SHAPE = "translation"
 
 STATE_FILENAME = "transcription_state.json"
 LOG_FILENAME = "tertius.log"
@@ -101,6 +180,21 @@ def language_choices() -> tuple[str, ...]:
     return tuple(sorted(codes)) if codes else FALLBACK_LANGUAGE_CODES
 
 
+def translation_language_choices(model_key: str) -> tuple[str, ...]:
+    """Codes the chosen translation model will accept as a target, sorted.
+
+    Read from the converted model's own vocabulary, for the same reason the
+    Whisper menu is read from Whisper's: a hand-written table goes stale, and a
+    menu that offers a code the model rejects fails the job rather than the
+    click. Empty until the model has been converted - nothing can be promised
+    about a model that is not on disk yet, and the UI says so rather than
+    guessing.
+    """
+    from .translate import supported_target_languages
+
+    return supported_target_languages(model_key)
+
+
 @dataclass
 class TranscriptionOptions:
     """Per-job transcription settings, exposed in the UI."""
@@ -123,6 +217,24 @@ class TranscriptionOptions:
     # Timestamp text you supply instead of writing a fresh transcript.
     use_reference_text: bool = False
     alignment_granularity: str = "auto"
+    # Translate the finished transcript into another language. A post-step, so
+    # it applies equally to a fresh transcription and to timestamped supplied
+    # text; the source-language files are always written too, and the
+    # translation lands beside them as `talk.<target>.txt`.
+    translate: bool = False
+    translation_model: str = DEFAULT_TRANSLATION_MODEL
+    target_language: str | None = None
+    # Translate the `.txt` as whole sentences rather than as the timing-cut
+    # segments Whisper produced. Measured on a 38-minute talk: 71% of segments
+    # begin mid-sentence and 54% are fragments at both ends, and translating
+    # those one at a time gave a `.txt` of 116 run-on lines where the English
+    # had 204 sentences. With this on it comes back at 206.
+    #
+    # On by default because an unreadable transcript is the thing `.txt` exists
+    # to avoid. It costs a second pass over the whole file - measured at 221s
+    # against 12s for the segment pass, so a 64-second run becomes about 285 -
+    # and it changes nothing about the `.srt`, whose timings need segments.
+    translate_sentences: bool = True
 
     def __post_init__(self) -> None:
         self.model_size = MODEL_ALIASES.get(self.model_size, self.model_size)
@@ -149,6 +261,21 @@ class TranscriptionOptions:
             raise ValueError(
                 f"unknown timestamp granularity: {self.alignment_granularity!r} "
                 f"(expected one of: {', '.join(GRANULARITIES)})"
+            )
+        if self.translation_model not in TRANSLATION_MODELS:
+            raise ValueError(
+                f"unknown translation model: {self.translation_model!r} "
+                f"(expected one of: {', '.join(TRANSLATION_MODEL_SIZES)})"
+            )
+        if isinstance(self.target_language, str):
+            self.target_language = self.target_language.strip() or None
+        if self.translate and not self.target_language:
+            # Rejected up front rather than per file: the alternative is a whole
+            # batch failing one file at a time, which is the shape of the
+            # language check above and exists for the same reason.
+            raise ValueError(
+                "a target language is required to translate - pick one from the "
+                "Translate into menu"
             )
         if not self.formats:
             raise ValueError("at least one output format is required")
@@ -190,15 +317,34 @@ def is_media_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
 
 
-def scan_directory(directory: Path, recursive: bool = True) -> list[Path]:
-    """Return media files in `directory`, sorted, ignoring our own scratch dirs."""
+def is_text_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS
+
+
+SOURCE_KINDS = ("media", "text")
+
+
+def scan_directory(
+    directory: Path, recursive: bool = True, kind: str = "media"
+) -> list[Path]:
+    """Return source files in `directory`, sorted, ignoring our own scratch dirs.
+
+    `kind="text"` looks for `.txt` to be translated on its own, with no audio.
+    It is a separate scan rather than an extra extension in the media list
+    because the same `.txt` means two different things depending on why it was
+    picked up: found beside an audio file it is reference text to be
+    timestamped, and scanning for both at once would make that ambiguous.
+    """
+    if kind not in SOURCE_KINDS:
+        raise ValueError(f"unknown source kind: {kind!r}")
     directory = Path(directory).expanduser()
     if not directory.is_dir():
         raise NotADirectoryError(f"not a directory: {directory}")
     walker = directory.rglob("*") if recursive else directory.glob("*")
+    matches = is_text_file if kind == "text" else is_media_file
     found = [
         p
         for p in walker
-        if is_media_file(p) and UPLOAD_DIRNAME not in p.parts
+        if matches(p) and UPLOAD_DIRNAME not in p.parts
     ]
     return sorted(found, key=lambda p: str(p).lower())

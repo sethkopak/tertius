@@ -14,16 +14,27 @@ if str(SRC) not in sys.path:
 from tertius.app import create_app  # noqa: E402 - needs the path set above
 from tertius.jobs import JobManager  # noqa: E402
 
-from .fakes import FakeTranscriber, fake_transcribe_file  # noqa: E402
+from .fakes import (  # noqa: E402
+    FakeTranscriber,
+    FakeTranslator,
+    fake_transcribe_file,
+)
 
 
 class ApiHarness:
     def __init__(self, tmp_path: Path):
         self.output_dir = tmp_path / "out"
         self.tertius: FakeTranscriber | None = None
+        self.translator: FakeTranslator | None = None
+        # Set before starting a job; the translator is not built until then.
+        self.translator_fails = False
+        self.translator_load_error: Exception | None = None
+        self.translator_prepare_error: Exception | None = None
         self.gates: dict[str, threading.Event] = {}
         self.manager = JobManager(
-            transcriber_factory=self._factory, transcribe_fn=fake_transcribe_file
+            transcriber_factory=self._factory,
+            transcribe_fn=fake_transcribe_file,
+            translator_factory=self._translator_factory,
         )
         self.app = create_app(self.output_dir, manager=self.manager)
         self.app.config["TESTING"] = True
@@ -33,6 +44,13 @@ class ApiHarness:
         self.tertius = FakeTranscriber(options)
         self.tertius.block_paths.update(self.gates)
         return self.tertius
+
+    def _translator_factory(self, model_key, device="auto", on_download_progress=None):
+        self.translator = FakeTranslator(model_key, device, on_download_progress)
+        self.translator.fail_always = self.translator_fails
+        self.translator.load_error = self.translator_load_error
+        self.translator.prepare_error = self.translator_prepare_error
+        return self.translator
 
     def block(self, path) -> threading.Event:
         gate = threading.Event()

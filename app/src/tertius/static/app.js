@@ -170,8 +170,88 @@ function collectOptions() {
     formats: [...formats],
     use_reference_text: $('opt-use-text').checked,
     alignment_granularity: $('opt-granularity').value,
+    translate: $('opt-translate').checked,
+    translation_model: $('opt-translation-model').value,
+    target_language: $('opt-target-language').value || null,
+    translate_sentences: $('opt-translate-sentences').checked,
   };
 }
+
+// The target-language menu is built from the model's own vocabulary, for the
+// same reason the Whisper one is: a list kept here by hand goes stale, and
+// offering a code the model rejects fails the job rather than the click. Until
+// the model has been converted there is no vocabulary to read, so the menu says
+// what the first run will cost instead of inventing a list.
+let translationDisplay = null;
+try { translationDisplay = new Intl.DisplayNames(['en'], { type: 'language' }); } catch (_) { /* older browser */ }
+
+async function refreshTargetLanguages() {
+  const model = $('opt-translation-model').value;
+  const select = $('opt-target-language');
+  const note = $('translation-note');
+  const wanted = select.value;
+  let info;
+  try {
+    const res = await fetch(`/api/translation/languages?model=${encodeURIComponent(model)}`);
+    info = await res.json();
+  } catch (_) {
+    note.textContent = 'Could not ask the server about this model.';
+    $('translation-note-row').hidden = false;
+    return;
+  }
+
+  select.length = 1;
+  (info.languages || []).forEach((code) => {
+    let name = code;
+    try { name = translationDisplay ? translationDisplay.of(code) : code; } catch (_) { /* not a known tag */ }
+    const option = document.createElement('option');
+    option.value = code;
+    option.textContent = name === code ? code : `${name} · ${code}`;
+    select.appendChild(option);
+  });
+  [...select.options].slice(1)
+    .sort((a, b) => a.textContent.localeCompare(b.textContent))
+    .forEach((option) => select.appendChild(option));
+  if (wanted && [...select.options].some((o) => o.value === wanted)) select.value = wanted;
+
+  const gb = (info.download_bytes / 1e9).toFixed(1);
+  note.textContent = info.ready
+    ? `${info.languages.length} languages available. ${info.license}.`
+    : `No languages yet — this model has to be downloaded (about ${gb} GB) and `
+      + `converted before it can say what it translates into. The first time, `
+      + `that also installs the translation libraries (about 150 MB). ${info.license}.`;
+  $('translation-note-row').hidden = false;
+  // The language menu is filled from the converted model's vocabulary, so
+  // until the model exists there is nothing to choose. Preparing it is its own
+  // step rather than something Begin does silently: this used to be a deadlock
+  // — no language could be picked, and a job could not start without one.
+  $('translation-prepare-row').hidden = info.ready;
+  $('opt-target-language').disabled = !info.ready;
+  $('translation-source-row').hidden = false;
+  $('translation-sentences-row').hidden = false;
+}
+
+$('btn-prepare-translation').onclick = async () => {
+  const button = $('btn-prepare-translation');
+  button.disabled = true;
+  try {
+    await jsonPost('/api/translation/prepare', {
+      model: $('opt-translation-model').value,
+    });
+  } catch (err) {
+    button.disabled = false;
+    return;
+  }
+  // The status poll drives the progress band from here; when it goes idle the
+  // model is on disk and the menu can be filled in.
+  const waitForIt = setInterval(async () => {
+    const status = await fetch('/api/status').then((r) => r.json());
+    if (status.running) return;
+    clearInterval(waitForIt);
+    button.disabled = false;
+    refreshTargetLanguages();
+  }, 1000);
+};
 
 /** Take the settings the server last ran with, once, at startup. */
 function restoreSettings(status) {
@@ -188,6 +268,18 @@ function restoreSettings(status) {
     paintFormats();
   }
   if (options.alignment_granularity) $('opt-granularity').value = options.alignment_granularity;
+  if (options.translation_model) $('opt-translation-model').value = options.translation_model;
+  if (typeof options.translate_sentences === 'boolean') {
+    $('opt-translate-sentences').checked = options.translate_sentences;
+  }
+  if (options.translate) {
+    $('opt-translate').checked = true;
+    $('translation-model-row').hidden = false;
+    $('translation-target-row').hidden = false;
+    refreshTargetLanguages().then(() => {
+      if (options.target_language) $('opt-target-language').value = options.target_language;
+    });
+  }
   // Off unless the queue in front of you actually uses it. The saved option
   // alone is not enough: `use_reference_text` sticks in the state file from
   // whenever it was last run, so honouring it meant opening a folder full of
@@ -220,16 +312,23 @@ async function scanAndQueue(directory) {
   localStorage.setItem('tertius-source', directory);
   note('add-note', 'Scanning…');
   try {
+    const textSource = $('opt-text-source').checked;
     const found = await jsonPost('/api/scan', {
       directory,
       recursive: $('scan-recursive').checked,
+      kind: textSource ? 'text' : 'media',
     });
-    if (!found.count) return note('add-note', `No audio or video files in ${found.directory}.`);
+    if (!found.count) {
+      return note('add-note', textSource
+        ? `No .txt files in ${found.directory}.`
+        : `No audio or video files in ${found.directory}.`);
+    }
     // Pass the scanned folder so the output directory can mirror its structure.
     const queued = await jsonPost('/api/queue', {
       files: found.files,
       base_dir: found.directory,
-      match_reference_text: $('opt-use-text').checked,
+      // A .txt queued as a source is translated, not matched against audio.
+      match_reference_text: $('opt-use-text').checked && !textSource,
     });
     let message = `Found ${plural(found.count, 'file', 'files')}; queued ${queued.added} new.`;
     if ($('opt-use-text').checked) {
@@ -340,6 +439,24 @@ const applyReferenceMode = (enabled) =>
     enabled,
     reference_dir: $('opt-textdir').value.trim(),
   });
+
+$('opt-translate').onchange = () => {
+  const enabled = $('opt-translate').checked;
+  $('translation-model-row').hidden = !enabled;
+  $('translation-target-row').hidden = !enabled;
+  $('translation-note-row').hidden = true;
+  if (!enabled) {
+    // Text sources are only translatable, so they cannot outlive the box.
+    $('opt-text-source').checked = false;
+    $('translation-source-row').hidden = true;
+    $('translation-sentences-row').hidden = true;
+  }
+  if (enabled) refreshTargetLanguages();
+};
+
+$('opt-translation-model').onchange = () => {
+  if ($('opt-translate').checked) refreshTargetLanguages();
+};
 
 $('opt-use-text').onchange = async () => {
   const enabled = $('opt-use-text').checked;
@@ -560,6 +677,35 @@ function bandModel(status) {
   const processed = done + failed + (s.skipped || 0);
   const audio = audioTotal(files);
 
+  // Converting a translation model prints nothing for minutes. Without a
+  // band of its own it is indistinguishable from a hang, which is the same
+  // reason the model download got one.
+  if (status.phase === 'installing_translation_deps') {
+    return {
+      tone: 'running',
+      headline: 'Installing the translation libraries',
+      counter: status.notice || 'about 150 MB, once per machine',
+      right: 'one-time',
+      progress: 0,
+      stats: [],
+    };
+  }
+
+  if (status.phase === 'preparing_translation') {
+    const d = status.download || {};
+    const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
+    return {
+      tone: 'running',
+      headline: 'Preparing the translator',
+      counter: pct === null
+        ? `${d.model || ''} — converting, this takes a few minutes`
+        : `${d.model || ''} · ${pct}% of about ${formatBytes(d.expected_bytes)}`,
+      right: 'one-time, for this translation model',
+      progress: pct === null ? 0 : pct / 100,
+      stats: [],
+    };
+  }
+
   if (status.phase === 'downloading_model' || status.phase === 'loading_model') {
     const d = status.download || {};
     const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
@@ -587,7 +733,9 @@ function bandModel(status) {
     if (rate) bits.push(`${rate.toFixed(1)}× realtime`);
     return {
       tone: 'running',
-      headline: status.cancel_requested ? 'Finishing this file' : 'Transcribing',
+      headline: status.cancel_requested
+        ? 'Finishing this file'
+        : status.phase === 'translating' ? 'Translating' : 'Transcribing',
       counter: `${processed + 1} of ${total}`,
       right: bits.join(' · '),
       stats: [
@@ -853,7 +1001,11 @@ function stateCell(file, status) {
     const pct = file.path === active.path && active.progress != null
       ? ` ${Math.round(active.progress * 100)}%`
       : '';
-    return `<span class="state-running">Transcribing${pct}</span>`;
+    // Which of the two it is doing. This said "Transcribing" throughout, so a
+    // file that was really being translated sat at "Transcribing 100%" for
+    // however many minutes the translation took.
+    const what = status.phase === 'translating' ? 'Translating' : 'Transcribing';
+    return `<span class="state-running">${what}${pct}</span>`;
   }
   if (file.status === 'done') {
     const spent = clock(elapsedOf(file));
@@ -1244,6 +1396,38 @@ async function refreshModelAdvice() {
     $('model-warning').textContent = '';
   }
 }
+
+function renderTranslationTable(data) {
+  $('translation-table').querySelector('tbody').innerHTML = data.models.map((m) => `<tr>
+      <td class="name">${esc(m.model)}</td>
+      <td>${formatBytes(m.download_bytes)}</td>
+      <td>${m.ready ? formatBytes(m.disk_bytes) : 'not yet'}</td>
+      <td>${esc(String(m.languages))}</td>
+      <td>${esc(m.license)}</td>
+      <td>${esc(m.speed || '')}</td>
+      <td>${esc(m.quality || '')}</td>
+    </tr>`).join('');
+}
+
+async function refreshTranslationTable() {
+  try {
+    renderTranslationTable(await api('/api/translation/models'));
+  } catch (err) {
+    $('translation-table').querySelector('tbody').innerHTML =
+      '<tr><td colspan="7">Could not read the translation models.</td></tr>';
+  }
+}
+
+$('btn-translation-info').onclick = async () => {
+  const panel = $('panel-translation-info');
+  panel.hidden = !panel.hidden;
+  $('btn-translation-info').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden) await refreshTranslationTable();
+};
+$('btn-translation-info-close').onclick = () => {
+  $('panel-translation-info').hidden = true;
+  $('btn-translation-info').setAttribute('aria-expanded', 'false');
+};
 
 $('btn-model-info').onclick = async () => {
   const panel = $('panel-model-info');

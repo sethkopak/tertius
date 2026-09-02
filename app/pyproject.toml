@@ -30,6 +30,16 @@ gpu = [
     "nvidia-cublas-cu12; platform_system != 'Darwin'",
     "nvidia-cudnn-cu12; platform_system != 'Darwin'",
 ]
+# Translation. `transformers` and `sentencepiece` tokenize at run time and are
+# small; `torch` is neither, and is needed only to *convert* a model the first
+# time one is used. They are one extra rather than two because a machine that
+# can translate is a machine that had to convert first - splitting them would
+# only offer an install that downloads a model and then cannot use it.
+translate = [
+    "transformers>=4.40",
+    "sentencepiece>=0.2",
+    "torch>=2.2",
+]
 
 [project.scripts]
 tertius = "tertius.__main__:main"

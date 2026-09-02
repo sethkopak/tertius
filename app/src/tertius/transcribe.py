@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from .alignment import split_sentences
-from .config import JSON_SHAPE_VERSION, TRANSCRIPTION_SHAPE, TranscriptionOptions
+from .config import (
+    JSON_SHAPE_VERSION,
+    TRANSCRIPTION_SHAPE,
+    TRANSLATION_SHAPE,
+    TranscriptionOptions,
+)
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +59,10 @@ class TranscriptionResult:
     duration: float | None = None
     words: list[TimedWord] = field(default_factory=list)
     alignment: dict | None = None  # set when supplied text was timestamped
+    # Set when this result *is* a translation: which model produced it, out of
+    # what language, into what. Written into the `.json` so a translated file
+    # can never be mistaken for a transcript of what was actually said.
+    translation: dict | None = None
 
 
 def format_timestamp(seconds: float, separator: str = ",") -> str:
@@ -116,11 +125,13 @@ def result_to_json(result: TranscriptionResult, source: Path) -> str:
     `version` and `kind` come first so a reader knows what it has before it
     reads any of it. `kind` matters because timestamped supplied text writes a
     genuinely different shape - chunks, not segments - and the file extension
-    alone cannot tell the two apart.
+    alone cannot tell the two apart. A translation is a third kind: the same
+    segment shape as a transcription, but the words are a machine's rendering
+    rather than what was said, and a reader must not quote it as speech.
     """
     payload = {
         "version": JSON_SHAPE_VERSION,
-        "kind": TRANSCRIPTION_SHAPE,
+        "kind": TRANSLATION_SHAPE if result.translation else TRANSCRIPTION_SHAPE,
         "source": source.name,
         "language": result.language,
         "duration": result.duration,
@@ -135,6 +146,10 @@ def result_to_json(result: TranscriptionResult, source: Path) -> str:
             if segment.text and segment.text.strip()
         ],
     }
+    if result.translation:
+        # Which model, and which way. Without it a translated `.json` cannot
+        # be told from a transcript of speech already in that language.
+        payload["translation"] = dict(result.translation)
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -147,7 +162,9 @@ RENDERERS = {
 }
 
 
-def safe_output_path(output_dir: Path, stem: str, fmt: str) -> Path:
+def safe_output_path(
+    output_dir: Path, stem: str, fmt: str, suffix: str = ""
+) -> Path:
     """Where a transcript goes, never on top of one of Tertius's own files.
 
     Adding `.json` as an output format made this reachable: a recording called
@@ -158,9 +175,9 @@ def safe_output_path(output_dir: Path, stem: str, fmt: str) -> Path:
     from .config import LOG_FILENAME, STATE_FILENAME
 
     reserved = {STATE_FILENAME.lower(), LOG_FILENAME.lower()}
-    target = output_dir / f"{stem}.{fmt}"
+    target = output_dir / f"{stem}{suffix}.{fmt}"
     if target.name.lower() in reserved:
-        target = output_dir / f"{stem}.transcript.{fmt}"
+        target = output_dir / f"{stem}{suffix}.transcript.{fmt}"
         log.warning(
             "a transcript would have overwritten Tertius's own %s; writing %s",
             f"{stem}.{fmt}",
@@ -169,27 +186,43 @@ def safe_output_path(output_dir: Path, stem: str, fmt: str) -> Path:
     return target
 
 
+def write_atomically(target: Path, body: str) -> str:
+    """Write via a temp name then replace.
+
+    An interrupted write must never leave a truncated transcript that a later
+    run would mistake for finished work. Shared so that everything writing an
+    output does it the same way.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".partial")
+    tmp.write_text(body, encoding="utf-8")
+    tmp.replace(target)
+    return str(target)
+
+
 def write_outputs(
     source: Path,
     result: TranscriptionResult,
     output_dir: Path,
     formats: Iterable[str],
+    suffix: str = "",
 ) -> list[str]:
     """Write one transcript per format, named after the source file.
 
     Writes to a temp name then replaces, so an interrupted write never leaves a
     truncated transcript that a later run would mistake for finished work.
+
+    `suffix` goes between the stem and the extension, which is how a
+    translation lands beside its transcript as `talk.es.txt` rather than on
+    top of it.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for fmt in formats:
         render = RENDERERS[fmt]
-        target = safe_output_path(output_dir, source.stem, fmt)
-        tmp = target.with_name(target.name + ".partial")
-        tmp.write_text(render(result, source), encoding="utf-8")
-        tmp.replace(target)
-        written.append(str(target))
+        target = safe_output_path(output_dir, source.stem, fmt, suffix)
+        written.append(write_atomically(target, render(result, source)))
     return written
 
 

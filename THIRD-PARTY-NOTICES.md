@@ -143,5 +143,29 @@ the ones verified in use; each project ships its own licence text.
 | ctranslate2 | 4.8.1 | MIT |
 | av | 18.0.0 | BSD-3-Clause |
 
-Whisper models are downloaded from Hugging Face at first use and are not part
-of this repository. Each model carries its own terms from its publisher.
+### Translation (the `translate` extra, optional)
+
+Installed only when translation is used, and not redistributed here either.
+
+| Package | Licence |
+| --- | --- |
+| transformers | Apache-2.0 |
+| sentencepiece | Apache-2.0 |
+| torch | BSD-3-Clause |
+
+## Models
+
+No model is part of this repository. Every one is downloaded from Hugging Face
+at first use and carries its own terms from its publisher.
+
+| Model | Publisher | Licence |
+| --- | --- | --- |
+| Whisper (all sizes) | OpenAI | MIT |
+| m2m100_418M, m2m100_1.2B | Meta | MIT |
+| madlad400-3b-mt | Google | Apache-2.0 |
+
+Every translation model Tertius offers is permissively licensed and may be used
+commercially. This is deliberate. NLLB-200 is a better model than any of them at
+its size and is **not** offered, because it is CC-BY-NC-4.0: shipping it as a
+default would have handed every user a feature they could not use commercially,
+under a restriction its publisher sets and Tertius cannot lift.

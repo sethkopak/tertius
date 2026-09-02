@@ -146,6 +146,68 @@
           </div>
         </div>
 
+        <span>Translate</span>
+        <label class="check"
+               title="Also write the transcript in another language. The original-language files are always written too — the translation lands beside them as talk.es.txt.">
+          <input type="checkbox" id="opt-translate" class="tick">
+          Translate the transcript
+        </label>
+
+        <div class="row-pair" id="translation-model-row" hidden>
+          <label for="opt-translation-model">Translator</label>
+          <div class="with-info">
+            <div class="select">
+              <select id="opt-translation-model"
+                      title="Bigger models translate better and take longer to download and run.">
+                {% for m in translation_models %}<option value="{{ m }}"{% if m == default_translation_model %} selected{% endif %}>{{ m }} — {{ translation_catalog[m]['languages'] }} languages, {{ translation_catalog[m]['license'] }}</option>{% endfor %}
+              </select>
+              <span class="chev" aria-hidden="true">⌄</span>
+            </div>
+            <button type="button" id="btn-translation-info" class="info" aria-expanded="false"
+                    title="Compare the translation models">i</button>
+          </div>
+        </div>
+
+        <div class="row-pair" id="translation-target-row" hidden>
+          <label for="opt-target-language">Into</label>
+          <div class="select">
+            <select id="opt-target-language"
+                    title="The language to translate into. Read from the model itself, so it can never offer one the model would reject.">
+              <option value="">choose a language</option>
+            </select>
+            <span class="chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+
+        <div class="row-pair" id="translation-sentences-row" hidden>
+          <span></span>
+          <label class="check"
+                 title="Whisper cuts segments for timing, not for meaning — most of them are sentence fragments. Translating whole sentences instead gives a .txt that reads properly, at roughly four times the translation time. The .srt is unaffected either way.">
+            <input type="checkbox" id="opt-translate-sentences" class="tick" checked>
+            Translate the .txt as whole sentences (slower)
+          </label>
+        </div>
+
+        <div class="row-pair" id="translation-source-row" hidden>
+          <span></span>
+          <label class="check"
+                 title="Scan for .txt files and translate those instead of audio. Whisper is never loaded — the text goes straight to the translator.">
+            <input type="checkbox" id="opt-text-source" class="tick">
+            Translate text files, not audio
+          </label>
+        </div>
+
+        <div class="row-pair" id="translation-prepare-row" hidden>
+          <span></span>
+          <button type="button" id="btn-prepare-translation" class="btn"
+                  title="Install the translation libraries if they are missing, then download this model and convert it. Needed once per model, and until it is done there are no languages to choose from.">Download and prepare</button>
+        </div>
+
+        <div class="row-pair" id="translation-note-row" hidden>
+          <span></span>
+          <p class="note" id="translation-note"></p>
+        </div>
+
         <div class="row-pair" id="textdir-row" hidden>
           <label for="opt-textdir">Text folder</label>
           <div class="path-row">
@@ -259,6 +321,35 @@
         </div>
         <p class="panel-body dim">Memory estimates assume the weights plus about 1 GB of
           working room. Speed is relative, not measured on your hardware.</p>
+      </section>
+
+      <section class="panel" id="panel-translation-info" hidden>
+        <div class="panel-head">
+          <strong>Translation models</strong>
+          <button type="button" id="btn-translation-info-close" class="info" title="Hide this table">✕</button>
+        </div>
+        <div class="table-scroll">
+          <table id="translation-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th title="Fetched from the publisher, then converted here.">Download</th>
+                <th title="What it takes once converted to int8 — a fraction of the download.">On disk</th>
+                <th>Languages</th>
+                <th>Licence</th>
+                <th>Speed</th>
+                <th>Quality</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="panel-body dim">Every one of these may be used commercially. NLLB-200 is
+          better than any of them at its size and is deliberately absent: it is
+          CC-BY-NC-4.0, which would forbid commercial use to everyone downstream.</p>
+        <p class="panel-body dim">No verdict for this machine, unlike the transcription
+          table &mdash; translation has only been run on the CPU here, so anything said about
+          fitting on a GPU would be a guess.</p>
       </section>
 
       <section class="panel danger" id="panel-clear-queue" hidden>

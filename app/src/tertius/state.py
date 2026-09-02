@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from .config import STATE_FILENAME, UPLOAD_DIRNAME
+from .config import STATE_FILENAME, TEXT_EXTENSIONS, UPLOAD_DIRNAME
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +25,14 @@ MODE_TRANSCRIBE = "transcribe"  # normal: Whisper writes the transcript
 MODE_ALIGN = "align"  # timestamp the supplied text instead
 MODE_SKIP = "skip"  # leave it alone
 MODE_UNDECIDED = "undecided"  # no text found; waiting on the user
-MODES = (MODE_TRANSCRIBE, MODE_ALIGN, MODE_SKIP, MODE_UNDECIDED)
+MODE_TRANSLATE_TEXT = "translate_text"  # a .txt source: translate it, no audio
+MODES = (
+    MODE_TRANSCRIBE,
+    MODE_ALIGN,
+    MODE_SKIP,
+    MODE_UNDECIDED,
+    MODE_TRANSLATE_TEXT,
+)
 
 PENDING = "pending"
 IN_PROGRESS = "in_progress"
@@ -233,10 +240,18 @@ class StateStore:
                 key = _key(raw)
                 if key in self._data["files"]:
                     continue
+                is_text_source = Path(key).suffix.lower() in TEXT_EXTENSIONS
                 reference = (
-                    self.find_reference_text(key) if match_reference_text else None
+                    self.find_reference_text(key)
+                    if match_reference_text and not is_text_source
+                    else None
                 )
-                if not match_reference_text:
+                if is_text_source:
+                    # Queued as a source in its own right. There is no audio to
+                    # transcribe and nothing to align it against; the only thing
+                    # to do with it is translate it.
+                    mode = MODE_TRANSLATE_TEXT
+                elif not match_reference_text:
                     mode = MODE_TRANSCRIBE
                 elif reference:
                     mode = MODE_ALIGN

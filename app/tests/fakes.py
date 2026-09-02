@@ -58,6 +58,64 @@ def fake_transcribe_file(tertius, source, output_dir):
     return outputs, result
 
 
+class FakeTranslator:
+    """Duck-compatible with Translator, minus the 2 GB model.
+
+    Translating is faked as an uppercase marker so a test can tell a translated
+    file from a transcript by reading it, rather than by trusting the filename.
+    """
+
+    def __init__(self, model_key="m2m100-418M", device="auto", on_download_progress=None):
+        self.model_key = model_key
+        self.device = device
+        self.on_download_progress = on_download_progress
+        self.loaded = False
+        self.calls: list[tuple[str, str]] = []
+        # Every batch of texts the model was handed, so a test can prove it was
+        # given whole sentences rather than timing-cut fragments.
+        self.batches: list[list[str]] = []
+        # Every (done, total) the translator reported.
+        self.progress: list[tuple[int, int]] = []
+        self.load_error: Exception | None = None
+        self.prepare_error: Exception | None = None
+        self.prepared = False
+        self.fail_paths: set[str] = set()
+        self.fail_always = False
+
+    @property
+    def family(self) -> str:
+        return "t5" if self.model_key.startswith("madlad") else "m2m100"
+
+    def prepare(self):
+        if self.prepare_error:
+            raise self.prepare_error
+        self.prepared = True
+        return None
+
+    def load(self) -> None:
+        if self.load_error:
+            raise self.load_error
+        self.loaded = True
+
+    def translate(self, texts, target_language, source_language=None, on_progress=None):
+        if self.fail_always:
+            raise RuntimeError("simulated translation failure")
+        self.calls.append((target_language, source_language))
+        self.batches.append(list(texts))
+        if on_progress is not None:
+            # The real one reports per batch; one call at the end is enough to
+            # prove the wiring without inventing a batching schedule here.
+            self.progress.append((len(texts), len(texts)))
+            on_progress(len(texts), len(texts))
+        return [
+            f"[{target_language}] {t.strip().upper()}" if t and t.strip() else t
+            for t in texts
+        ]
+
+    def unload(self) -> None:
+        self.loaded = False
+
+
 def wait_until(predicate, timeout: float = 10.0, description: str = "condition"):
     """Poll until `predicate()` is truthy. Returns its value.
 

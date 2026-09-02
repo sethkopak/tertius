@@ -23,6 +23,8 @@ from .config import (
     GRANULARITIES,
     MODEL_SIZES,
     OUTPUT_FORMATS,
+    TRANSLATION_MODEL_SIZES,
+    TRANSLATION_MODELS,
     UPLOAD_DIRNAME,
     TranscriptionOptions,
     default_output_dir,
@@ -95,6 +97,9 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             default_formats=TranscriptionOptions().formats,
             granularities=GRANULARITIES,
             languages=language_choices(),
+            translation_models=TRANSLATION_MODEL_SIZES,
+            translation_catalog=TRANSLATION_MODELS,
+            default_translation_model=TranscriptionOptions().translation_model,
             app_version=__version__,
             default_output_dir=str(manager.output_dir or out),
         )
@@ -112,8 +117,13 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if not directory:
             return _error("directory is required")
         recursive = bool(body.get("recursive", True))
+        # `kind="text"` queues `.txt` files as sources to be translated on their
+        # own, with no audio. See scan_directory for why it is a separate scan.
+        kind = (body.get("kind") or "media").strip().lower()
         try:
-            files = scan_directory(Path(directory), recursive=recursive)
+            files = scan_directory(Path(directory), recursive=recursive, kind=kind)
+        except ValueError as exc:
+            return _error(str(exc), 400)
         except NotADirectoryError as exc:
             return _error(str(exc), 404)
         except OSError as exc:
@@ -121,6 +131,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         return jsonify(
             {
                 "directory": str(Path(directory).expanduser().resolve()),
+                "kind": kind,
                 "count": len(files),
                 "files": [str(f) for f in files],
             }
@@ -146,6 +157,80 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
                 "compute_warning": check_compute_type(compute_type, device, info),
             }
         )
+
+    @app.get("/api/translation/models")
+    def api_translation_models():
+        """The translation models, for the comparison table behind the i button.
+
+        No "on this machine" verdict, unlike the Whisper table. Translation has
+        only ever been run on the CPU here, so any judgement about whether one
+        of these fits alongside Whisper on a GPU would be invented. What is
+        reported is what is known: the download, whether it is prepared, and
+        how big it turned out once converted.
+        """
+        from .translate import converted_size, is_converted
+
+        models = []
+        for name, entry in TRANSLATION_MODELS.items():
+            try:
+                ready = is_converted(name)
+                disk = converted_size(name) if ready else None
+            except Exception:
+                ready, disk = False, None
+            models.append(
+                {
+                    "model": name,
+                    "repo": entry["repo"],
+                    "license": entry["license"],
+                    "languages": entry["languages"],
+                    "download_bytes": entry["download_bytes"],
+                    "speed": entry["speed"],
+                    "quality": entry["quality"],
+                    "ready": ready,
+                    "disk_bytes": disk,
+                }
+            )
+        return jsonify({"models": models})
+
+    @app.get("/api/translation/languages")
+    def api_translation_languages():
+        """What the chosen translation model can translate into, and its cost.
+
+        The language list is empty until the model has been converted, because
+        the codes are read out of the converted vocabulary rather than a table
+        kept here by hand. `ready` is what the UI needs to say "this will
+        download 1.9 GB first" instead of appearing to hang on Begin.
+        """
+        from .translate import is_converted, supported_target_languages
+
+        name = request.args.get("model") or TranscriptionOptions().translation_model
+        if name not in TRANSLATION_MODELS:
+            return _error(f"unknown translation model: {name}", 404)
+        entry = TRANSLATION_MODELS[name]
+        try:
+            ready = is_converted(name)
+        except Exception:
+            ready = False
+        return jsonify(
+            {
+                "model": name,
+                "ready": ready,
+                "languages": list(supported_target_languages(name)) if ready else [],
+                "download_bytes": entry["download_bytes"],
+                "license": entry["license"],
+                "language_count": entry["languages"],
+            }
+        )
+
+    @app.post("/api/translation/prepare")
+    def api_translation_prepare():
+        """Make a translation model ready, so its languages can be listed."""
+        body = request.get_json(silent=True) or {}
+        name = body.get("model") or TranscriptionOptions().translation_model
+        try:
+            return jsonify(manager.prepare_translation(name))
+        except JobError as exc:
+            return _error(str(exc), 409)
 
     @app.post("/api/browse-folder")
     def api_browse_folder():

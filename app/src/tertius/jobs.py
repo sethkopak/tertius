@@ -22,10 +22,12 @@ from .state import (
     MODE_ALIGN,
     MODE_SKIP,
     MODE_TRANSCRIBE,
+    MODE_TRANSLATE_TEXT,
     SKIPPED,
     StateStore,
 )
 from .transcribe import WhisperTranscriber, align_file, transcribe_file
+from .translate import Translator, translate_outputs, translate_text_file
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +42,13 @@ ERROR = "error"
 DOWNLOADING_MODEL = "downloading_model"
 LOADING_MODEL = "loading_model"
 TRANSCRIBING = "transcribing"
+# Converting a translation model is a one-off that takes minutes and prints
+# nothing; without its own phase it is indistinguishable from a hang.
+# Installing torch and friends is minutes of silence of its own, before
+# any model download starts.
+INSTALLING_TRANSLATION_DEPS = "installing_translation_deps"
+PREPARING_TRANSLATION = "preparing_translation"
+TRANSLATING = "translating"
 
 # Stop the batch after this many files fail in a row with the identical error:
 # that is the environment being broken, not a run of bad files.
@@ -76,10 +85,18 @@ class JobManager:
         | None = None,
         transcribe_fn: Callable = transcribe_file,
         align_fn: Callable = align_file,
+        translator_factory: Callable[..., Translator] | None = None,
+        translate_fn: Callable = translate_outputs,
+        translate_text_fn: Callable = translate_text_file,
     ):
         self._transcriber_factory = transcriber_factory or WhisperTranscriber
         self._transcribe_fn = transcribe_fn
         self._align_fn = align_fn
+        # Injectable for the same reason the transcriber is: the tests must be
+        # able to run a whole batch without a 2 GB download or a real model.
+        self._translator_factory = translator_factory or Translator
+        self._translate_fn = translate_fn
+        self._translate_text_fn = translate_text_fn
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -129,8 +146,30 @@ class JobManager:
         except Exception:
             return False
 
+    def _note_install_line(self, line: str) -> None:
+        """Show pip's last line, so a long install is visibly alive."""
+        with self._lock:
+            self._phase = INSTALLING_TRANSLATION_DEPS
+            self._notice = line[:200]
+
+    def _note_translation_progress(self, done: int, total: int) -> None:
+        """How far through translating this file we are.
+
+        Writes the same `active.progress` transcription uses, so the queue row
+        keeps moving instead of sitting at 100% for the minutes translation
+        takes. The excerpt is left alone: it is the last thing *transcribed*,
+        and half a translated sentence in its place would say less.
+        """
+        with self._lock:
+            if total:
+                self._active["progress"] = max(0.0, min(1.0, done / total))
+
     def _note_download_progress(self, downloaded: int, total: int) -> None:
         with self._lock:
+            # The first bytes of the model download end the install phase.
+            if self._phase == INSTALLING_TRANSLATION_DEPS:
+                self._phase = PREPARING_TRANSLATION
+                self._notice = None
             self._download["downloaded"] = downloaded
             self._download["total"] = total
 
@@ -191,6 +230,83 @@ class JobManager:
     @staticmethod
     def state_file_exists(output_dir: str | Path) -> bool:
         return (Path(output_dir).expanduser() / STATE_FILENAME).is_file()
+
+    def prepare_translation(self, model_key: str) -> dict:
+        """Download and convert a translation model, without running a job.
+
+        This exists because the target-language menu is read from the converted
+        model's vocabulary, and nothing used to convert a model except starting
+        a job - which could not be started without first picking a target
+        language. The menu could therefore never be filled. An explicit step
+        also puts the multi-gigabyte download in the open, where the user
+        chooses it, rather than hiding it inside Begin.
+
+        Returns immediately; the work happens on a worker thread and is
+        observed through `status()` like any other job.
+        """
+        from .config import TRANSLATION_MODELS
+
+        if model_key not in TRANSLATION_MODELS:
+            raise JobError(f"unknown translation model: {model_key}")
+
+        with self._lock:
+            if self.is_running():
+                raise JobError("a job is already running")
+            self._cancel.clear()
+            self._state = RUNNING
+            self._error = None
+            self._notice = None
+            self._current_file = None
+            self._run = self._empty_run()
+            self._active = self._empty_active()
+            self._phase = PREPARING_TRANSLATION
+            self._download = self._empty_download()
+            self._download["model"] = model_key
+            self._download["expected_bytes"] = TRANSLATION_MODELS[model_key][
+                "download_bytes"
+            ]
+            self._started_at = time.time()
+            self._finished_at = None
+            self._thread = threading.Thread(
+                target=self._prepare_translation,
+                args=(model_key,),
+                name="translation-prepare",
+                daemon=False,
+            )
+            self._thread.start()
+            return self.status(include_files=False)
+
+    def _prepare_translation(self, model_key: str) -> None:
+        try:
+            translator = self._translator_factory(
+                model_key,
+                device="cpu",
+                on_download_progress=self._note_download_progress,
+            )
+            # Convert only. Loading it onto a device here would take VRAM for a
+            # model nobody has asked to run yet.
+            prepare = getattr(translator, "prepare", None)
+            if callable(prepare):
+                if _accepts(prepare, "on_line"):
+                    prepare(on_line=self._note_install_line)
+                else:
+                    prepare()
+            else:  # pragma: no cover - the real Translator always has prepare
+                translator.load()
+        except Exception as exc:
+            log.exception("could not prepare the translation model")
+            with self._lock:
+                self._state = ERROR
+                self._error = f"could not prepare the translation model: {exc}"
+                self._finished_at = time.time()
+                self._phase = None
+            return
+
+        with self._lock:
+            self._state = COMPLETED
+            self._finished_at = time.time()
+            self._phase = None
+            self._notice = f"{model_key} is ready to translate with."
 
     # ---------------------------------------------------------- job lifecycle
 
@@ -338,6 +454,8 @@ class JobManager:
         # Test doubles stand in for these, and are not obliged to report progress
         # through a file; only offer the callback to something that asked for it.
         transcribe_watches = _accepts(self._transcribe_fn, "on_segment")
+        translate_takes_sentence_pass = _accepts(self._translate_fn, "sentence_pass")
+        translate_reports_progress = _accepts(self._translate_fn, "on_progress")
         align_watches = _accepts(self._align_fn, "on_segment")
         transcriber = (
             self._transcriber_factory(
@@ -347,7 +465,16 @@ class JobManager:
             else self._transcriber_factory(options)
         )
 
-        warmup = getattr(transcriber, "warmup", None)
+        # A queue of nothing but `.txt` sources has no audio to decode, so
+        # loading Whisper would download gigabytes to sit idle - and would fail
+        # the whole job on a machine with a broken GPU that was never going to
+        # be asked to do anything.
+        needs_whisper = any(
+            (store.get(path) or {}).get("mode")
+            not in (MODE_TRANSLATE_TEXT, MODE_SKIP)
+            for path in store.pending_files()
+        )
+        warmup = getattr(transcriber, "warmup", None) if needs_whisper else None
         if callable(warmup):
             # The first use of a model size downloads ~0.1-3 GB. Say so, with
             # progress, or it looks like a hang.
@@ -374,6 +501,38 @@ class JobManager:
                     self._phase = None
                 return
 
+        translator = None
+        if options.translate:
+            # Loaded before the first file, not on demand. The first use may
+            # download and convert several GB, and discovering that halfway
+            # through a queue - after files have already been written without a
+            # translation - is the failure this ordering exists to prevent.
+            with self._lock:
+                self._phase = PREPARING_TRANSLATION
+                self._download = self._empty_download()
+                self._download["model"] = options.translation_model
+                from .config import TRANSLATION_MODELS
+
+                entry = TRANSLATION_MODELS.get(options.translation_model) or {}
+                self._download["expected_bytes"] = entry.get("download_bytes")
+            try:
+                translator = self._translator_factory(
+                    options.translation_model,
+                    device=options.device,
+                    on_download_progress=self._note_download_progress,
+                )
+                load = getattr(translator, "load", None)
+                if callable(load):
+                    load()
+            except Exception as exc:
+                log.exception("translation model failed to load")
+                with self._lock:
+                    self._state = ERROR
+                    self._error = f"translation is not available: {exc}"
+                    self._finished_at = time.time()
+                    self._phase = None
+                return
+
         with self._lock:
             self._phase = TRANSCRIBING
             if getattr(transcriber, "gpu_fallback_reason", None):
@@ -385,6 +544,7 @@ class JobManager:
 
         last_error: str | None = None
         repeated = 0
+        translation_failures = 0
 
         try:
             while True:
@@ -420,7 +580,22 @@ class JobManager:
                 target_dir = Path(output_dir) / subdir if subdir else output_dir
                 mode = (entry or {}).get("mode") or MODE_TRANSCRIBE
                 try:
-                    if mode == MODE_ALIGN:
+                    if mode == MODE_TRANSLATE_TEXT:
+                        if translator is None:
+                            raise JobError(
+                                "this file is text to be translated, but "
+                                "translation is switched off - tick Translate "
+                                "and choose a language, or remove it from the "
+                                "queue"
+                            )
+                        outputs, result = self._translate_text_fn(
+                            path,
+                            target_dir,
+                            translator,
+                            options.target_language,
+                            options.formats,
+                        )
+                    elif mode == MODE_ALIGN:
                         outputs, result = self._align_fn(
                             transcriber,
                             path,
@@ -474,6 +649,84 @@ class JobManager:
                             self._active = self._empty_active()
                         return
                     continue
+
+                if translator is not None and mode != MODE_TRANSLATE_TEXT:
+                    # The transcript is already written and correct at this
+                    # point. A translation that fails must therefore not fail
+                    # the file: marking it failed would send a resume back to
+                    # redo a transcription that was fine, which on a 40-minute
+                    # recording is an hour thrown away for a tokenizer error.
+                    # It is reported, and a run of them still stops the batch.
+                    with self._lock:
+                        self._phase = TRANSLATING
+                        # Transcription left this at 100%; translating is a
+                        # second journey through the same file, not a
+                        # continuation of the first.
+                        self._active["progress"] = 0.0
+                    try:
+                        translated_outputs, _translated = self._translate_fn(
+                            result,
+                            path,
+                            target_dir,
+                            options.formats,
+                            translator,
+                            options.target_language,
+                            **(
+                                {"sentence_pass": options.translate_sentences}
+                                if translate_takes_sentence_pass
+                                else {}
+                            ),
+                            **(
+                                {"on_progress": self._note_translation_progress}
+                                if translate_reports_progress
+                                else {}
+                            ),
+                        )
+                        outputs = list(outputs) + list(translated_outputs)
+                        translation_failures = 0
+                    except Exception as exc:
+                        translation_failures += 1
+                        message = f"{type(exc).__name__}: {exc}"
+                        log.exception("could not translate %s", path)
+                        with self._lock:
+                            self._notice = (
+                                f"{Path(path).name} was transcribed, but could "
+                                f"not be translated: {message}"
+                            )
+                        if translation_failures >= REPEATED_FAILURE_LIMIT:
+                            log.error(
+                                "%d translations in a row failed - stopping",
+                                translation_failures,
+                            )
+                            store.mark_done(
+                                path,
+                                outputs=outputs,
+                                language=getattr(result, "language", None),
+                                duration=getattr(result, "duration", None),
+                                words=sum(
+                                    len((seg.text or "").split())
+                                    for seg in getattr(result, "segments", None) or ()
+                                ),
+                            )
+                            with self._lock:
+                                self._state = ERROR
+                                self._error = (
+                                    f"{translation_failures} files in a row were "
+                                    "transcribed but could not be translated, so "
+                                    "the batch was stopped. The transcripts "
+                                    "written so far are complete.\n\n"
+                                    + message
+                                )
+                                self._run["completed"] += 1
+                                self._run["processed"] += 1
+                                self._finished_at = time.time()
+                                self._current_file = None
+                                self._phase = None
+                                self._active = self._empty_active()
+                            return
+                    with self._lock:
+                        self._phase = TRANSCRIBING
+
                 segments = getattr(result, "segments", None) or ()
                 store.mark_done(
                     path,
@@ -503,9 +756,10 @@ class JobManager:
                 self._active = self._empty_active()
             return
         finally:
-            unload = getattr(transcriber, "unload", None)
-            if callable(unload):
-                unload()
+            for model in (transcriber, translator):
+                unload = getattr(model, "unload", None)
+                if callable(unload):
+                    unload()
 
         with self._lock:
             self._current_file = None
