@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**463 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**470 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -81,6 +81,117 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   Run for real on the GPU at **0.51x realtime** — slower than realtime, and
   about forty times dearer per minute than transcribing. **Nobody has listened
   to the output yet**, and voice cloning has never been run.
+
+## 2026-09-19 — out of memory, and the bug that found
+
+Reported as an error. It was two, and the second was the one actually ruining
+the output.
+
+### Three models do not fit on a 6 GB card
+
+`CUDA out of memory. Tried to allocate 204.00 MiB` - raised *after* the
+transcript and the translation had been written, which is the worst moment for
+it: all the expensive work done and the only thing missing was the thing the
+run was for. The file was marked done with `error: null`, because a failed
+reading deliberately does not fail a file whose transcript is already correct,
+so the reason survived only in a notice a restart would have erased. It was
+still in the live server when this was looked at.
+
+Measured rather than estimated, each loaded alone and read back from
+`torch.cuda.memory_allocated`:
+
+| model | VRAM |
+| --- | --- |
+| whisper large-v3-turbo | 2.23 GB |
+| m2m100-418M | 0.27 GB |
+| chatterbox-multilingual | **3.22 GB** |
+| **total** | **5.72 GB** |
+
+The card is 6.44 GB and had 5.36 GB free - a browser was holding the rest, and
+the two processes the error named turned out to be Brave, not Tertius. Short by
+0.36 GB. This is the line that sat in *Not verified* as "whether a voice model
+fits on a GPU beside Whisper is unknown". It does not.
+
+**Holding all three at once was never necessary: nothing transcribes while it
+reads aloud.** The earlier stages hand their VRAM back before the reading and
+reload themselves for the next file - `WhisperTranscriber.model` and
+`Translator.translate` were already lazy, so this needed no new machinery. Only
+when the work is on CUDA; on the CPU there is nothing to reclaim and a reload
+would cost real time for nothing.
+
+Proved on the same job that failed, with free VRAM logged at each phase:
+
+```
+[before]                GPU free 5.36 / 6.44 GB
+[preparing_translation] GPU free 3.13          <- whisper loaded
+[preparing_speech]      GPU free 2.86          <- translator loaded
+[transcribing]          GPU free 0.00          <- nothing left at all
+freed the GPU for the reading: WhisperTranscriber, Translator
+[speaking]              GPU free 2.05
+```
+
+### The splitter had never seen a sentence that was not English
+
+The run that then succeeded logged **1 chunk, 23.6s** for a 79-second source.
+It was truncating, and the cause was three years older than any of this:
+
+```python
+_SENTENCE_END = re.compile(r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])")
+```
+
+An ASCII terminator, whitespace after it, **and a following ASCII capital**.
+Chinese has none of the three: an ideographic full stop, usually no space, and
+no case at all. So the whole translation came back as one "sentence", became
+one 326-character chunk, and Chatterbox forced EOS at step 591 and produced
+garbled Mandarin. The same is true of Japanese, Korean, Greek, Arabic and
+Devanagari - and of any *transcript* in those languages, where a `.txt` would
+have been one enormous line. Invisible on the page; fatal read aloud.
+
+Three things were wrong, not one:
+
+1. **The terminators.** A second alternation with no following-capital
+   requirement, because these scripts have no case. The reported file went from
+   1 sentence to 10.
+2. **The budget was script-blind.** 300 Latin characters is about 60 words and
+   twenty seconds read aloud; 300 Han characters is nearer eighty. `spoken_length`
+   weights a dense character as four, reasoned from speaking rate - a Han
+   character is about a syllable, an English word about 1.3 syllables in six
+   characters.
+3. **The translator's own line breaks were being thrown away.** It writes one
+   sentence per line, and `chunks_from_prose` was joining that back into a blob
+   and re-splitting it. The lines are the sentence boundaries now, still packed
+   to the budget rather than spoken one at a time.
+
+Measured on the reported file: Chinese **1 chunk of 326 characters -> 4 of
+55-123**. English is byte-identical at `[216, 190, 414, 185]`; a first attempt
+at this regressed it to 8 chunks with a 0.7s pause between every sentence,
+which is why that number is now pinned by a test.
+
+### What it sounds like now
+
+Same job, both fixes, `0101.mp3` into Chinese: **4 chunks, 53.3s** of audio
+against the previous 23.6s. Transcribed back with Whisper it matches the
+translation rather than wandering off it:
+
+| | |
+| --- | --- |
+| translator wrote | 每日天堂曼娜。祝福我們的上帝,你們的人民,讓他的讚美的聲音被聽到 |
+| the audio says | 每日天堂麦娜,祝福我们的上帝,你们的人民,让他的在美的声音被听到 |
+
+Homophone slips are what `base` does to synthetic Chinese and are not evidence
+of much. That it is the *same text* is - before the fix it was unrelated.
+
+### Still not verified
+
+- **Nobody has listened to any of it**, in any language. Whisper hearing
+  Chinese back proves the words survived, not that a Mandarin speaker would
+  want to listen.
+- The weight of 4 for dense scripts is reasoned, not measured. So is the
+  300-character budget it is applied to.
+- The terminator list covers the scripts Tertius can currently speak into. It
+  is not a general sentence segmenter and does not pretend to be.
+- Only `chatterbox-multilingual` has ever been loaded, so only its VRAM figure
+  is real; turbo and nano are recorded as unknown rather than guessed.
 
 ## 2026-09-19 — three stages, not three modes
 
@@ -187,6 +298,9 @@ does not: it is where the *voice* model runs too.
 - **Nobody has listened to the Spanish.** Whisper transcribing it back as
   Spanish proves it is Spanish, not that it is good Spanish or that it sounds
   like the man in the recording rather than merely sharing his pitch.
+- That run also predates the sentence-splitting fix below, so its chunking was
+  the Latin-only kind. Spanish was unaffected - it has ASCII terminators - but
+  the figures in it are from the older code.
 - Whisper's `base` model was used to keep the loop short; the English
   transcript has errors of its own ("Man of for January 3"), which the
   translation then faithfully carried.

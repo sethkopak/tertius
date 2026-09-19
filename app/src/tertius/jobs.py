@@ -582,6 +582,50 @@ class JobManager:
                 f" (+{len(notes) - 1} more, in the .json)" if len(notes) > 1 else ""
             )
 
+    @staticmethod
+    def _free_gpu_for_speech(*models) -> None:
+        """Take the earlier stages off the GPU before the reading starts.
+
+        Measured on the 6 GB card this was built on:
+
+        | model                   | VRAM    |
+        | whisper large-v3-turbo  | 2.23 GB |
+        | m2m100-418M             | 0.27 GB |
+        | chatterbox-multilingual | 3.22 GB |
+
+        5.72 GB of models for a 6.44 GB card - of which a browser was already
+        holding a gigabyte. Reported as "CUDA out of memory. Tried to allocate
+        204.00 MiB" *after* the transcript and the translation had been written,
+        which is the worst moment for it: the expensive work was done and the
+        only thing missing was the thing the run was for.
+
+        Holding all three at once was never necessary. Nothing transcribes while
+        it reads aloud, and both Whisper and the translator reload themselves
+        when the next file needs them - `WhisperTranscriber.model` and
+        `Translator.translate` are both lazy. So this costs a model load per
+        file on a queue, and buys a feature that otherwise cannot run at all on
+        a small card.
+        """
+        freed = []
+        for model in models:
+            if model is None:
+                continue
+            if getattr(model, "active_device", None) != "cuda":
+                continue
+            unload = getattr(model, "unload", None)
+            if callable(unload):
+                unload()
+                freed.append(type(model).__name__)
+        if not freed:
+            return
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:  # pragma: no cover - torch may not be installed
+            log.debug("could not empty the CUDA cache", exc_info=True)
+        log.info("freed the GPU for the reading: %s", ", ".join(freed))
+
     def _read_aloud(self, path, target_dir, speaker, result, translated, options):
         """Speak a finished transcript. The third stage.
 
@@ -1026,6 +1070,10 @@ class JobManager:
                         self._phase = SPEAKING
                         self._active["progress"] = 0.0
                     try:
+                        # Three models do not fit on a small card. Nothing
+                        # transcribes while it reads aloud, so the earlier
+                        # stages give their VRAM back first.
+                        self._free_gpu_for_speech(transcriber, translator)
                         spoken = self._read_aloud(
                             path, target_dir, speaker, result, translated, options
                         )
@@ -1035,6 +1083,17 @@ class JobManager:
                         speech_failures += 1
                         message = f"{type(exc).__name__}: {exc}"
                         log.exception("could not read %s aloud", path)
+                        if "out of memory" in message.lower():
+                            # The raw message is four lines of allocator
+                            # statistics and does not say what to do about it.
+                            message = (
+                                "the GPU ran out of memory. The voice model "
+                                "needs about 3.2 GB to itself; close anything "
+                                "else using the GPU (a browser can hold a "
+                                "gigabyte), choose a smaller Whisper model, or "
+                                "set Device to cpu for a slower run that always "
+                                "fits.\n\n" + message
+                            )
                         with self._lock:
                             self._notice = (
                                 f"{Path(path).name} was transcribed, but could "

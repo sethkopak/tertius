@@ -271,6 +271,142 @@ def test_no_speaker_is_loaded_when_the_stage_is_off(api, tmp_path):
     assert api.speaker is None
 
 
+# --------------------------------------------------------- scripts without capitals
+
+
+ZH = '每日天堂曼娜。每日天堂曼娜。祝福我們的上帝，讓他的讚美被聽到。'
+
+
+def test_chinese_splits_into_sentences():
+    """The splitter wanted an ASCII terminator, a space, and a capital.
+
+    Chinese has none of the three: an ideographic full stop, usually no space,
+    and no case at all - so a whole translation came back as one "sentence".
+    Invisible in a `.txt`, fatal when something reads it aloud.
+    """
+    from tertius.alignment import split_sentences
+
+    assert len(split_sentences(ZH)) == 3
+
+
+def test_a_dense_script_costs_more_of_the_budget():
+    """300 Han characters is nothing like 300 Latin characters of speech."""
+    from tertius.speech import spoken_length
+
+    latin = "a" * 100
+    assert spoken_length(latin) == 100
+    # A hundred Han characters is roughly a hundred syllables.
+    assert spoken_length("每" * 100) == 400
+    # Mixed text is counted per character, not per string.
+    assert spoken_length("ab每") == 2 + 4
+
+
+def test_a_chinese_translation_is_not_one_giant_chunk():
+    """Measured: one 326-character chunk produced 23.6s of truncated audio.
+
+    Short Chinese still packs into one chunk, and should - the bug was never
+    "always split", it was that nothing *could* split.
+    """
+    from tertius.speech import chunks_from_prose, spoken_length
+
+    long_zh = ZH * 5  # about what a minute of devotional audio translates to
+    assert spoken_length(long_zh) > 300, "sample must exceed the budget"
+
+    chunks = chunks_from_prose(long_zh, "chatterbox-multilingual")
+    assert len(chunks) > 1
+    assert all(spoken_length(c.text) <= 300 for c in chunks)
+    # Nothing dropped on the way through.
+    assert "".join(c.text for c in chunks).count("。") == long_zh.count("。")
+
+
+def test_the_translator_s_own_line_breaks_are_the_sentences(tmp_path):
+    """It puts one sentence per line; re-splitting is a chance to get it wrong.
+
+    And the lines are still packed, not spoken one at a time - a chunk per
+    sentence would put a pause between every one and quadruple the calls.
+    """
+    from tertius.speech import chunks_from_prose
+
+    prose = chr(10).join(f"Sentence number {n} goes here." for n in range(12))
+    chunks = chunks_from_prose(prose, "chatterbox-multilingual")
+    assert 1 < len(chunks) < 12
+    # Nothing was lost in the packing.
+    joined = " ".join(c.text for c in chunks)
+    assert joined.count("Sentence number") == 12
+
+
+# ------------------------------------------------------------- fitting on a card
+
+
+def test_the_earlier_stages_give_back_the_gpu_before_speaking(api, tmp_path):
+    """Three models do not fit on a 6 GB card, and the reading is the biggest.
+
+    Measured: whisper large-v3-turbo 2.23 GB + m2m100-418M 0.27 GB +
+    chatterbox-multilingual 3.22 GB = 5.72 GB, on a 6.44 GB card with a browser
+    already holding a gigabyte. It failed with "CUDA out of memory" *after*
+    writing the transcript and the translation.
+    """
+    audio = _queue_audio(api, tmp_path)
+
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={"translate": True, "target_language": "es", "speak": True},
+    )
+    api.wait_done()
+
+    # Twice each: once to make room for the reading, once when the batch ends.
+    # They reload themselves when the next file needs them.
+    assert api.tertius is not None and api.tertius.unloads == 2
+    assert api.translator is not None and api.translator.unloads == 2
+
+
+def test_nothing_is_unloaded_when_the_work_is_on_the_cpu(api, tmp_path):
+    """A reload costs real time; there is nothing to reclaim on the CPU."""
+    audio = _queue_audio(api, tmp_path)
+    api.cpu_only = True
+
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={
+            "translate": True,
+            "target_language": "es",
+            "speak": True,
+            "device": "cpu",
+        },
+    )
+    api.wait_done()
+
+    # Once only - the batch's own cleanup. Nothing was reclaimed mid-run,
+    # because there is no VRAM to reclaim and a reload costs real time.
+    assert api.tertius is not None and api.tertius.unloads == 1
+
+
+def test_an_out_of_memory_failure_says_what_to_do_about_it(api, tmp_path):
+    """The raw message is four lines of allocator statistics and no advice."""
+    audio = _queue_audio(api, tmp_path)
+    api.speaker_speak_error = RuntimeError(
+        "CUDA out of memory. Tried to allocate 204.00 MiB. GPU 0 has a total "
+        "capacity of 6.00 GiB of which 0 bytes is free."
+    )
+
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={
+            "translate": True,
+            "target_language": "es",
+            "speak": True,
+            "formats": ["txt"],
+        },
+    )
+    api.wait_done()
+
+    notice = api.manager.status(include_files=False)["notice"] or ""
+    assert "3.2 GB" in notice
+    assert "Device to cpu" in notice
+    # And the transcript it already wrote is still there.
+    assert api.manager.store.get(audio)["status"] == "done"
+
+
 # --------------------------------------------------- text → translate → speak
 
 

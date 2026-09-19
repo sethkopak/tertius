@@ -35,6 +35,8 @@ class ApiHarness:
         self.speaker_fails = False
         self.speaker_load_error: Exception | None = None
         self.speaker_prepare_error: Exception | None = None
+        self.speaker_speak_error: Exception | None = None
+        self.cpu_only = False
         self.gates: dict[str, threading.Event] = {}
         self.manager = JobManager(
             transcriber_factory=self._factory,
@@ -63,6 +65,7 @@ class ApiHarness:
         self.speaker.fail_always = self.speaker_fails
         self.speaker.load_error = self.speaker_load_error
         self.speaker.prepare_error = self.speaker_prepare_error
+        self.speaker.speak_error = self.speaker_speak_error
         return self.speaker
 
     def block(self, path) -> threading.Event:

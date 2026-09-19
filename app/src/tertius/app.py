@@ -292,6 +292,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
                     "speed": entry["speed"],
                     "quality": entry["quality"],
                     "paralinguistic": bool(entry.get("paralinguistic")),
+                    "vram_bytes": entry.get("vram_bytes"),
                     "ready": ready,
                 }
             )

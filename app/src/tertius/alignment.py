@@ -37,7 +37,28 @@ GRANULARITIES = (AUTO, PARAGRAPH, SENTENCE)
 # something that starts a new sentence. Matched rather than used as a
 # lookbehind, because the closing-quote part is variable width. Common
 # abbreviations are protected below.
-_SENTENCE_END = re.compile(r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])")
+# Two alternations, because the first one only ever worked for Latin script.
+#
+# The original required an ASCII terminator, whitespace after it, *and* a
+# following ASCII capital. Chinese has none of the three: it ends sentences with
+# an ideographic full stop, usually with no space, followed by a Han character.
+# So Chinese, Japanese, Greek, Arabic and Devanagari text never split at all -
+# a whole translation came back as one "sentence".
+#
+# That was invisible until something read it aloud. A `.txt` of one long line
+# is ugly; one 326-character chunk handed to a speech model is truncated
+# audio - measured, 23.6s of garbled Mandarin for 79 seconds of source.
+#
+# The second alternation needs no following capital, because these scripts have
+# no case, and tolerates a missing space. Not exhaustive: it covers the
+# terminators of the languages Tertius can currently speak and translate into.
+_SENTENCE_END = re.compile(
+    # Latin: a terminator, space, and something that looks like a new sentence.
+    r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])"
+    # CJK, Arabic, Devanagari, Armenian: the terminator is enough on its own.
+    r"|[\u3002\uff01\uff1f\u061f\u06d4\u0964\u0589\u3001\uff0e]+"
+    r"[\"')\]\u300d\u300f\uff09]*\s*"
+)
 _ABBREVIATIONS = (
     "mr.",
     "mrs.",

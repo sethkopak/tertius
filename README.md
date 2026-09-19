@@ -891,6 +891,39 @@ index you use actually has a wheel for your Python — one that does not says
 `No matching distribution found for torch`, which reads as though torch itself
 were missing.
 
+### It has to fit on the card
+
+Three models, measured on a 6 GB RTX 2060:
+
+| model | VRAM |
+| --- | --- |
+| whisper `large-v3-turbo` | 2.23 GB |
+| `m2m100-418M` | 0.27 GB |
+| `chatterbox-multilingual` | **3.22 GB** |
+
+That is 5.72 GB of models, and a browser can be holding a gigabyte of the card
+already. Tertius therefore takes the transcriber and the translator off the GPU
+before a reading starts and reloads them for the next file — nothing
+transcribes while it reads aloud, so holding all three was never necessary. It
+costs a model load per file and buys a feature that otherwise cannot run at all
+on a small card.
+
+If it still runs out, the message says so and what to do: close whatever else
+is using the GPU, choose a smaller Whisper model, or set **Device** to `cpu`
+for a slower run that always fits.
+
+### Languages that do not end sentences with a full stop
+
+Chinese, Japanese, Korean, Greek, Arabic and Hindi are split on their own
+terminators, and a character that carries a whole word counts for more of the
+chunk budget than a letter does — 300 Han characters is about eighty seconds
+read aloud where 300 Latin characters is about twenty.
+
+Both had to be fixed before Chinese worked at all. The splitter wanted an ASCII
+terminator followed by an ASCII capital, so a Chinese translation arrived as a
+single "sentence", became one oversized chunk, and came back truncated. It was
+invisible in the `.txt` and only showed up when something read it aloud.
+
 ### Honest limits
 
 As of the last time this was written:

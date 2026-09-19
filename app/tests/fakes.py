@@ -18,6 +18,13 @@ class FakeTranscriber:
         self.options = options
         self.calls: list[str] = []
         self.warmed_up = False
+        # Where the real one would have put the model, so a test can tell
+        # whether freeing the GPU was even applicable.
+        self.active_device = "cpu" if options.device == "cpu" else "cuda"
+        # Counted, not flagged: every model is unloaded once when the batch
+        # ends, so a boolean cannot tell "freed for the reading" from
+        # ordinary cleanup. Two unloads means it gave its VRAM back mid-run.
+        self.unloads = 0
         # Per-path behaviour hooks, set by tests.
         self.fail_paths: set[str] = set()
         self.block_paths: dict[str, threading.Event] = {}
@@ -47,7 +54,7 @@ class FakeTranscriber:
         )
 
     def unload(self) -> None:
-        pass
+        self.unloads += 1
 
 
 def fake_transcribe_file(tertius, source, output_dir):
@@ -68,8 +75,10 @@ class FakeTranslator:
     def __init__(self, model_key="m2m100-418M", device="auto", on_download_progress=None):
         self.model_key = model_key
         self.device = device
+        self.active_device = "cpu" if device == "cpu" else "cuda"
         self.on_download_progress = on_download_progress
         self.loaded = False
+        self.unloads = 0
         self.calls: list[tuple[str, str]] = []
         # Every batch of texts the model was handed, so a test can prove it was
         # given whole sentences rather than timing-cut fragments.
@@ -114,6 +123,7 @@ class FakeTranslator:
 
     def unload(self) -> None:
         self.loaded = False
+        self.unloads += 1
 
 
 class FakeSpeaker:
@@ -143,6 +153,7 @@ class FakeSpeaker:
         self.load_error: Exception | None = None
         self.prepare_error: Exception | None = None
         self.fail_always = False
+        self.speak_error: Exception | None = None
         self.gpu_fallback_reason: str | None = None
 
     @property
@@ -171,6 +182,8 @@ class FakeSpeaker:
         self.loaded = True
 
     def speak(self, chunk, language, voice=None):
+        if self.speak_error:
+            raise self.speak_error
         if self.fail_always:
             raise RuntimeError("simulated speech failure")
         self.load()

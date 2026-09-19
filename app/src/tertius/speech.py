@@ -320,8 +320,35 @@ def _tokenize(text: str, paralinguistic: bool) -> tuple[list[tuple[str, str]], l
     return events, warnings
 
 
+# Characters that carry a whole word or syllable rather than a letter. Three
+# hundred of these is nothing like three hundred Latin characters of speech:
+# 300 Latin characters is roughly 60 words, about twenty seconds read aloud,
+# where 300 Han characters is nearer eighty seconds. Weighted so one budget
+# means one duration whatever the script.
+#
+# The factor is reasoned from speaking rate rather than measured: a Han
+# character is about a syllable, an English word about 1.3 syllables and six
+# characters, so a Han character is worth roughly four Latin ones here.
+_DENSE_SCRIPT = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]"
+)
+DENSE_CHARACTER_WEIGHT = 4
+
+
+def spoken_length(text: str) -> int:
+    """How long `text` is in the units the chunk budget is written in.
+
+    Characters, except that a character carrying a whole word counts for
+    several. Without this a Chinese translation sails under a budget written
+    for English and arrives at the model as one oversized chunk, which it
+    truncates.
+    """
+    dense = len(_DENSE_SCRIPT.findall(text))
+    return len(text) + dense * (DENSE_CHARACTER_WEIGHT - 1)
+
+
 def _pack(sentences: Sequence[str], budget: int) -> list[str]:
-    """Group sentences into chunks of at most `budget` characters.
+    """Group sentences into chunks of at most `budget` characters of speech.
 
     A sentence longer than the budget on its own is still sent whole. Cutting
     one mid-clause to satisfy a number would put a breath in the middle of a
@@ -338,7 +365,7 @@ def _pack(sentences: Sequence[str], budget: int) -> list[str]:
             continue
         if not current:
             current = sentence
-        elif len(current) + 1 + len(sentence) <= budget:
+        elif spoken_length(current) + 1 + spoken_length(sentence) <= budget:
             current = f"{current} {sentence}"
         else:
             chunks.append(current)
@@ -1116,8 +1143,35 @@ def chunks_from_prose(
     a translator handed `[solemn]` would have rendered it into something else
     anyway. Style tags belong to text the user wrote, which goes through
     `parse_script`.
+
+    **The translator's own line breaks are the sentence boundaries.** It puts
+    one sentence per line, so re-splitting its output is wasted work and a
+    chance to get it wrong - which is exactly what happened to Chinese, where
+    the splitter recognised no terminator and handed the model the whole file
+    as a single chunk. The lines are still *packed* into chunks by the usual
+    budget: treating each as its own chunk would put a pause between every
+    sentence and quadruple the number of calls.
     """
-    return parse_script(text, model_key, default_style).chunks
+    style, _warning = resolve_style(default_style)
+    params = style_params(model_key, style)
+
+    sentences = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(sentences) <= 1:
+        # One blob - a transcript that was never translated, say. Fall back to
+        # splitting it, which is all there is to go on.
+        from .alignment import split_sentences
+
+        sentences = split_sentences(" ".join((text or "").split()))
+
+    return [
+        SpokenChunk(
+            text=body,
+            style=style,
+            params=params,
+            starts_paragraph=(index == 0),
+        )
+        for index, body in enumerate(_pack(sentences, SPEECH_CHUNK_CHARS))
+    ]
 
 
 def read_text_source(

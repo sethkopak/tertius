@@ -151,6 +151,10 @@ SPEECH_MODELS = {
             "Cangjie5_TC.json",
         ],
         "baseline": {"exaggeration": 0.5, "cfg_weight": 0.5},
+        # Measured, not estimated: loaded alone on an RTX 2060 and read back
+        # from `torch.cuda.memory_allocated`. It is half a 6 GB card, which is
+        # why the earlier stages are unloaded before a reading starts.
+        "vram_bytes": 3_220_000_000,
         # Paralinguistic tags are documented for Turbo and Nano only. Left in
         # the text here they would simply be read out, so they are stripped.
         "paralinguistic": False,
@@ -165,6 +169,8 @@ SPEECH_MODELS = {
         "download_bytes": 4_044_000_000,
         "allow_patterns": ["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
         "baseline": {"exaggeration": 0.0, "cfg_weight": 0.0},
+        # Never loaded, so never measured. Absent rather than guessed.
+        "vram_bytes": None,
         "paralinguistic": True,
         "speed": "Fast",
         "quality": "English only, and the only one that can be told to laugh.",
@@ -177,6 +183,7 @@ SPEECH_MODELS = {
         "download_bytes": 2_999_000_000,
         "allow_patterns": ["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
         "baseline": {"exaggeration": 0.0, "cfg_weight": 0.0},
+        "vram_bytes": None,
         "paralinguistic": True,
         "speed": "Fastest",
         "quality": "Smallest. The publisher reports 3x realtime on 8 CPU cores.",
