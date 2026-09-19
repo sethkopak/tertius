@@ -740,6 +740,7 @@ def translate_outputs(
     target_language: str,
     sentence_pass: bool = True,
     on_progress: Callable[[int, int], None] | None = None,
+    for_speech: bool = False,
 ) -> tuple[list[str], object]:
     """Translate a finished result and write it beside the original files.
 
@@ -768,7 +769,11 @@ def translate_outputs(
     output_dir = Path(output_dir)
     suffix = f".{target_language}"
 
-    wants_sentences = sentence_pass and "txt" in formats
+    # `for_speech` forces the sentence pass even when no `.txt` was asked for.
+    # A reading has to come from the sentence stream: the segment translations
+    # are the measurably worse ones, and an error nobody can skim past is a
+    # different thing from an error in a file.
+    wants_sentences = (sentence_pass and "txt" in formats) or for_speech
     timed_formats = [fmt for fmt in formats if not (wants_sentences and fmt == "txt")]
 
     # Both passes count towards one number, so the percentage only ever goes
@@ -806,11 +811,14 @@ def translate_outputs(
             on_progress=report,
             sentences=sentences,
         )
-        written.append(
-            write_atomically(
-                safe_output_path(output_dir, source.stem, "txt", suffix), prose
+        # Only written when a `.txt` was actually asked for. `for_speech` needs
+        # the prose in memory, not another file in the output folder.
+        if "txt" in formats:
+            written.append(
+                write_atomically(
+                    safe_output_path(output_dir, source.stem, "txt", suffix), prose
+                )
             )
-        )
 
     if translated is None:
         # Only a `.txt` was asked for, so the segments were never translated.
@@ -827,6 +835,10 @@ def translate_outputs(
             duration=result.duration,
             translation=_provenance(translator, target_language, result),
         )
+
+    # Carried on the result rather than returned separately, so that every
+    # existing caller keeps its two-value unpacking.
+    translated.prose = prose or None
 
     log.info(
         "translated %s into %s (%d segments%s)",
@@ -848,6 +860,40 @@ def _paragraphs(text: str) -> list[list[str]]:
 
     blocks = re.split(r"\n\s*\n", text)
     return [split_sentences(block.strip()) for block in blocks if block.strip()]
+
+
+def translate_chunks(
+    chunks,
+    translator: "Translator",
+    target_language: str,
+    source_language: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list:
+    """Translate parsed chunks, keeping each one's delivery.
+
+    This is what carries `[solemn]` through a translation. The alternative -
+    translating the file and then parsing tags out of the result - cannot work,
+    because the tag would have been fed to the translator as a word and come
+    back as something else, or not at all. Parsing first and translating the
+    text inside each chunk keeps the styles exactly where they were put.
+    """
+    from dataclasses import replace
+
+    chunks = list(chunks)
+    if not chunks:
+        return []
+    rendered = translator.translate(
+        [chunk.text for chunk in chunks],
+        target_language,
+        source_language=source_language,
+        on_progress=on_progress,
+    )
+    out = []
+    for chunk, text in zip(chunks, rendered):
+        text = (text or "").strip()
+        if text:
+            out.append(replace(chunk, text=text))
+    return out
 
 
 def translate_text_file(

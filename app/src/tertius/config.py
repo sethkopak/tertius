@@ -413,18 +413,28 @@ class TranscriptionOptions:
     # against 12s for the segment pass, so a 64-second run becomes about 285 -
     # and it changes nothing about the `.srt`, whose timings need segments.
     translate_sentences: bool = True
-    # Read a `.txt` aloud. A source kind of its own, like translating text with
-    # no audio: Whisper is never loaded, because there is nothing to decode.
-    # It is not a post-step on a transcription - speaking a transcript back to
-    # the person who just recorded it is not a thing anyone asked for.
+    # Read the result aloud. The third stage, after transcribing and
+    # translating, and deliberately not a source kind of its own.
+    #
+    # It used to be one, and that was the bug: a queue could be translated *or*
+    # spoken but never both, so "take this English talk and give me Spanish
+    # audio" - the whole point - was the one thing the app could not express.
+    # Someone asking for it picked a language in the speech menu instead, waited
+    # for the GPU, and got English back with nothing having warned them.
     speak: bool = False
     speech_model: str = DEFAULT_SPEECH_MODEL
-    # The language the text is *in*, which the multilingual model must be told.
-    # Defaults to English at use rather than here, so that a stored option set
-    # written before this existed does not claim a language it never chose.
+    # What language the model is told it is reading.
+    #
+    # Consulted **only** for a text source that is not being translated, which
+    # is the one case where nothing else knows the answer. Everywhere else it is
+    # derived - see `resolved_speech_language` - because a language chosen by
+    # hand here is a language that can disagree with the words, and Chatterbox
+    # does not translate: told `zh` over English text it reads the English.
     speech_language: str | None = None
-    # A recording of the voice to read in. None means the model's own default
-    # voice. Ten seconds of clean speech is what the publisher asks for.
+    # A recording of the voice to read in. None means: sample it from the audio
+    # being transcribed, which is what "in the original speaker's voice" needs,
+    # and what a queue of different speakers needs. For a text source with no
+    # audio behind it, None means the model's own default voice.
     speech_voice: str | None = None
     # The delivery used until the text says otherwise with a `[style]` tag.
     speech_style: str = DEFAULT_SPEECH_STYLE
@@ -494,6 +504,25 @@ class TranscriptionOptions:
             self.speech_language = self.speech_language.strip().lower() or None
         if isinstance(self.speech_voice, str):
             self.speech_voice = self.speech_voice.strip() or None
+        if self.speak and self.translate:
+            # Rejected up front rather than per file, like every other language
+            # check here. The translator knows hundreds of languages and the
+            # voice model knows 23; translating a whole queue into Romanian and
+            # only then discovering nothing can say it is the failure this
+            # prevents.
+            from .speech import speech_language_choices
+
+            speakable = speech_language_choices(self.speech_model)
+            if (
+                speakable
+                and self.target_language
+                and self.target_language not in speakable
+            ):
+                raise ValueError(
+                    f"{self.speech_model} cannot speak "
+                    f"{self.target_language!r}. With Read aloud on, choose a "
+                    f"language it knows: {', '.join(speakable)}"
+                )
         if not self.formats:
             raise ValueError("at least one output format is required")
         bad = [f for f in self.formats if f not in OUTPUT_FORMATS]
@@ -513,6 +542,24 @@ class TranscriptionOptions:
     def resolved_compute_type(self) -> str | None:
         """`default` means: let CTranslate2 pick for the device."""
         return None if self.compute_type == "default" else self.compute_type
+
+    def resolved_speech_language(self, detected: str | None = None) -> str:
+        """What language the reading is actually in.
+
+        Derived rather than chosen wherever anything else already knows the
+        answer, because a language picked by hand is a language that can
+        disagree with the words in front of it:
+
+        * translating - the target, necessarily. The words about to be spoken
+          are the ones the translator just produced.
+        * otherwise - whatever the transcription was in, or `speech_language`
+          for a text source that nothing has detected a language for.
+
+        Falls back to English, which is what the model assumes anyway.
+        """
+        if self.translate and self.target_language:
+            return self.target_language
+        return (self.speech_language or detected or "en").strip().lower()
 
 
 def default_output_dir() -> Path:

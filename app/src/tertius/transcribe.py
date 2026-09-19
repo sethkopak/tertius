@@ -69,6 +69,14 @@ class TranscriptionResult:
     # out. The one case here where a cue cannot have drifted from its
     # recording, both having been made in the same pass.
     speech: dict | None = None
+    # The transcript as continuous prose, rejoined and re-split into sentences.
+    # Set by the translator when a reading is going to follow, because the two
+    # translations of a file are not equally good: the `.srt` is translated per
+    # segment so its timings survive, and those segments are fragments more
+    # than half the time. Speaking the fragment stream would read a mistake out
+    # loud - "gloom" as *glume* - where the text version can at least be
+    # skimmed past.
+    prose: str | None = None
 
 
 def format_timestamp(seconds: float, separator: str = ",") -> str:

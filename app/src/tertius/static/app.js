@@ -107,7 +107,11 @@ const formats = new Set(
 );
 
 function paintDevice() {
-  document.querySelectorAll('.seg').forEach((seg) => {
+  // Scoped to `[data-device]`, not `.seg`. The Source row uses the same chip
+  // class, and an unscoped sweep set aria-checked="false" on both of its
+  // buttons - they have no `data-device`, so neither could ever match - which
+  // silently cleared the Source selection every time the device was painted.
+  document.querySelectorAll('[data-device]').forEach((seg) => {
     seg.setAttribute('aria-checked', String(seg.dataset.device === device));
   });
 }
@@ -161,6 +165,68 @@ paintFormats();
     .forEach((option) => select.appendChild(option));
 })();
 
+// Which kind of file the queue is made of. Audio is transcribed first; text
+// goes straight to whichever stages are on. This used to be a checkbox buried
+// in the translation block called "Translate text files, not audio", which
+// meant the choice of *source* and the choice of *stage* were the same
+// control - and reading a text file aloud and translating it could not both
+// be asked for.
+let sourceKind = localStorage.getItem('tertius-source-kind') || 'media';
+
+function paintSource() {
+  document.querySelectorAll('[data-source]').forEach((button) => {
+    // `aria-checked` is what the stylesheet keys off, the same as the device
+    // chips - there is no separate "selected" class to keep in step.
+    button.setAttribute(
+      'aria-checked', String(button.dataset.source === sourceKind)
+    );
+  });
+  // Transcription settings mean nothing for a text source.
+  ['opt-model', 'opt-compute', 'opt-language'].forEach((id) => {
+    const field = $(id);
+    if (field) field.disabled = sourceKind === 'text';
+  });
+  refreshStageRows();
+}
+
+document.querySelectorAll('[data-source]').forEach((button) => {
+  button.onclick = () => {
+    sourceKind = button.dataset.source;
+    localStorage.setItem('tertius-source-kind', sourceKind);
+    paintSource();
+  };
+});
+
+// Read aloud is offered when there is something for it to read: a translation
+// to speak, or a text file that is already in a language. Speaking a transcript
+// back in its own language is not a thing anyone asked for, so it is not shown.
+function speakIsOffered() {
+  return sourceKind === 'text' || $('opt-translate').checked;
+}
+
+// The speech language is only ever asked for in the one case where nothing
+// else knows it: a text file that is not being translated. Translating makes
+// the target the answer; transcribing detects it.
+function speechLanguageIsAsked() {
+  return sourceKind === 'text' && !$('opt-translate').checked;
+}
+
+function refreshStageRows() {
+  const offered = speakIsOffered();
+  $('speak-row').hidden = !offered;
+  if (!offered && $('opt-speak').checked) {
+    $('opt-speak').checked = false;
+  }
+  const on = offered && $('opt-speak').checked;
+  ['speech-model-row', 'speech-voice-row', 'speech-style-row']
+    .forEach((id) => { $(id).hidden = !on; });
+  $('speech-language-row').hidden = !(on && speechLanguageIsAsked());
+  if (!on) {
+    $('speech-note-row').hidden = true;
+    $('speech-prepare-row').hidden = true;
+  }
+}
+
 function collectOptions() {
   return {
     model_size: $('opt-model').value,
@@ -174,9 +240,13 @@ function collectOptions() {
     translation_model: $('opt-translation-model').value,
     target_language: $('opt-target-language').value || null,
     translate_sentences: $('opt-translate-sentences').checked,
-    speak: $('opt-speak').checked,
+    speak: $('opt-speak').checked && speakIsOffered(),
     speech_model: $('opt-speech-model').value,
-    speech_language: $('opt-speech-language').value || null,
+    // Only meaningful when nothing else knows the language; sent as null
+    // otherwise so a stale menu value cannot contradict the words.
+    speech_language: speechLanguageIsAsked()
+      ? ($('opt-speech-language').value || null)
+      : null,
     speech_voice: $('opt-speech-voice').value.trim() || null,
     speech_style: $('opt-speech-style').value,
   };
@@ -197,7 +267,12 @@ async function refreshTargetLanguages() {
   const wanted = select.value;
   let info;
   try {
-    const res = await fetch(`/api/translation/languages?model=${encodeURIComponent(model)}`);
+    const speaking = $('opt-speak').checked;
+    const res = await fetch(
+      `/api/translation/languages?model=${encodeURIComponent(model)}`
+      + `&speak=${speaking ? '1' : '0'}`
+      + `&speech_model=${encodeURIComponent($('opt-speech-model').value)}`
+    );
     info = await res.json();
   } catch (_) {
     note.textContent = 'Could not ask the server about this model.';
@@ -220,8 +295,12 @@ async function refreshTargetLanguages() {
   if (wanted && [...select.options].some((o) => o.value === wanted)) select.value = wanted;
 
   const gb = (info.download_bytes / 1e9).toFixed(1);
+  // Say why the list is short, or the missing Romanian reads as a bug.
+  const narrowed = info.restricted_to_speakable
+    ? ` Narrowed to the ${info.speakable_count} the voice model can say, because Read aloud is on.`
+    : '';
   note.textContent = info.ready
-    ? `${info.languages.length} languages available. ${info.license}.`
+    ? `${info.languages.length} languages available.${narrowed} ${info.license}.`
     : `No languages yet — this model has to be downloaded (about ${gb} GB) and `
       + `converted before it can say what it translates into. The first time, `
       + `that also installs the translation libraries (about 150 MB). ${info.license}.`;
@@ -232,7 +311,6 @@ async function refreshTargetLanguages() {
   // — no language could be picked, and a job could not start without one.
   $('translation-prepare-row').hidden = info.ready;
   $('opt-target-language').disabled = !info.ready;
-  $('translation-source-row').hidden = false;
   $('translation-sentences-row').hidden = false;
 }
 
@@ -309,29 +387,16 @@ async function refreshSpeechLanguages() {
   $('speech-prepare-row').hidden = info.ready;
 }
 
-function setSpeechRows(enabled) {
-  ['speech-model-row', 'speech-language-row', 'speech-voice-row', 'speech-style-row']
-    .forEach((id) => { $(id).hidden = !enabled; });
-  if (!enabled) {
-    $('speech-note-row').hidden = true;
-    $('speech-prepare-row').hidden = true;
-  }
-}
-
 $('opt-speak').onchange = () => {
-  const enabled = $('opt-speak').checked;
-  setSpeechRows(enabled);
-  if (enabled) {
-    // Reading aloud and translating are two different jobs over two different
-    // source kinds, and one queue can only be one of them. Turning this on
-    // turns the other off rather than letting Begin fail with the queue
-    // already full of the wrong thing.
-    if ($('opt-translate').checked) {
-      $('opt-translate').checked = false;
-      $('opt-translate').onchange();
-    }
-    if ($('opt-text-source').checked) $('opt-text-source').checked = false;
+  refreshStageRows();
+  if ($('opt-speak').checked) {
     refreshSpeechLanguages();
+    // The translator knows hundreds of languages and the voice model knows 23.
+    // Narrow the target menu now rather than letting a queue be translated
+    // into something nothing can say.
+    if ($('opt-translate').checked) refreshTargetLanguages();
+  } else if ($('opt-translate').checked) {
+    refreshTargetLanguages();
   }
 };
 
@@ -388,6 +453,16 @@ async function previewTags(path) {
       model: $('opt-speech-model').value,
       style: $('opt-speech-style').value,
     });
+    // The screen that exists to catch mistakes before a run should mention the
+    // one that cost 46 seconds of GPU and produced English for someone who
+    // asked for Chinese.
+    const spoken = $('opt-translate').checked
+      ? ($('opt-target-language').value || '(no language chosen)')
+      : (speechLanguageIsAsked()
+          ? ($('opt-speech-language').value || 'en')
+          : 'the language of the recording');
+    $('speech-preview-language').textContent =
+      `Will be read aloud in: ${spoken}.`;
     $('speech-warnings').innerHTML = (body.warnings || [])
       .map((w) => `<p class="panel-body warn-text">${esc(w)}</p>`).join('');
     $('speech-preview-table').querySelector('tbody').innerHTML =
@@ -430,7 +505,6 @@ function restoreSettings(status) {
   if (options.speech_voice) $('opt-speech-voice').value = options.speech_voice;
   if (options.speak) {
     $('opt-speak').checked = true;
-    setSpeechRows(true);
     // The language is set after the menu is filled, or there is nothing to
     // select it on yet.
     refreshSpeechLanguages().then(() => {
@@ -439,6 +513,7 @@ function restoreSettings(status) {
       }
     });
   }
+  refreshStageRows();
   if (options.translate) {
     $('opt-translate').checked = true;
     $('translation-model-row').hidden = false;
@@ -479,12 +554,11 @@ async function scanAndQueue(directory) {
   localStorage.setItem('tertius-source', directory);
   note('add-note', 'Scanning…');
   try {
-    const speaking = $('opt-speak').checked;
-    const textSource = $('opt-text-source').checked || speaking;
+    const textSource = sourceKind === 'text';
     const found = await jsonPost('/api/scan', {
       directory,
       recursive: $('scan-recursive').checked,
-      kind: speaking ? 'speech' : (textSource ? 'text' : 'media'),
+      kind: sourceKind,
     });
     if (!found.count) {
       return note('add-note', textSource
@@ -495,16 +569,16 @@ async function scanAndQueue(directory) {
     const queued = await jsonPost('/api/queue', {
       files: found.files,
       base_dir: found.directory,
-      // A .txt queued as a source is either translated or read aloud, and the
-      // server cannot tell which from the file - the two look identical on
-      // disk, and picking the wrong one is an hour spent on the wrong output.
-      kind: speaking ? 'speech' : undefined,
+      // Nothing about the stages goes in the queue: a text source is a text
+      // source, and what happens to it is decided when the job runs.
       match_reference_text: $('opt-use-text').checked && !textSource,
     });
     let message = `Found ${plural(found.count, 'file', 'files')}; queued ${queued.added} new.`;
     // Show the first file's tags at once. Nothing is generated by this, and it
     // is the cheapest possible moment to find out a style tag was misspelt.
-    if (speaking && found.files.length) previewTags(found.files[0]);
+    if (textSource && $('opt-speak').checked && found.files.length) {
+      previewTags(found.files[0]);
+    }
     if ($('opt-use-text').checked) {
       message += ` Matched text for ${queued.matched_text}; ${queued.needs_choice} need a choice.`;
     }
@@ -619,10 +693,9 @@ $('opt-translate').onchange = () => {
   $('translation-model-row').hidden = !enabled;
   $('translation-target-row').hidden = !enabled;
   $('translation-note-row').hidden = true;
+  refreshStageRows();
   if (!enabled) {
     // Text sources are only translatable, so they cannot outlive the box.
-    $('opt-text-source').checked = false;
-    $('translation-source-row').hidden = true;
     $('translation-sentences-row').hidden = true;
   }
   if (enabled) refreshTargetLanguages();
@@ -1682,6 +1755,7 @@ $('btn-model-info-close').onclick = () => {
 };
 ['opt-model', 'opt-compute'].forEach((id) => { $(id).onchange = refreshModelAdvice; });
 
+paintSource();
 poll();
 // Tell the user up front if their default model suits this machine.
 refreshModelAdvice();

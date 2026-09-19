@@ -44,6 +44,7 @@ from typing import Callable, Iterable, Sequence
 
 from .config import (
     DEFAULT_SPEECH_MODEL,
+    MEDIA_EXTENSIONS,
     DEFAULT_SPEECH_STYLE,
     FALLBACK_SPEECH_LANGUAGES,
     PARALINGUISTIC_TAGS,
@@ -138,6 +139,17 @@ TORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu126"
 TAG = re.compile(r"\[([A-Za-z][A-Za-z0-9_-]*)\]")
 
 PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
+
+# How much of a recording to sample when cloning the speaker in it. Chatterbox
+# conditions its decoder on roughly ten seconds, so more than this is simply
+# ignored - and a longer clip is not a better one, it is the same ten seconds
+# with the user believing otherwise.
+VOICE_CLIP_SECONDS = 10.0
+
+# Below this much actual speech in the sampled window, say so. A reference that
+# is half silence clones badly, and the recording is the reason rather than the
+# feature.
+VOICE_CLIP_MIN_SPEECH = 0.6
 
 # Audio is written as 16-bit PCM. The model hands back float32 in [-1, 1].
 _INT16_MAX = 32767
@@ -870,28 +882,131 @@ def _cues(chunks: Iterable[tuple[SpokenChunk, float, float]]):
     )
 
 
-def speak_text_file(
-    source,
-    output_dir,
+def best_voice_window(segments, wanted: float = VOICE_CLIP_SECONDS) -> tuple[float, float]:
+    """Where in a recording to sample the speaker's voice from.
+
+    Chatterbox conditions on roughly the first ten seconds of whatever
+    reference it is handed, so handing it a whole talk means handing it the
+    talk's first ten seconds - which on real material is an introduction, a
+    hymn, a pause, or nothing at all. Measured on one of Seth's devotional
+    files: 49% of the first ten seconds was near-silence, and that is the half
+    the model was conditioning on.
+
+    So the window is chosen rather than assumed. Scored on how much *speech*
+    it contains, using the segment timings a transcription already produced -
+    word timings would be finer but are off by default and would cost a slower
+    pass for a ten-second decision.
+
+    Returns `(start, duration)`. An empty or untimed transcript falls back to
+    the beginning, which is no worse than what the model would have done.
+    """
+    spans = [
+        (float(seg.start), float(seg.end))
+        for seg in segments or ()
+        if getattr(seg, "end", 0) > getattr(seg, "start", 0)
+    ]
+    if not spans:
+        return 0.0, wanted
+
+    # Candidate starts: the beginning of each segment. The best window always
+    # begins at one - starting earlier only adds silence, and starting later
+    # only drops speech from the front.
+    best_start, best_speech = spans[0][0], -1.0
+    for start, _ in spans:
+        end = start + wanted
+        speech = sum(
+            max(0.0, min(e, end) - max(b, start)) for b, e in spans
+        )
+        if speech > best_speech:
+            best_start, best_speech = start, speech
+
+    covered = best_speech / wanted if wanted else 0.0
+    log.info(
+        "voice window: %.1fs-%.1fs (%.0f%% speech)",
+        best_start,
+        best_start + wanted,
+        covered * 100,
+    )
+    if covered < VOICE_CLIP_MIN_SPEECH:
+        # Said out loud rather than silently accepted: a reference that is
+        # mostly silence clones badly, and the user should know the recording
+        # is the reason rather than the feature.
+        log.warning(
+            "the best %.0fs of this recording is only %.0f%% speech; the "
+            "cloned voice may be poor",
+            wanted,
+            covered * 100,
+        )
+    return best_start, wanted
+
+
+def extract_voice_clip(source, start: float, duration: float, target) -> str:
+    """Cut `duration` seconds out of `source` into a wav the model can read.
+
+    `librosa.load` seeks rather than decoding the whole file - measured at
+    0.19s for a ten-second slice of a 79-second mp3 - so this costs nothing
+    worth optimising even on a long recording.
+    """
+    import librosa
+
+    samples, rate = librosa.load(
+        str(source), sr=None, mono=True, offset=float(start), duration=float(duration)
+    )
+    writer = WavWriter(Path(target), int(rate))
+    try:
+        writer.append(samples)
+    except Exception:
+        writer.abandon()
+        raise
+    return writer.close()
+
+
+def voice_for(source, result, requested: str | None, scratch_dir) -> tuple[str | None, bool]:
+    """The reference clip to read in, sampling the source when none was given.
+
+    Returns `(path, is_temporary)`. An explicit choice always wins; otherwise
+    the speaker in the recording being translated is the voice the translation
+    should come back in, which is the whole point of putting this after
+    transcription rather than beside it.
+
+    Falls back to the model's own voice - `(None, False)` - when there is no
+    audio behind this text at all, or when the cut fails. A default voice is a
+    worse reading; a failed one is no reading.
+    """
+    if requested:
+        return str(requested), False
+    source = Path(source)
+    if source.suffix.lower() not in MEDIA_EXTENSIONS:
+        return None, False
+    start, duration = best_voice_window(getattr(result, "segments", None))
+    target = Path(scratch_dir) / f"{source.stem}.voice.wav"
+    try:
+        return extract_voice_clip(source, start, duration, target), True
+    except Exception as exc:
+        log.warning("could not sample a voice from %s: %s", source.name, exc)
+        return None, False
+
+
+def speak_chunks(
+    chunks: Sequence[SpokenChunk],
     speaker: Speaker,
-    language: str | None = None,
+    language: str,
+    output_dir,
+    stem: str,
     voice: str | None = None,
-    default_style: str = DEFAULT_SPEECH_STYLE,
-    formats: Sequence[str] = ("txt", "srt"),
+    suffix: str = "",
+    formats: Sequence[str] = (),
+    warnings: Sequence[str] = (),
+    styles_used: Sequence[str] = (),
+    source=None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> tuple[list[str], object]:
-    """Read a `.txt` aloud and write the recording beside it.
+    """Generate audio for a prepared list of chunks. The core of the feature.
 
-    Always writes a `.wav`. Writes an `.srt` and a `.json` when those formats
-    are asked for, timed against the audio that was just generated rather than
-    against anything estimated. Never writes a `.txt`: the text is the input,
-    and writing a near-copy of it back into the output folder would be one more
-    file to tell apart from the one the user wrote.
-
-    The audio is streamed to disk as it is generated, so a reading that fails
-    on chunk four hundred does not lose the first three hundred and
-    ninety-nine - it leaves nothing, which is the same bargain every other
-    output here makes, but without ever holding the whole recording in memory.
+    Split out from `speak_text_file` so that a translated transcript reaches
+    exactly the same code as a text file does. The two differ only in where
+    their chunks came from - parsed from a `.txt`, or built from the sentences
+    a translator produced - and nothing below this line needs to know which.
     """
     from .transcribe import (
         result_to_json,
@@ -900,17 +1015,10 @@ def speak_text_file(
         write_atomically,
     )
 
-    source = Path(source)
+    if not chunks:
+        raise ValueError("there is nothing to read aloud")
+
     output_dir = Path(output_dir)
-    # `utf-8-sig`, not `utf-8`. Notepad and PowerShell both write a BOM, and
-    # read as plain utf-8 it survives as an invisible character glued to the
-    # first word - which here would be read out loud.
-    text = source.read_text(encoding="utf-8-sig")
-
-    script = parse_script(text, speaker.model_key, default_style)
-    if not script.chunks:
-        raise ValueError(f"there is no text to read aloud in {source.name}")
-
     language = (language or "en").strip().lower()
     allowed = speech_language_choices(speaker.model_key)
     if allowed and language not in allowed:
@@ -924,13 +1032,13 @@ def speak_text_file(
     # recording exists.
     speaker.load()
 
-    target = safe_output_path(output_dir, source.stem, "wav")
+    target = safe_output_path(output_dir, stem, "wav", suffix)
     spans: list[tuple[SpokenChunk, float, float]] = []
-    total = len(script.chunks)
+    total = len(chunks)
 
     writer = WavWriter(target, speaker.sample_rate)
     try:
-        for index, chunk in enumerate(script.chunks):
+        for index, chunk in enumerate(chunks):
             if index:
                 writer.silence(
                     SPEECH_PARAGRAPH_GAP_SECONDS
@@ -959,11 +1067,10 @@ def speak_text_file(
         "repo": SPEECH_MODELS[speaker.model_key]["repo"],
         "language": language,
         "voice": str(voice) if voice else None,
-        "default_style": default_style,
-        "styles_used": list(script.styles_used),
+        "styles_used": list(styles_used),
         "chunks": total,
         "seconds": round(writer.seconds, 3),
-        "warnings": list(script.warnings),
+        "warnings": list(warnings),
         # Chatterbox watermarks everything it generates with Resemble AI's
         # PerTh watermarker, inaudibly and unconditionally. Recorded because it
         # is true of every file this writes and someone should be able to find
@@ -972,27 +1079,179 @@ def speak_text_file(
     }
 
     formats = list(formats or ())
+    named = Path(source).name if source else stem
     if "srt" in formats:
         written.append(
             write_atomically(
-                safe_output_path(output_dir, source.stem, "srt"),
+                safe_output_path(output_dir, stem, "srt", suffix),
                 segments_to_srt(result.segments),
             )
         )
     if "json" in formats:
         written.append(
             write_atomically(
-                safe_output_path(output_dir, source.stem, "json"),
-                result_to_json(result, source),
+                safe_output_path(output_dir, stem, "json", suffix),
+                result_to_json(result, Path(source) if source else Path(stem)),
             )
         )
 
     log.info(
-        "read %s aloud into %s (%d chunk(s), %.1fs%s)",
-        source.name,
+        "read %s aloud into %s (%d chunk(s), %.1fs, %s%s)",
+        named,
         Path(written[0]).name,
         total,
         writer.seconds,
-        f", {len(script.warnings)} warning(s)" if script.warnings else "",
+        language,
+        f", {len(warnings)} warning(s)" if warnings else "",
     )
     return written, result
+
+
+def chunks_from_prose(
+    text: str, model_key: str, default_style: str = DEFAULT_SPEECH_STYLE
+) -> list[SpokenChunk]:
+    """Chunk plain prose - a translated transcript - for reading aloud.
+
+    No tags are expected here and none are honoured: a transcript has none, and
+    a translator handed `[solemn]` would have rendered it into something else
+    anyway. Style tags belong to text the user wrote, which goes through
+    `parse_script`.
+    """
+    return parse_script(text, model_key, default_style).chunks
+
+
+def read_text_source(
+    source,
+    output_dir,
+    speaker: Speaker,
+    translator=None,
+    target_language: str | None = None,
+    language: str | None = None,
+    voice: str | None = None,
+    default_style: str = DEFAULT_SPEECH_STYLE,
+    formats: Sequence[str] = ("txt",),
+    on_translate_progress: Callable[[int, int], None] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[list[str], object]:
+    """Read a `.txt` aloud, translating it first when asked to.
+
+    The order is what matters here: **parse the tags, then translate, then
+    speak.** Translating the file first and parsing afterwards cannot work -
+    `[solemn]` would have been handed to the translator as a word and come back
+    as something else, or not at all. Parsing first leaves the styles attached
+    to chunks and only the prose inside them is translated, so the delivery the
+    user wrote survives into a language they may not read.
+
+    Writes the translated text as well when `.txt` was asked for, built from
+    the same chunks that are about to be spoken, so the file and the recording
+    cannot disagree about what was said.
+    """
+    from .transcribe import safe_output_path, write_atomically
+
+    source = Path(source)
+    output_dir = Path(output_dir)
+    # `utf-8-sig`, not `utf-8`. Notepad and PowerShell both write a BOM, and
+    # read as plain utf-8 it survives as an invisible character glued to the
+    # first word - which here would be read out loud.
+    text = source.read_text(encoding="utf-8-sig")
+
+    script = parse_script(text, speaker.model_key, default_style)
+    if not script.chunks:
+        raise ValueError(f"there is no text to read aloud in {source.name}")
+
+    chunks = script.chunks
+    suffix = ""
+    if translator is not None:
+        if not target_language:
+            raise ValueError("translating needs a target language")
+        from .translate import translate_chunks
+
+        chunks = translate_chunks(
+            chunks,
+            translator,
+            target_language,
+            on_progress=on_translate_progress,
+        )
+        if not chunks:
+            raise ValueError(f"nothing survived translating {source.name}")
+        language = target_language
+        suffix = f".{target_language}"
+
+    written: list[str] = []
+    if translator is not None and "txt" in (formats or ()):
+        body = "\n".join(chunk.text for chunk in chunks) + "\n"
+        written.append(
+            write_atomically(
+                safe_output_path(output_dir, source.stem, "txt", suffix), body
+            )
+        )
+
+    # The audio and its cues are marked `.spoken` so they can never be written
+    # over a translation's own files - see the same suffix in jobs.py.
+    spoken, result = speak_chunks(
+        chunks,
+        speaker,
+        language or "en",
+        output_dir,
+        source.stem,
+        voice=voice,
+        suffix=f"{suffix}.spoken" if suffix else f".{language or 'en'}.spoken",
+        formats=formats,
+        warnings=script.warnings,
+        styles_used=script.styles_used,
+        source=source,
+        on_progress=on_progress,
+    )
+    if translator is not None:
+        # A reading of a translation is two claims away from a recording of
+        # someone speaking, and the `.json` should say both.
+        (result.speech or {})["translated_into"] = target_language
+    return written + spoken, result
+
+
+def speak_text_file(
+    source,
+    output_dir,
+    speaker: Speaker,
+    language: str | None = None,
+    voice: str | None = None,
+    default_style: str = DEFAULT_SPEECH_STYLE,
+    formats: Sequence[str] = ("txt", "srt"),
+    on_progress: Callable[[int, int], None] | None = None,
+) -> tuple[list[str], object]:
+    """Read a `.txt` aloud and write the recording beside it.
+
+    Always writes a `.wav`. Writes an `.srt` and a `.json` when those formats
+    are asked for, timed against the audio that was just generated rather than
+    against anything estimated. Never writes a `.txt`: the text is the input,
+    and writing a near-copy of it back into the output folder would be one more
+    file to tell apart from the one the user wrote.
+
+    The audio is streamed to disk as it is generated, so a reading that fails
+    on chunk four hundred does not lose the first three hundred and
+    ninety-nine - it leaves nothing, which is the same bargain every other
+    output here makes, but without ever holding the whole recording in memory.
+    """
+    source = Path(source)
+    # `utf-8-sig`, not `utf-8`. Notepad and PowerShell both write a BOM, and
+    # read as plain utf-8 it survives as an invisible character glued to the
+    # first word - which here would be read out loud.
+    text = source.read_text(encoding="utf-8-sig")
+
+    script = parse_script(text, speaker.model_key, default_style)
+    if not script.chunks:
+        raise ValueError(f"there is no text to read aloud in {source.name}")
+
+    return speak_chunks(
+        script.chunks,
+        speaker,
+        language,
+        output_dir,
+        source.stem,
+        voice=voice,
+        formats=formats,
+        warnings=script.warnings,
+        styles_used=script.styles_used,
+        source=source,
+        on_progress=on_progress,
+    )

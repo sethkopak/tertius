@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 ## Where it stands
 
@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**444 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**463 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -82,6 +82,117 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **Nobody has listened
   to the output yet**, and voice cloning has never been run.
 
+## 2026-09-19 — three stages, not three modes
+
+Reported: "the most recent job didn't work right". It had not. The options
+recorded `speech_language: "zh"` over an English text file, and 46 seconds of
+GPU later it produced English audio and reported success.
+
+**The diagnosis was not user error.** Chatterbox does not translate -
+`language_id` declares what the text *is in*. But the speech Language menu
+offered 23 choices in exactly the place the translation feature offers its
+"Into" menu, so it read as "speak it in this language". And the combination
+that would actually have done the job was blocked: ticking Read aloud switched
+Translate off, because speaking had been modelled as a mutually exclusive
+*source kind*.
+
+Translation was already a post-step on a transcription. Speaking should have
+been the third one in the same chain from the start:
+
+```
+audio -> transcribe -> [translate] -> [speak]
+ text ->               [translate] -> [speak]
+```
+
+### What that buys
+
+**The bug becomes unrepresentable.** Once a reading follows a translation, the
+speech language *is* the target - `resolved_speech_language()` derives it, and
+`speech_language` is consulted only for a text file that nothing is translating,
+the one case where nothing else knows the answer. A stale `zh` in the menu can
+no longer reach the model.
+
+**A target nothing can say is refused before the queue runs.** The translator
+knows 100 languages and the voice model knows 23. Translating a whole queue
+into Romanian and discovering at the last stage that nothing can pronounce it
+is the failure the language menus have always existed to prevent, so the "Into"
+menu narrows to the intersection when Read aloud is on - measured as exactly
+Chatterbox's 23, since m2m100-418M covers all of them - and says why, because
+a missing Romanian otherwise reads as a bug.
+
+**The voice is sampled from the recording.** No clip to choose: the densest ten
+seconds of speech in the file being transcribed, found from the segment timings
+a transcription already produces. Word timings would be finer and are off by
+default; ten seconds does not justify a slower pass. This is a direct fix for
+what the reported job actually did - the clip it was given was 78.8s long, of
+which Chatterbox uses the first ten, and **49% of those ten seconds was
+near-silence**. It warns now when the best available window is still mostly
+silence, so a poor clone points at the recording rather than at the feature.
+
+**A queue written by the old version still runs.** `translate_text` and `speak`
+both normalise to `MODE_TEXT` on load. Left alone they match no branch in the
+worker, so the file would sit pending forever with nothing saying why.
+
+### Verified end to end, on real material
+
+`Daily Heavenly Manna/0103.mp3`, 51s of English, through one job:
+
+- Whisper hears **Spanish** in the generated audio: `es`, p=0.99.
+- The voice is the **original speaker's**: median F0 **115.9 Hz** against the
+  source recording's **110.7 Hz**, IQR 102.6-132.3 against 101.3-137.7. Nothing
+  was chosen by hand; the clip was cut from the recording itself.
+- The chain reads correctly: *"Man of for January 3, pray without ceasing."*
+  became *"El hombre del 3 de enero, ora sin cesar."*
+- 343s in total for 51s of source, on the RTX 2060.
+
+### A bug the real run found, that no test would have
+
+The first run wrote `0103.es.srt` **twice** - and the second write destroyed the
+first. The translation writes translated cues timed against the *original
+recording*; the reading writes cues timed against the *generated audio*. Both
+are legitimately "the Spanish subtitles for this file", both were written to
+the same name, and the reading silently replaced the only cues that match real
+speech.
+
+Everything the reading produces carries `.spoken` now:
+`0103.es.txt` and `0103.es.srt` are the translation, `0103.es.spoken.wav` and
+`0103.es.spoken.srt` are the reading. Pinned by a test asserting both survive.
+
+### Driven in the browser
+
+The new panel was exercised for real, not just rendered: Read aloud stays
+hidden until there is something to read, appears when Translate goes on, and
+the speech Language row - the one that caused all this - does not appear at
+all while translating. The Into menu came back with 23 entries and the note
+explaining why. Switching the source to text brings the language question back,
+because that is the one case where nothing else knows the answer.
+
+Two bugs found by looking, neither reachable from a test:
+
+1. **`paintDevice` was clearing the Source selection.** It swept
+   `document.querySelectorAll('.seg')` - which now matches the Source chips too
+   - and set `aria-checked="false"` on both, since neither has a `data-device`
+   to match. Scoped to `[data-device]` now, and the Source painter uses
+   `aria-checked` rather than a class the stylesheet never read.
+2. **Two things numbered "1."** The page already labels its sections 1. Source
+   / 2. Settings / 3. Run, so numbering the stages as well put two firsts on
+   one screen. The stages are named rather than numbered now, with one line
+   above them saying the order.
+
+The Transcribe settings grey out for a text source. **Device** deliberately
+does not: it is where the *voice* model runs too.
+
+### Still not verified
+
+- **Nobody has listened to the Spanish.** Whisper transcribing it back as
+  Spanish proves it is Spanish, not that it is good Spanish or that it sounds
+  like the man in the recording rather than merely sharing his pitch.
+- Whisper's `base` model was used to keep the loop short; the English
+  transcript has errors of its own ("Man of for January 3"), which the
+  translation then faithfully carried.
+- Multi-speaker panels remain out of scope: every diarization option is gated
+  on Hugging Face.
+
 ## 2026-09-18 — speech, actually run
 
 `chatterbox-multilingual` downloaded, loaded onto the GPU, and used. Audio
@@ -145,8 +256,6 @@ here whether those chunks are clipped.
 - Turbo and Nano have not been downloaded, so `[laugh]` has never reached a
   model that acts on it.
 - Chinese is now *knowingly* degraded by skipping `spacy-pkuseg`. Untested.
-- Nothing has been read through the UI end to end - this run drove
-  `speak_text_file` directly, through the same code the queue uses.
 
 ### The install does not work as published
 
@@ -1107,7 +1216,11 @@ did not.
 6. Packaging is still untouched — run-from-source only, no wheel, no installer.
    Strangers on macOS and Linux will arrive before either platform has been run
    by hand, which is the risk to weigh before publishing.
-7. **Listen to `transcripts/first-reading/reading.wav`.** The model has been run
+7. **Listen to a reading.** Two now exist and neither has been heard:
+   `transcripts/first-reading/reading.wav` (English, default voice) and the
+   Spanish devotional from the 2026-09-19 run. Whisper can say what language
+   came out; only a person can say whether it is worth listening to.
+   Previously: **Listen to `transcripts/first-reading/reading.wav`.** The model has been run
    and the audio measured, but not heard. Until someone plays it, "it works"
    means "it produced a well-formed 22-second file", which is not the same
    claim. Check in particular the five chunks where the model forced an early

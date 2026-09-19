@@ -27,7 +27,12 @@ from tertius.speech import (
     speak_text_file,
     style_params,
 )
-from tertius.state import MODE_SPEAK, MODE_TRANSLATE_TEXT, StateStore
+from tertius.state import (
+    MODE_TEXT,
+    MODE_TRANSCRIBE,
+    MODE_TRANSLATE_TEXT,
+    StateStore,
+)
 
 from .fakes import FakeSpeaker, wait_until
 
@@ -440,17 +445,56 @@ def test_an_unknown_speech_model_is_rejected_up_front():
 # ----------------------------------------------------------------- the queue
 
 
-def test_a_text_file_is_queued_for_whichever_was_asked_for(tmp_path):
+def test_a_text_file_is_queued_as_a_text_source(tmp_path):
+    """No stage is recorded at scan time. That was the bug."""
     source = tmp_path / "talk.txt"
     source.write_text("words", encoding="utf-8")
 
     store = StateStore.for_output_dir(tmp_path / "a")
     store.add_files([source])
-    assert store.get(source)["mode"] == MODE_TRANSLATE_TEXT
+    assert store.get(source)["mode"] == MODE_TEXT
 
-    speaking = StateStore.for_output_dir(tmp_path / "b")
-    speaking.add_files([source], text_mode=MODE_SPEAK)
-    assert speaking.get(source)["mode"] == MODE_SPEAK
+
+def test_a_queue_written_by_the_old_version_still_runs(tmp_path):
+    """Both legacy mode names become MODE_TEXT when the state file is read.
+
+    Left alone they match no branch in the worker, so the file sits pending
+    forever with nothing saying why - a queue that will not move and no error.
+    """
+    import json
+
+    out = tmp_path / "out"
+    out.mkdir()
+    state = out / "transcription_state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    "a.txt": {"path": "a.txt", "mode": "translate_text",
+                              "status": "pending"},
+                    "b.txt": {"path": "b.txt", "mode": "speak",
+                              "status": "pending"},
+                    "c.mp3": {"path": "c.mp3", "mode": "transcribe",
+                              "status": "pending"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    StateStore.for_output_dir(out)
+
+    # Read the file back rather than going through `get`, which resolves a path
+    # to an absolute key; these entries are keyed by the bare names an older
+    # version happened to write.
+    files = json.loads(state.read_text(encoding="utf-8"))["files"]
+    assert files["a.txt"]["mode"] == MODE_TEXT
+    assert files["b.txt"]["mode"] == MODE_TEXT
+    # Anything that was not a text source is left exactly as it was.
+    assert files["c.mp3"]["mode"] == MODE_TRANSCRIBE
+    # Persisted, so the next process does not have to redo it.
+    assert MODE_TRANSLATE_TEXT not in state.read_text(encoding="utf-8")
 
 
 def test_a_queue_of_readings_never_loads_whisper(api, tmp_path):
@@ -458,7 +502,7 @@ def test_a_queue_of_readings_never_loads_whisper(api, tmp_path):
     source = tmp_path / "talk.txt"
     source.write_text("Read this aloud.", encoding="utf-8")
     api.manager.attach(api.output_dir)
-    api.manager.store.add_files([source], text_mode=MODE_SPEAK)
+    api.manager.store.add_files([source])
 
     api.manager.start(
         output_dir=api.output_dir,
@@ -471,14 +515,14 @@ def test_a_queue_of_readings_never_loads_whisper(api, tmp_path):
     assert api.speaker.calls
     entry = api.manager.store.get(source)
     assert entry["status"] == "done"
-    assert any(p.endswith("talk.wav") for p in entry["outputs"])
+    assert any(p.endswith("talk.en.spoken.wav") for p in entry["outputs"])
 
 
 def test_a_reading_that_changed_the_text_says_so_once(api, tmp_path):
     source = tmp_path / "talk.txt"
     source.write_text("Hello [laugh] there.", encoding="utf-8")
     api.manager.attach(api.output_dir)
-    api.manager.store.add_files([source], text_mode=MODE_SPEAK)
+    api.manager.store.add_files([source])
 
     api.manager.start(
         output_dir=api.output_dir,
@@ -497,7 +541,7 @@ def test_a_speech_model_that_will_not_load_stops_before_anything_is_written(
     source.write_text("Read this.", encoding="utf-8")
     api.speaker_load_error = RuntimeError("no CUDA device")
     api.manager.attach(api.output_dir)
-    api.manager.store.add_files([source], text_mode=MODE_SPEAK)
+    api.manager.store.add_files([source])
 
     api.manager.start(
         output_dir=api.output_dir, options={"speak": True, "speech_language": "en"}
@@ -596,16 +640,15 @@ def test_scanning_for_speech_finds_text_files(api, tmp_path):
     assert body["files"][0].endswith("one.txt")
 
 
-def test_queueing_with_kind_speech_marks_the_files_to_be_read(api, tmp_path):
+def test_queueing_a_text_file_records_no_stage(api, tmp_path):
+    """The queue says what the file *is*, never what will be done to it."""
     source = tmp_path / "one.txt"
     source.write_text("a", encoding="utf-8")
     api.manager.attach(api.output_dir)
 
-    api.client.post(
-        "/api/queue", json={"files": [str(source)], "kind": "speech"}
-    )
+    api.client.post("/api/queue", json={"files": [str(source)]})
 
-    assert api.manager.store.get(source)["mode"] == MODE_SPEAK
+    assert api.manager.store.get(source)["mode"] == MODE_TEXT
 
 
 def test_the_page_renders_the_reading_controls(api):

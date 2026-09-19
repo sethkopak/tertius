@@ -677,15 +677,81 @@ Honest limits, as of the last time this was written:
 
 ## Reading text aloud
 
-The mirror image of everything else here. Point Tertius at a folder of `.txt`
-files, tick **Read text files aloud**, and it writes a `.wav` beside each one —
-optionally in a voice sampled from a recording you supply.
+Three stages, and you pick which of them run:
 
-Whisper is never loaded: there is no audio to decode.
+```
+audio → transcribe → [translate] → [read aloud]
+ text →              [translate] → [read aloud]
+```
 
-Before you use this on anyone's voice but your own, read
-[Voice cloning: your responsibility, not the tool's](SECURITY.md#voice-cloning-your-responsibility-not-the-tools).
-It is short, and it is the part of this program that can hurt somebody.
+So an English talk becomes Spanish audio in one job — **in the voice of whoever
+was talking**, because Tertius samples the speaker out of the recording it is
+already transcribing.
+
+Pick the **Source** (audio or text), then tick the stages you want. Read aloud
+appears once there is something for it to read: a translation to speak, or a
+text file that is already in a language.
+
+Whisper is never loaded for a text source — there is nothing to decode.
+
+> **Before you point this at anyone's voice but your own**, read
+> [Voice cloning: your responsibility, not the tool's](SECURITY.md#voice-cloning-your-responsibility-not-the-tools).
+> It is short, and it is the part of this program that can hurt somebody.
+
+### What it writes
+
+For `0103.mp3` translated into Spanish and read aloud:
+
+| File | What it is |
+| --- | --- |
+| `0103.txt` / `0103.srt` | the transcript, timed against the recording |
+| `0103.es.txt` / `0103.es.srt` | the translation, timed against the same recording |
+| `0103.es.spoken.wav` | the Spanish audio |
+| `0103.es.spoken.srt` | cues timed against **that** audio |
+
+The `.spoken` is load-bearing. Without it the reading's `.srt` is written to
+the name the translation's `.srt` already has and silently replaces it — two
+different things that both honestly answer to "the Spanish subtitles". One is
+timed to real speech, the other to generated speech, and losing the first is
+losing the only cues that match anything anybody said.
+
+### The language is derived, not chosen
+
+**Chatterbox does not translate.** Its language setting says what the text it
+is being handed *is in*; told `zh` over English words it reads the English.
+That cost a real job once — 46 seconds of GPU, a "completed" status, and
+English audio for someone who had asked for Chinese.
+
+So it is not a free choice any more:
+
+- **Translating?** The speaking language is the target. Necessarily — the
+  words about to be spoken are the ones the translator just produced.
+- **Transcribing without translating?** Whatever the transcript is in.
+- **A text file with no translation?** The one case where nothing else knows,
+  and the only case where Tertius asks.
+
+With Read aloud on, the **Into** menu narrows to the languages the voice model
+can actually say — 23 of them — because translating a whole queue into Romanian
+and only then finding nothing can pronounce it is the failure these menus exist
+to prevent. The note under the menu says so, or the missing Romanian looks like
+a bug.
+
+### The voice
+
+Leave **Voice clip** empty and Tertius cuts a reference out of the recording
+itself: the densest ten seconds of actual speech in it, found from the segment
+timings the transcription already produced.
+
+That is not a convenience. Chatterbox conditions on roughly the first ten
+seconds of whatever reference it is handed, so handing it a whole talk hands it
+the talk's *opening* ten seconds — an introduction, a hymn, a pause. Measured
+on one real devotional file: **49% of its first ten seconds was near-silence**,
+and that was the half the model was cloning from. Tertius says so in the log
+when the best window it can find is still mostly silence.
+
+Set the field to override with a clip of your own; about ten seconds of clean
+speech is what the publisher asks for. For a text file with no audio behind it,
+empty means the model's own default voice.
 
 ### The models
 

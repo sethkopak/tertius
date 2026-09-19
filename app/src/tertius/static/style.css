@@ -345,6 +345,16 @@ button, input, select { font: inherit; color: inherit; }
    was misspelt or removed. */
 .panel-body.warn-text { color: var(--accent); }
 
+/* The three stage names in the settings rail. Set apart from the field labels
+   beside them, because they name a step in a pipeline rather than a setting. */
+.settings-grid .stage {
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+#pipeline-hint { margin: 0; }
+
+
 /* ── settings grid ────────────────────────────────────────────────────── */
 
 .settings-grid {

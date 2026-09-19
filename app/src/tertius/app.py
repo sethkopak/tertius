@@ -40,7 +40,6 @@ from .config import (
 )
 from . import folder_picker
 from .jobs import JobError, JobManager
-from .state import MODE_SPEAK, MODE_TRANSLATE_TEXT
 from .media import probe_durations_in_background
 from .system import assess_model, check_compute_type, describe_system
 from .transcribe import is_model_cached
@@ -129,8 +128,8 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if not directory:
             return _error("directory is required")
         recursive = bool(body.get("recursive", True))
-        # `kind="text"` queues `.txt` files as sources to be translated on their
-        # own, with no audio. See scan_directory for why it is a separate scan.
+        # `kind="text"` queues `.txt` files as sources in their own right, with
+        # no audio. See scan_directory for why it is a separate scan.
         kind = (body.get("kind") or "media").strip().lower()
         try:
             files = scan_directory(Path(directory), recursive=recursive, kind=kind)
@@ -223,11 +222,32 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             ready = is_converted(name)
         except Exception:
             ready = False
+        languages = list(supported_target_languages(name)) if ready else []
+
+        # With Read aloud on, only offer languages that can then be *said*.
+        # The translator knows a hundred or four hundred; the voice model knows
+        # 23. Offering the difference would translate a whole queue into
+        # Romanian and fail at the last stage, which is the same failure the
+        # menu itself exists to prevent - it is read from the model rather than
+        # hand-written precisely so it cannot offer what will be rejected.
+        speaking = request.args.get("speak", "").lower() in ("1", "true", "yes")
+        speech_model = request.args.get(
+            "speech_model", TranscriptionOptions().speech_model
+        )
+        spoken: list[str] = []
+        if speaking and speech_model in SPEECH_MODELS:
+            from .speech import speech_language_choices
+
+            spoken = list(speech_language_choices(speech_model))
+            languages = [code for code in languages if code in spoken]
+
         return jsonify(
             {
                 "model": name,
                 "ready": ready,
-                "languages": list(supported_target_languages(name)) if ready else [],
+                "languages": languages,
+                "restricted_to_speakable": bool(speaking and spoken),
+                "speakable_count": len(spoken),
                 "download_bytes": entry["download_bytes"],
                 "license": entry["license"],
                 "language_count": entry["languages"],
@@ -430,14 +450,12 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if base_dir and not Path(base_dir).expanduser().is_dir():
             return _error(f"not a directory: {base_dir}", 400)
         match_text = bool(body.get("match_reference_text"))
-        # A `.txt` queued as a source is either translated or read aloud, and
-        # only the caller knows which - the file itself cannot say.
-        text_mode = MODE_SPEAK if body.get("kind") == "speech" else MODE_TRANSLATE_TEXT
+        # Nothing about the stages is recorded at queue time any more. A `.txt`
+        # is a text source; whether it gets translated, read aloud, or both is
+        # decided by the options when the job runs - which is what lets it be
+        # both, and that combination is the whole point.
         added = store.add_files(
-            paths,
-            base_dir=base_dir,
-            match_reference_text=match_text,
-            text_mode=text_mode,
+            paths, base_dir=base_dir, match_reference_text=match_text
         )
         # Lengths fill in behind the queue: the files appear at once, and the
         # Length column and the estimate catch up a moment later.

@@ -598,7 +598,7 @@ def test_an_unknown_scan_kind_is_refused(api, tmp_path):
     assert "unknown source kind" in res.get_json()["error"]
 
 
-def test_a_queued_text_file_gets_the_translate_mode(api, tmp_path):
+def test_a_queued_text_file_is_marked_a_text_source(api, tmp_path):
     folder = tmp_path / "docs"
     _text(folder, "notes.txt", "Some text.")
     found = api.client.post(
@@ -607,7 +607,9 @@ def test_a_queued_text_file_gets_the_translate_mode(api, tmp_path):
     api.client.post("/api/queue", json={"files": found["files"]})
 
     entry = api.client.get("/api/status").get_json()["files"][0]
-    assert entry["mode"] == "translate_text"
+    # Just "a text source". What is done with it is a stage chosen at run time,
+    # not something baked in when it was scanned.
+    assert entry["mode"] == "text"
 
 
 def test_a_text_only_batch_never_loads_whisper(api, tmp_path):
@@ -679,12 +681,22 @@ def test_queued_text_with_translation_off_says_so(api, tmp_path):
 
     entry = api.client.get("/api/status").get_json()["files"][0]
     assert entry["status"] == "failed"
-    assert "translation is switched off" in entry["error"]
+    # Both stages are named, because either one would give it something to do.
+    assert "neither Translate nor Read aloud" in entry["error"]
 
 
-def test_the_page_offers_the_text_source_switch(api):
+def test_the_page_offers_the_source_switch(api):
+    """Choosing the source is its own control now, not a translation setting.
+
+    It used to be a checkbox inside the translation block reading "Translate
+    text files, not audio", which made the kind of file and the stage applied
+    to it one choice - so a text file could be translated or read aloud but
+    never both.
+    """
     page = api.client.get("/").get_data(as_text=True)
-    assert "opt-text-source" in page
+    assert 'data-source="media"' in page
+    assert 'data-source="text"' in page
+    assert "opt-text-source" not in page
 
 
 # ----------------------------------------------- installing what it needs

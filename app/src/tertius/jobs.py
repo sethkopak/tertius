@@ -21,13 +21,12 @@ from .state import (
     DONE,
     MODE_ALIGN,
     MODE_SKIP,
-    MODE_SPEAK,
+    MODE_TEXT,
     MODE_TRANSCRIBE,
-    MODE_TRANSLATE_TEXT,
     SKIPPED,
     StateStore,
 )
-from .speech import Speaker, speak_text_file
+from .speech import Speaker, read_text_source, speak_text_file
 from .transcribe import WhisperTranscriber, align_file, transcribe_file
 from .translate import Translator, translate_outputs, translate_text_file
 
@@ -99,6 +98,7 @@ class JobManager:
         translate_text_fn: Callable = translate_text_file,
         speaker_factory: Callable[..., Speaker] | None = None,
         speak_fn: Callable = speak_text_file,
+        text_source_fn: Callable = read_text_source,
     ):
         self._transcriber_factory = transcriber_factory or WhisperTranscriber
         self._transcribe_fn = transcribe_fn
@@ -112,6 +112,7 @@ class JobManager:
         # able to run a whole batch without a 3 GB download or a real model.
         self._speaker_factory = speaker_factory or Speaker
         self._speak_fn = speak_fn
+        self._text_source_fn = text_source_fn
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -566,6 +567,92 @@ class JobManager:
         if thread is not None:
             thread.join(timeout)
 
+    def _note_speech_warnings(self, path, result) -> None:
+        """Say once what Tertius silently changed about the text.
+
+        A dropped paralinguistic tag or an emotion word read as an intensity is
+        not recoverable from the audio afterwards, and the `.json` that records
+        it is not a file anyone opens.
+        """
+        notes = (getattr(result, "speech", None) or {}).get("warnings") or []
+        if not notes:
+            return
+        with self._lock:
+            self._notice = f"{Path(path).name}: {notes[0]}" + (
+                f" (+{len(notes) - 1} more, in the .json)" if len(notes) > 1 else ""
+            )
+
+    def _read_aloud(self, path, target_dir, speaker, result, translated, options):
+        """Speak a finished transcript. The third stage.
+
+        Two things are decided here rather than by the user, because in both
+        cases something else already knows the answer and a hand-made choice
+        can only disagree with it:
+
+        **Which words.** The sentence-level translation, never the per-segment
+        one. The `.srt` is translated segment by segment so its measured
+        timings survive, and Whisper cuts segments for timing rather than
+        meaning - so more than half of them are fragments, and the model
+        renders them worse. A mistake in a file can be skimmed past; the same
+        mistake read out loud cannot.
+
+        **Which voice.** The recording being transcribed, sampled from its own
+        densest stretch of speech, so a translation comes back in the voice of
+        whoever was talking. A queue of different speakers therefore needs no
+        settings at all, which one shared voice clip could never manage.
+        """
+        import shutil
+        import tempfile
+
+        from .speech import chunks_from_prose, speak_chunks, voice_for
+
+        language = options.resolved_speech_language(getattr(result, "language", None))
+        source = translated if translated is not None else result
+        text = getattr(source, "prose", None)
+        if not text:
+            # No translation, or a translation that produced no prose: fall
+            # back to the transcript's own words.
+            text = " ".join(
+                (seg.text or "").strip()
+                for seg in getattr(source, "segments", None) or ()
+                if (seg.text or "").strip()
+            )
+        if not text.strip():
+            raise ValueError("there is nothing to read aloud")
+
+        chunks = chunks_from_prose(text, speaker.model_key, options.speech_style)
+        # `.spoken`, and it is not decoration. Without it the reading's `.srt`
+        # is written to exactly the name the translation's `.srt` already has,
+        # and silently replaces it - two different things that both legitimately
+        # answer to "the Spanish subtitles for this file". The translation's
+        # cues are timed against the original recording; the reading's are
+        # timed against the audio that was just generated. Losing the first to
+        # the second destroys the only cues that match the real speech.
+        suffix = f".{language}.spoken"
+
+        scratch = tempfile.mkdtemp(prefix="tertius-voice-")
+        try:
+            voice, temporary = voice_for(
+                path, result, options.speech_voice, scratch
+            )
+            written, spoken = speak_chunks(
+                chunks,
+                speaker,
+                language,
+                target_dir,
+                Path(path).stem,
+                voice=voice,
+                suffix=suffix,
+                formats=[f for f in options.formats if f != "txt"],
+                source=path,
+                on_progress=self._note_speech_progress,
+            )
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+        self._note_speech_warnings(path, spoken)
+        return written
+
     # --------------------------------------------------------------- the work
 
     def _run_batch(self) -> None:
@@ -582,6 +669,8 @@ class JobManager:
         translate_reports_progress = _accepts(self._translate_fn, "on_progress")
         align_watches = _accepts(self._align_fn, "on_segment")
         speak_reports_progress = _accepts(self._speak_fn, "on_progress")
+        text_source_reports_progress = _accepts(self._text_source_fn, "on_progress")
+        translate_takes_for_speech = _accepts(self._translate_fn, "for_speech")
         transcriber = (
             self._transcriber_factory(
                 options, on_download_progress=self._note_download_progress
@@ -595,15 +684,14 @@ class JobManager:
         # the whole job on a machine with a broken GPU that was never going to
         # be asked to do anything.
         needs_whisper = any(
-            (store.get(path) or {}).get("mode")
-            not in (MODE_TRANSLATE_TEXT, MODE_SPEAK, MODE_SKIP)
+            (store.get(path) or {}).get("mode") not in (MODE_TEXT, MODE_SKIP)
             for path in store.pending_files()
         )
-        # Whether anything in the queue is to be read aloud. Asked of the files
-        # rather than of `options.speak`, which only records what the UI was
-        # set to: a queue can outlive the toggle that filled it.
-        needs_speech = any(
-            (store.get(path) or {}).get("mode") == MODE_SPEAK
+        # Reading aloud is a stage now, so this is simply whether the stage is
+        # switched on - it applies to a transcript just as it does to a text
+        # file, which is the whole point of the change.
+        needs_speech = bool(options.speak) and any(
+            (store.get(path) or {}).get("mode") != MODE_SKIP
             for path in store.pending_files()
         )
         warmup = getattr(transcriber, "warmup", None) if needs_whisper else None
@@ -716,6 +804,7 @@ class JobManager:
         last_error: str | None = None
         repeated = 0
         translation_failures = 0
+        speech_failures = 0
 
         try:
             while True:
@@ -751,60 +840,44 @@ class JobManager:
                 target_dir = Path(output_dir) / subdir if subdir else output_dir
                 mode = (entry or {}).get("mode") or MODE_TRANSCRIBE
                 try:
-                    if mode == MODE_SPEAK:
-                        if speaker is None:  # pragma: no cover - defensive
-                            raise JobError(
-                                "this file is text to be read aloud, but no "
-                                "speech model was loaded"
-                            )
-                        with self._lock:
-                            self._phase = SPEAKING
-                        outputs, result = self._speak_fn(
-                            path,
-                            target_dir,
-                            speaker,
-                            options.speech_language,
-                            options.speech_voice,
-                            options.speech_style,
-                            options.formats,
-                            **(
-                                {"on_progress": self._note_speech_progress}
-                                if speak_reports_progress
-                                else {}
-                            ),
-                        )
-                        # Whatever Tertius silently changed about the text -
-                        # a dropped paralinguistic tag, an emotion word read as
-                        # an intensity - is worth saying once, here, rather than
-                        # only in the `.json` nobody opens.
-                        notes = (getattr(result, "speech", None) or {}).get(
-                            "warnings"
-                        ) or []
-                        if notes:
+                    if mode == MODE_TEXT:
+                        # A text source: no audio to decode, and whichever of
+                        # the two stages are on decide what happens to it.
+                        if speaker is not None:
                             with self._lock:
-                                self._notice = (
-                                    f"{Path(path).name}: {notes[0]}"
-                                    + (
-                                        f" (+{len(notes) - 1} more, in the .json)"
-                                        if len(notes) > 1
-                                        else ""
-                                    )
-                                )
-                    elif mode == MODE_TRANSLATE_TEXT:
-                        if translator is None:
-                            raise JobError(
-                                "this file is text to be translated, but "
-                                "translation is switched off - tick Translate "
-                                "and choose a language, or remove it from the "
-                                "queue"
+                                self._phase = SPEAKING
+                            outputs, result = self._text_source_fn(
+                                path,
+                                target_dir,
+                                speaker,
+                                translator=translator,
+                                target_language=options.target_language,
+                                language=options.resolved_speech_language(),
+                                voice=options.speech_voice,
+                                default_style=options.speech_style,
+                                formats=options.formats,
+                                **(
+                                    {"on_progress": self._note_speech_progress}
+                                    if text_source_reports_progress
+                                    else {}
+                                ),
                             )
-                        outputs, result = self._translate_text_fn(
-                            path,
-                            target_dir,
-                            translator,
-                            options.target_language,
-                            options.formats,
-                        )
+                            self._note_speech_warnings(path, result)
+                        elif translator is not None:
+                            outputs, result = self._translate_text_fn(
+                                path,
+                                target_dir,
+                                translator,
+                                options.target_language,
+                                options.formats,
+                            )
+                        else:
+                            raise JobError(
+                                "this file is text, and neither Translate nor "
+                                "Read aloud is switched on - there is nothing "
+                                "to do with it. Tick one, or remove it from "
+                                "the queue"
+                            )
                     elif mode == MODE_ALIGN:
                         outputs, result = self._align_fn(
                             transcriber,
@@ -860,7 +933,8 @@ class JobManager:
                         return
                     continue
 
-                if translator is not None and mode != MODE_TRANSLATE_TEXT:
+                translated = None
+                if translator is not None and mode != MODE_TEXT:
                     # The transcript is already written and correct at this
                     # point. A translation that fails must therefore not fail
                     # the file: marking it failed would send a resume back to
@@ -874,7 +948,7 @@ class JobManager:
                         # continuation of the first.
                         self._active["progress"] = 0.0
                     try:
-                        translated_outputs, _translated = self._translate_fn(
+                        translated_outputs, translated = self._translate_fn(
                             result,
                             path,
                             target_dir,
@@ -884,6 +958,11 @@ class JobManager:
                             **(
                                 {"sentence_pass": options.translate_sentences}
                                 if translate_takes_sentence_pass
+                                else {}
+                            ),
+                            **(
+                                {"for_speech": True}
+                                if options.speak and translate_takes_for_speech
                                 else {}
                             ),
                             **(
@@ -937,7 +1016,43 @@ class JobManager:
                     with self._lock:
                         self._phase = TRANSCRIBING
 
-                if mode == MODE_SPEAK:
+                if speaker is not None and mode != MODE_TEXT:
+                    # The third stage. Like translation before it, a failure
+                    # here must not fail the file: the transcript and the
+                    # translation are already written and correct, and marking
+                    # it failed would send a resume back to redo an hour of
+                    # transcription over a voice model that would not load.
+                    with self._lock:
+                        self._phase = SPEAKING
+                        self._active["progress"] = 0.0
+                    try:
+                        spoken = self._read_aloud(
+                            path, target_dir, speaker, result, translated, options
+                        )
+                        outputs = list(outputs) + list(spoken)
+                        speech_failures = 0
+                    except Exception as exc:
+                        speech_failures += 1
+                        message = f"{type(exc).__name__}: {exc}"
+                        log.exception("could not read %s aloud", path)
+                        with self._lock:
+                            self._notice = (
+                                f"{Path(path).name} was transcribed, but could "
+                                f"not be read aloud: {message}"
+                            )
+                        if speech_failures >= REPEATED_FAILURE_LIMIT:
+                            log.error(
+                                "%d readings in a row failed - stopping",
+                                speech_failures,
+                            )
+                            with self._lock:
+                                self._state = ERROR
+                                self._error = (
+                                    f"{speech_failures} files in a row were "
+                                    "transcribed but could not be read aloud, "
+                                    "so the batch was stopped. The transcripts "
+                                    "written so far are complete.\n\n" + message
+                                )
                     with self._lock:
                         self._phase = TRANSCRIBING
 

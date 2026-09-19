@@ -79,6 +79,20 @@
 
       <div class="settings-grid">
 
+        <span id="source-label">Source</span>
+        <div class="segments" id="source-segments" role="radiogroup" aria-labelledby="source-label">
+          <button type="button" class="seg" data-source="media" role="radio" aria-checked="true"
+                  title="Scan for audio and video files and transcribe them.">audio</button>
+          <button type="button" class="seg" data-source="text" role="radio" aria-checked="false"
+                  title="Scan for .txt files and use them as sources in their own right. Whisper is never loaded — there is nothing to decode.">text</button>
+        </div>
+
+        <span></span>
+        <p class="note dim" id="pipeline-hint">Stages run in order: <strong>transcribe</strong> &rarr; <strong>translate</strong> &rarr; <strong>read aloud</strong>. Text files skip the first.</p>
+
+        <span class="stage">Transcribe</span>
+        <span></span>
+
         <label for="opt-model">Model</label>
         <div class="with-info">
           <div class="select">
@@ -146,7 +160,7 @@
           </div>
         </div>
 
-        <span>Translate</span>
+        <span class="stage">Translate</span>
         <label class="check"
                title="Also write the transcript in another language. The original-language files are always written too — the translation lands beside them as talk.es.txt.">
           <input type="checkbox" id="opt-translate" class="tick">
@@ -188,15 +202,6 @@
           </label>
         </div>
 
-        <div class="row-pair" id="translation-source-row" hidden>
-          <span></span>
-          <label class="check"
-                 title="Scan for .txt files and translate those instead of audio. Whisper is never loaded — the text goes straight to the translator.">
-            <input type="checkbox" id="opt-text-source" class="tick">
-            Translate text files, not audio
-          </label>
-        </div>
-
         <div class="row-pair" id="translation-prepare-row" hidden>
           <span></span>
           <button type="button" id="btn-prepare-translation" class="btn"
@@ -208,12 +213,14 @@
           <p class="note" id="translation-note"></p>
         </div>
 
-        <span>Read aloud</span>
-        <label class="check"
-               title="Turn a folder of .txt files into recordings. Whisper is never loaded — there is no audio to decode. Writes a .wav beside each text file, and an .srt timed against the audio it just made.">
-          <input type="checkbox" id="opt-speak" class="tick">
-          Read text files aloud
-        </label>
+        <div class="row-pair" id="speak-row" hidden>
+          <span class="stage">Read aloud</span>
+          <label class="check"
+                 title="Generate audio from the finished text. On an audio source this runs after translating, so an English talk comes back as speech in the target language — in the voice of whoever was talking. Writes a .wav, and an .srt timed against the audio it just made.">
+            <input type="checkbox" id="opt-speak" class="tick">
+            Read the result aloud
+          </label>
+        </div>
 
         <div class="row-pair" id="speech-model-row" hidden>
           <label for="opt-speech-model">Voice model</label>
@@ -234,7 +241,7 @@
           <label for="opt-speech-language">Language</label>
           <div class="select">
             <select id="opt-speech-language"
-                    title="The language the text is written in. Read from the model itself, so it can never offer one the model would reject.">
+                    title="The language this text is written in. Only asked when nothing else already knows: translating makes the target language the answer, and transcribing detects it. Chatterbox does not translate — telling it zh over English text makes it read the English.">
               <option value="">choose a language</option>
             </select>
             <span class="chev" aria-hidden="true">⌄</span>
@@ -245,8 +252,8 @@
           <label for="opt-speech-voice">Voice clip</label>
           <div class="path-row">
             <input type="text" id="opt-speech-voice" class="field data" spellcheck="false"
-                   placeholder="the model's own voice"
-                   title="A recording of the person to read in — about ten seconds of clean speech. Everything expressive comes from this clip: a voice sampled reading gently reads gently. Leave it empty to use the model's default voice.">
+                   placeholder="from the recording"
+                   title="Leave this empty and Tertius samples the voice from the recording being transcribed — the densest ten seconds of speech in it — so a translation comes back in the original speaker's voice. Set it to override with a clip of your own; about ten seconds of clean speech is what the model wants. For a text file with no audio behind it, empty means the model's own default voice.">
             <button type="button" id="btn-browse-voice" class="btn ghost"
                     title="Choose a recording of the voice to read in">Browse</button>
           </div>
@@ -460,6 +467,7 @@
         <p class="panel-body dim">Nothing has been generated. This is the text split into the
           calls that would be made, with the delivery each one would get &mdash; so a
           misspelt tag shows up here rather than forty minutes into a reading.</p>
+        <p class="panel-body" id="speech-preview-language"></p>
         <div id="speech-warnings"></div>
         <div class="table-scroll">
           <table id="speech-preview-table">

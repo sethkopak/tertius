@@ -25,15 +25,29 @@ MODE_TRANSCRIBE = "transcribe"  # normal: Whisper writes the transcript
 MODE_ALIGN = "align"  # timestamp the supplied text instead
 MODE_SKIP = "skip"  # leave it alone
 MODE_UNDECIDED = "undecided"  # no text found; waiting on the user
-MODE_TRANSLATE_TEXT = "translate_text"  # a .txt source: translate it, no audio
-MODE_SPEAK = "speak"  # a .txt source: read it aloud, no audio in
+MODE_TEXT = "text"  # a .txt queued as a source: no audio to decode
+
+# The two names this mode used to have, kept only so that a queue written by an
+# older version still loads. Both meant "a .txt source"; they differed in what
+# was then done with it, which turned out to be the wrong thing to record here.
+#
+# Translating and speaking are *stages*, not kinds of file - an audio source
+# can be translated too, and a text source can be both translated and read
+# aloud. Baking the stage into the queue at scan time made the two mutually
+# exclusive, which is exactly how a run ended up producing English audio for
+# someone who had asked for Chinese. What happens to a text source is decided
+# by the options at run time now. `_normalise_modes` rewrites the old values on
+# load.
+MODE_TRANSLATE_TEXT = "translate_text"  # legacy: a .txt to translate
+MODE_SPEAK = "speak"  # legacy: a .txt to read aloud
+LEGACY_TEXT_MODES = (MODE_TRANSLATE_TEXT, MODE_SPEAK)
+
 MODES = (
     MODE_TRANSCRIBE,
     MODE_ALIGN,
     MODE_SKIP,
     MODE_UNDECIDED,
-    MODE_TRANSLATE_TEXT,
-    MODE_SPEAK,
+    MODE_TEXT,
 )
 
 PENDING = "pending"
@@ -127,6 +141,26 @@ class StateStore:
         data.setdefault("output_dir", None)
         data.setdefault("reference_dir", None)
         self._data = data
+        self._normalise_modes()
+
+    def _normalise_modes(self) -> None:
+        """Rewrite the two legacy text-source modes to `MODE_TEXT`.
+
+        A queue written before translating and speaking became stages names one
+        of them per file. Left alone, such a file matches no branch in the
+        worker and sits pending forever - the expensive kind of silent failure,
+        because the user sees a queue that will not move and no error saying
+        why. Rewritten in memory and flushed only if something changed, so
+        opening a folder read-only does not rewrite its state file.
+        """
+        changed = 0
+        for entry in (self._data.get("files") or {}).values():
+            if entry.get("mode") in LEGACY_TEXT_MODES:
+                entry["mode"] = MODE_TEXT
+                changed += 1
+        if changed:
+            log.info("queue: %d file(s) carried over from an older mode", changed)
+            self._flush()
 
     def _flush(self) -> None:
         """Atomically persist. Caller must hold the lock."""
@@ -226,7 +260,6 @@ class StateStore:
         paths: Iterable[str | os.PathLike],
         base_dir: str | os.PathLike | None = None,
         match_reference_text: bool = False,
-        text_mode: str = MODE_TRANSLATE_TEXT,
     ) -> list[str]:
         """Register files as pending. Already-known files keep their status.
 
@@ -234,15 +267,13 @@ class StateStore:
         sat inside it, so the output directory can mirror the same structure -
         which also stops `A/talk.mp3` and `B/talk.mp3` writing to one transcript.
 
-        `text_mode` is what a `.txt` queued as a source in its own right is
-        for - translating, or reading aloud. It has to be carried in rather than
-        worked out later: the two look identical on disk, and picking the wrong
-        one is an hour of GPU time spent producing the wrong thing.
+        A `.txt` queued as a source becomes `MODE_TEXT`, and nothing is
+        recorded here about what will be done with it. Translating and reading
+        aloud are stages chosen in the options at run time, and a text source
+        can have both.
 
         Returns the keys of files that were newly added.
         """
-        if text_mode not in (MODE_TRANSLATE_TEXT, MODE_SPEAK):
-            raise ValueError(f"not a text source mode: {text_mode!r}")
         added: list[str] = []
         root = Path(base_dir).expanduser().resolve() if base_dir else None
         with self._lock:
@@ -258,9 +289,9 @@ class StateStore:
                 )
                 if is_text_source:
                     # Queued as a source in its own right. There is no audio to
-                    # transcribe and nothing to align it against: it is either
-                    # translated or read aloud, and the caller says which.
-                    mode = text_mode
+                    # transcribe and nothing to align it against; what happens
+                    # to it is whichever stages the options turn on.
+                    mode = MODE_TEXT
                 elif not match_reference_text:
                     mode = MODE_TRANSCRIBE
                 elif reference:
