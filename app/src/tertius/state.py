@@ -26,12 +26,14 @@ MODE_ALIGN = "align"  # timestamp the supplied text instead
 MODE_SKIP = "skip"  # leave it alone
 MODE_UNDECIDED = "undecided"  # no text found; waiting on the user
 MODE_TRANSLATE_TEXT = "translate_text"  # a .txt source: translate it, no audio
+MODE_SPEAK = "speak"  # a .txt source: read it aloud, no audio in
 MODES = (
     MODE_TRANSCRIBE,
     MODE_ALIGN,
     MODE_SKIP,
     MODE_UNDECIDED,
     MODE_TRANSLATE_TEXT,
+    MODE_SPEAK,
 )
 
 PENDING = "pending"
@@ -224,6 +226,7 @@ class StateStore:
         paths: Iterable[str | os.PathLike],
         base_dir: str | os.PathLike | None = None,
         match_reference_text: bool = False,
+        text_mode: str = MODE_TRANSLATE_TEXT,
     ) -> list[str]:
         """Register files as pending. Already-known files keep their status.
 
@@ -231,8 +234,15 @@ class StateStore:
         sat inside it, so the output directory can mirror the same structure -
         which also stops `A/talk.mp3` and `B/talk.mp3` writing to one transcript.
 
+        `text_mode` is what a `.txt` queued as a source in its own right is
+        for - translating, or reading aloud. It has to be carried in rather than
+        worked out later: the two look identical on disk, and picking the wrong
+        one is an hour of GPU time spent producing the wrong thing.
+
         Returns the keys of files that were newly added.
         """
+        if text_mode not in (MODE_TRANSLATE_TEXT, MODE_SPEAK):
+            raise ValueError(f"not a text source mode: {text_mode!r}")
         added: list[str] = []
         root = Path(base_dir).expanduser().resolve() if base_dir else None
         with self._lock:
@@ -248,9 +258,9 @@ class StateStore:
                 )
                 if is_text_source:
                     # Queued as a source in its own right. There is no audio to
-                    # transcribe and nothing to align it against; the only thing
-                    # to do with it is translate it.
-                    mode = MODE_TRANSLATE_TEXT
+                    # transcribe and nothing to align it against: it is either
+                    # translated or read aloud, and the caller says which.
+                    mode = text_mode
                 elif not match_reference_text:
                     mode = MODE_TRANSCRIBE
                 elif reference:

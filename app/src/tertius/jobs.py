@@ -21,11 +21,13 @@ from .state import (
     DONE,
     MODE_ALIGN,
     MODE_SKIP,
+    MODE_SPEAK,
     MODE_TRANSCRIBE,
     MODE_TRANSLATE_TEXT,
     SKIPPED,
     StateStore,
 )
+from .speech import Speaker, speak_text_file
 from .transcribe import WhisperTranscriber, align_file, transcribe_file
 from .translate import Translator, translate_outputs, translate_text_file
 
@@ -47,8 +49,15 @@ TRANSCRIBING = "transcribing"
 # Installing torch and friends is minutes of silence of its own, before
 # any model download starts.
 INSTALLING_TRANSLATION_DEPS = "installing_translation_deps"
+INSTALLING_SPEECH_DEPS = "installing_speech_deps"
 PREPARING_TRANSLATION = "preparing_translation"
 TRANSLATING = "translating"
+# Speech has the same two silent minutes to account for - a 3-4 GB download,
+# and a torch install before it - plus a third phase of its own, because
+# generating audio is nothing like decoding it and the UI should not claim
+# to be transcribing while it reads a script aloud.
+PREPARING_SPEECH = "preparing_speech"
+SPEAKING = "speaking"
 
 # Stop the batch after this many files fail in a row with the identical error:
 # that is the environment being broken, not a run of bad files.
@@ -88,6 +97,8 @@ class JobManager:
         translator_factory: Callable[..., Translator] | None = None,
         translate_fn: Callable = translate_outputs,
         translate_text_fn: Callable = translate_text_file,
+        speaker_factory: Callable[..., Speaker] | None = None,
+        speak_fn: Callable = speak_text_file,
     ):
         self._transcriber_factory = transcriber_factory or WhisperTranscriber
         self._transcribe_fn = transcribe_fn
@@ -97,6 +108,10 @@ class JobManager:
         self._translator_factory = translator_factory or Translator
         self._translate_fn = translate_fn
         self._translate_text_fn = translate_text_fn
+        # Injectable for the same reason the other two are: the tests must be
+        # able to run a whole batch without a 3 GB download or a real model.
+        self._speaker_factory = speaker_factory or Speaker
+        self._speak_fn = speak_fn
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -152,6 +167,19 @@ class JobManager:
             self._phase = INSTALLING_TRANSLATION_DEPS
             self._notice = line[:200]
 
+    def _note_speech_install_line(self, line: str) -> None:
+        """The same, for the speech install, which is the larger of the two.
+
+        Its own phase rather than a shared one: speaking pulls the CUDA build
+        of torch where translating takes the CPU build, and a progress line
+        saying "installing translation dependencies" during a 2.5 GB download
+        nobody asked translation for is how a user concludes the app is
+        confused.
+        """
+        with self._lock:
+            self._phase = INSTALLING_SPEECH_DEPS
+            self._notice = line[:200]
+
     def _note_translation_progress(self, done: int, total: int) -> None:
         """How far through translating this file we are.
 
@@ -160,6 +188,12 @@ class JobManager:
         takes. The excerpt is left alone: it is the last thing *transcribed*,
         and half a translated sentence in its place would say less.
         """
+        with self._lock:
+            if total:
+                self._active["progress"] = max(0.0, min(1.0, done / total))
+
+    def _note_speech_progress(self, done: int, total: int) -> None:
+        """Chunks read so far, for the bar inside the current file."""
         with self._lock:
             if total:
                 self._active["progress"] = max(0.0, min(1.0, done / total))
@@ -307,6 +341,96 @@ class JobManager:
             self._finished_at = time.time()
             self._phase = None
             self._notice = f"{model_key} is ready to translate with."
+
+    def prepare_speech(self, model_key: str) -> dict:
+        """Install what speaking needs and download the weights, without a job.
+
+        The same bargain as `prepare_translation`, and here for the same
+        reason: the download is 3-4 GB and the torch that runs it is another
+        2.5, so it belongs in the open where the user chooses it rather than
+        hidden inside Begin.
+
+        Returns immediately; the work happens on a worker thread and is
+        observed through `status()` like any other job.
+        """
+        from .config import SPEECH_MODELS
+
+        if model_key not in SPEECH_MODELS:
+            raise JobError(f"unknown speech model: {model_key}")
+
+        with self._lock:
+            if self.is_running():
+                raise JobError("a job is already running")
+            self._cancel.clear()
+            self._state = RUNNING
+            self._error = None
+            self._notice = None
+            self._current_file = None
+            self._run = self._empty_run()
+            self._active = self._empty_active()
+            self._phase = PREPARING_SPEECH
+            self._download = self._empty_download()
+            self._download["model"] = model_key
+            self._download["expected_bytes"] = SPEECH_MODELS[model_key][
+                "download_bytes"
+            ]
+            self._started_at = time.time()
+            self._finished_at = None
+            self._thread = threading.Thread(
+                target=self._prepare_speech,
+                args=(model_key,),
+                name="speech-prepare",
+                daemon=False,
+            )
+            self._thread.start()
+            return self.status(include_files=False)
+
+    def _prepare_speech(self, model_key: str) -> None:
+        try:
+            speaker = self._speaker_factory(
+                model_key,
+                device="cpu",
+                on_download_progress=self._note_download_progress,
+            )
+            # Download only. Loading it onto a device here would take VRAM for
+            # a model nobody has asked to run yet.
+            prepare = getattr(speaker, "prepare", None)
+            if callable(prepare):
+                if _accepts(prepare, "on_line"):
+                    prepare(on_line=self._note_speech_install_line)
+                else:
+                    prepare()
+            else:  # pragma: no cover - the real Speaker always has prepare
+                speaker.load()
+        except Exception as exc:
+            log.exception("could not prepare the speech model")
+            with self._lock:
+                self._state = ERROR
+                self._error = f"could not prepare the speech model: {exc}"
+                self._finished_at = time.time()
+                self._phase = None
+            return
+
+        # Said here rather than only at run time: this is the moment the user
+        # finds out whether the GPU they have will actually be used.
+        problem = None
+        try:
+            from .speech import torch_install_problem
+
+            problem = torch_install_problem()
+        except Exception:  # pragma: no cover - defensive
+            log.debug("could not check the torch install", exc_info=True)
+
+        ready = f"{model_key} is ready to read text aloud."
+        with self._lock:
+            self._state = COMPLETED
+            self._finished_at = time.time()
+            self._phase = None
+            # Both, not one or the other. The model really is ready, and the
+            # GPU really will not be used; saying only the second reads as a
+            # failure, and saying only the first hides the reason a reading is
+            # about to take twenty times as long as it should.
+            self._notice = "\n\n".join([ready, problem]) if problem else ready
 
     # ---------------------------------------------------------- job lifecycle
 
@@ -457,6 +581,7 @@ class JobManager:
         translate_takes_sentence_pass = _accepts(self._translate_fn, "sentence_pass")
         translate_reports_progress = _accepts(self._translate_fn, "on_progress")
         align_watches = _accepts(self._align_fn, "on_segment")
+        speak_reports_progress = _accepts(self._speak_fn, "on_progress")
         transcriber = (
             self._transcriber_factory(
                 options, on_download_progress=self._note_download_progress
@@ -471,7 +596,14 @@ class JobManager:
         # be asked to do anything.
         needs_whisper = any(
             (store.get(path) or {}).get("mode")
-            not in (MODE_TRANSLATE_TEXT, MODE_SKIP)
+            not in (MODE_TRANSLATE_TEXT, MODE_SPEAK, MODE_SKIP)
+            for path in store.pending_files()
+        )
+        # Whether anything in the queue is to be read aloud. Asked of the files
+        # rather than of `options.speak`, which only records what the UI was
+        # set to: a queue can outlive the toggle that filled it.
+        needs_speech = any(
+            (store.get(path) or {}).get("mode") == MODE_SPEAK
             for path in store.pending_files()
         )
         warmup = getattr(transcriber, "warmup", None) if needs_whisper else None
@@ -533,12 +665,51 @@ class JobManager:
                     self._phase = None
                 return
 
+        speaker = None
+        if needs_speech:
+            # Loaded before the first file for the same reason the translator
+            # is: the first use may download 3-4 GB, and finding that out
+            # halfway through a queue is the failure this ordering prevents.
+            with self._lock:
+                self._phase = PREPARING_SPEECH
+                self._download = self._empty_download()
+                self._download["model"] = options.speech_model
+                from .config import SPEECH_MODELS
+
+                entry = SPEECH_MODELS.get(options.speech_model) or {}
+                self._download["expected_bytes"] = entry.get("download_bytes")
+            try:
+                speaker = self._speaker_factory(
+                    options.speech_model,
+                    device=options.device,
+                    on_download_progress=self._note_download_progress,
+                )
+                load = getattr(speaker, "load", None)
+                if callable(load):
+                    load()
+            except Exception as exc:
+                log.exception("speech model failed to load")
+                with self._lock:
+                    self._state = ERROR
+                    self._error = f"speaking is not available: {exc}"
+                    self._finished_at = time.time()
+                    self._phase = None
+                return
+
         with self._lock:
             self._phase = TRANSCRIBING
             if getattr(transcriber, "gpu_fallback_reason", None):
                 self._notice = (
                     "The GPU could not be used, so this job is running on the CPU "
                     f"(slower). Reason: {transcriber.gpu_fallback_reason}"
+                )
+            elif getattr(speaker, "gpu_fallback_reason", None):
+                # Worth its own branch: the usual cause here is not a missing
+                # GPU but a CPU-only torch sitting in front of a perfectly good
+                # one, and that reason explains how to fix it.
+                self._notice = (
+                    "Speaking is running on the CPU, which is much slower. "
+                    f"Reason: {speaker.gpu_fallback_reason}"
                 )
             self._active_device = getattr(transcriber, "active_device", None)
 
@@ -580,7 +751,46 @@ class JobManager:
                 target_dir = Path(output_dir) / subdir if subdir else output_dir
                 mode = (entry or {}).get("mode") or MODE_TRANSCRIBE
                 try:
-                    if mode == MODE_TRANSLATE_TEXT:
+                    if mode == MODE_SPEAK:
+                        if speaker is None:  # pragma: no cover - defensive
+                            raise JobError(
+                                "this file is text to be read aloud, but no "
+                                "speech model was loaded"
+                            )
+                        with self._lock:
+                            self._phase = SPEAKING
+                        outputs, result = self._speak_fn(
+                            path,
+                            target_dir,
+                            speaker,
+                            options.speech_language,
+                            options.speech_voice,
+                            options.speech_style,
+                            options.formats,
+                            **(
+                                {"on_progress": self._note_speech_progress}
+                                if speak_reports_progress
+                                else {}
+                            ),
+                        )
+                        # Whatever Tertius silently changed about the text -
+                        # a dropped paralinguistic tag, an emotion word read as
+                        # an intensity - is worth saying once, here, rather than
+                        # only in the `.json` nobody opens.
+                        notes = (getattr(result, "speech", None) or {}).get(
+                            "warnings"
+                        ) or []
+                        if notes:
+                            with self._lock:
+                                self._notice = (
+                                    f"{Path(path).name}: {notes[0]}"
+                                    + (
+                                        f" (+{len(notes) - 1} more, in the .json)"
+                                        if len(notes) > 1
+                                        else ""
+                                    )
+                                )
+                    elif mode == MODE_TRANSLATE_TEXT:
                         if translator is None:
                             raise JobError(
                                 "this file is text to be translated, but "
@@ -727,6 +937,10 @@ class JobManager:
                     with self._lock:
                         self._phase = TRANSCRIBING
 
+                if mode == MODE_SPEAK:
+                    with self._lock:
+                        self._phase = TRANSCRIBING
+
                 segments = getattr(result, "segments", None) or ()
                 store.mark_done(
                     path,
@@ -756,7 +970,7 @@ class JobManager:
                 self._active = self._empty_active()
             return
         finally:
-            for model in (transcriber, translator):
+            for model in (transcriber, translator, speaker):
                 unload = getattr(model, "unload", None)
                 if callable(unload):
                     unload()

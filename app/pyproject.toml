@@ -40,6 +40,38 @@ translate = [
     "sentencepiece>=0.2",
     "torch>=2.2",
 ]
+# Reading text aloud. `torch` here is not a setup-only dependency the way it is
+# for translating - it is the runtime, and it runs the model on every chunk.
+#
+# The two extras therefore want *different builds of the same package*, and one
+# virtual environment holds one torch. `translate` deliberately takes the
+# CPU-only wheel, because conversion never runs a model and the CUDA build is
+# ten times the download; speaking on that wheel works and is perhaps twenty
+# times slower. Whichever is installed first wins, so `tertius.speech`
+# checks for exactly that case and says so rather than letting someone sit
+# through a CPU synthesis wondering why the GPU is idle. Installing this extra
+# through pip does not choose an index; the Download and prepare button does.
+# `chatterbox-tts` is absent on purpose, and this extra cannot install it.
+# Its metadata hard-pins `spacy-pkuseg` (no cp314 wheel anywhere, so pip tries
+# to compile it and needs MSVC), `transformers==5.2.0` (which would downgrade
+# the library translation depends on) and `gradio==6.8.0` (never imported).
+# pip has no way to say "this package without its declared dependencies" from
+# a dependency list, so the Download and prepare button does it with
+# `--no-deps` plus the real imports - see CHATTERBOX_DEPENDENCIES in
+# tertius/speech.py. Installing this extra gets the rest ready.
+speak = [
+    "torch>=2.2",
+    "librosa",
+    "resemble-perth",
+    "s3tokenizer",
+    "conformer",
+    "diffusers",
+    "omegaconf",
+    "pyloudnorm",
+    "pykakasi",
+    "transformers>=4.40",
+    "safetensors",
+]
 
 [project.scripts]
 tertius = "tertius.__main__:main"

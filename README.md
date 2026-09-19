@@ -675,13 +675,178 @@ Honest limits, as of the last time this was written:
   beside Whisper is unknown, which is why the comparison table has no verdict
   column.
 
+## Reading text aloud
+
+The mirror image of everything else here. Point Tertius at a folder of `.txt`
+files, tick **Read text files aloud**, and it writes a `.wav` beside each one —
+optionally in a voice sampled from a recording you supply.
+
+Whisper is never loaded: there is no audio to decode.
+
+Before you use this on anyone's voice but your own, read
+[Voice cloning: your responsibility, not the tool's](SECURITY.md#voice-cloning-your-responsibility-not-the-tools).
+It is short, and it is the part of this program that can hurt somebody.
+
+### The models
+
+Three, all from Resemble AI, all **MIT**, and none of them gated on Hugging
+Face — you do not need an account or an access token for any of them.
+
+| Model | Download | Languages | `[laugh]` tags | Notes |
+| --- | --- | --- | --- | --- |
+| `chatterbox-multilingual` | ~3.2 GB | 23 | no | The default. The only one that speaks anything but English. |
+| `chatterbox-turbo` | ~4.0 GB | English | yes | Faster, and the only one that can be told to laugh. |
+| `chatterbox-nano` | ~3.0 GB | English | yes | Smallest. The publisher reports 3× realtime on 8 CPU cores. |
+
+The 23 are `ar da de el en es fi fr he hi it ja ko ms nl no pl pt ru sv sw tr
+zh`, read out of the package itself rather than a table kept here, so the menu
+can never offer one the model would reject.
+
+Better models exist and are deliberately absent, the same way NLLB-200 is
+absent from [Translating](#translating). **IndexTTS-2** is the only open model
+with real duration control, which is exactly what dubbing wants, and it ships
+under the bilibili Model Use License Agreement rather than a permissive
+licence. **XTTS-v2** is CPML and forbids commercial use outright. Tertius is
+MIT and gets handed to strangers; a default that quietly removes their rights
+is not a default.
+
+One real difference from the translation models: **these are loaded as the
+publisher shipped them, not converted here.** CTranslate2 cannot run them —
+they are a torch stack end to end — so the argument that protects the
+translation path (convert the publisher's own weights, never trust a stranger's
+upload) does not apply. What stands in for it is that the repositories belong
+to Resemble AI, the organisation that wrote the model.
+
+### Voice cloning
+
+Leave **Voice clip** empty and you get the model's own default voice. Point it
+at a recording — about ten seconds of clean speech is what the publisher asks
+for — and it reads in that voice instead.
+
+**Everything expressive comes from the clip.** A voice sampled from someone
+reading gently reads gently; one sampled from someone reading briskly reads
+briskly. This matters more than it sounds, and the next section is why.
+
+### Style tags
+
+Write a tag on its own in square brackets and everything after it is delivered
+that way, until the next tag:
+
+```
+[solemn]
+In the beginning was the Word, and the Word was with God.
+
+[warm] And the light shineth in darkness.
+
+[emphatic] And the darkness comprehended it not.
+```
+
+The eight styles are `neutral`, `calm`, `gentle`, `solemn`, `warm`, `bright`,
+`emphatic`, `urgent`. A tag holds across paragraph breaks and is only ended by
+another tag; the **Default style** menu sets what applies before the first one.
+
+**These are delivery, not emotion, and the distinction is not pedantry.**
+Chatterbox has no emotion conditioning — there is no input to it that means
+"sad". What it exposes is how hard a line is pushed and how loosely it holds to
+the reference clip. So the tags are named for what they actually do. Emotion
+words are accepted as aliases (`[angry]` → `urgent`, `[excited]` → `bright`,
+`[sad]` → `solemn`, and a few more) and Tertius tells you it did that, because
+somebody who writes `[angry]` and gets firm-but-calm speech back would fairly
+conclude the feature was broken rather than that the tag was a lie. If you want
+anger, sample a clip of someone angry.
+
+Three kinds of bracket, treated differently:
+
+- **A style tag** is Tertius's. It changes delivery and is removed from what
+  gets spoken.
+- **`[laugh]`, `[chuckle]`, `[cough]`** are the model's own, and are passed
+  through untouched on `chatterbox-turbo` and `chatterbox-nano`. The
+  multilingual model does not understand them, so there they are removed —
+  left in, it would read out the word "laugh".
+- **Anything else in brackets stays exactly as you wrote it.** Transcripts are
+  full of `[inaudible]` and `[crosstalk]`, and a tag vocabulary that ate them
+  would corrupt the very files this feature exists to read. Tertius reports
+  them instead, once each, so a misspelt `[emphatc]` is visible rather than
+  silently read out.
+
+Scanning a folder pops open **What your tags did** — the text split into the
+calls that would be made, with the delivery each would get. Nothing is
+generated to produce it, so it is instant, and it is the cheapest moment to
+discover a typo.
+
+### What it writes
+
+A `.wav` always, 16-bit mono at the model's own sample rate, streamed to disk
+as it is generated rather than held in memory — a forty-minute reading is a
+hundred-odd megabytes of samples.
+
+An `.srt` and a `.json` if those format chips are set. **These timings are
+measured, not estimated**: each chunk's audio is timed as it is written, so the
+subtitles describe the recording that came out beside them, exactly. It is the
+one place in this whole program where a cue cannot have drifted from its audio.
+
+No `.txt` is written. The text is the input; a near-copy of it in the output
+folder would be one more file to tell apart from the one you wrote.
+
+The `.json` has `"kind": "speech"` and records the model, the voice clip, the
+styles used, and every warning — so nothing downstream can mistake a reading
+for a transcript of something somebody actually said.
+
+### The torch problem, and it is a real one
+
+Speaking needs `torch` as its **runtime**, and on a GPU it is perhaps twenty
+times faster than on a CPU. Translating needs `torch` too, but only to *convert*
+a model once, so it deliberately installs the **CPU-only** build — a 126 MB
+download instead of 2.5 GB.
+
+One virtual environment holds one torch, so whichever feature installs first
+decides. **If you translated before you ever read anything aloud, you have the
+CPU build in front of a perfectly good GPU.** Tertius detects exactly this and
+says so, in the voice-model panel and again when a model is prepared, with the
+command that fixes it:
+
+```bash
+# from the repository root, and note it is the venv's own Python - a bare
+# `pip install` hits whichever Python is on PATH and does nothing for Tertius
+app/.venv/Scripts/python.exe -m pip install --force-reinstall \
+  --index-url https://download.pytorch.org/whl/cu126 torch
+```
+
+`--force-reinstall` is not optional. pip counts `torch` as already satisfied by
+`2.14.0+cpu`, because the part after the `+` is a local version identifier and
+does not make it a different version. Leave the flag off and pip prints
+*Requirement already satisfied*, changes nothing, and exits 0 — so it looks
+like it worked.
+
+The index is `cu126` and not something newer on purpose: it carries the same
+torch version as the CPU build, so nothing else in the environment shifts, and
+it still builds for every GPU architecture back to Maxwell. Check that the
+index you use actually has a wheel for your Python — one that does not says
+`No matching distribution found for torch`, which reads as though torch itself
+were missing.
+
+### Honest limits
+
+As of the last time this was written:
+
+- **Not one line of this has met a real model.** Everything below is what the
+  code does against a fake; no audio has been generated, no voice has been
+  cloned, and nobody has listened to any of it.
+- **The style numbers are a considered starting point and nothing more.** They
+  were chosen by reading the publisher's guidance, not by listening.
+- Whether a voice model fits on a GPU beside Whisper is unknown, which is why
+  the comparison table has no verdict column — the same reason the translation
+  one has none.
+- The gaps between chunks (0.28 s, and 0.7 s at a paragraph) are a guess at
+  what reads as a breath rather than an edit.
+
 ## HTTP API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/status` | Full job + queue state (what the UI polls). |
-| `POST` | `/api/scan` | `{directory, recursive, kind?}` → source files found. `kind` is `media` (default) or `text`. |
-| `POST` | `/api/queue` | `{files: [...], base_dir?}` → add to queue without starting. `base_dir` is the scanned folder, and makes the output mirror its structure. |
+| `POST` | `/api/scan` | `{directory, recursive, kind?}` → source files found. `kind` is `media` (default), `text` or `speech`. |
+| `POST` | `/api/queue` | `{files: [...], base_dir?, kind?}` → add to queue without starting. `base_dir` is the scanned folder, and makes the output mirror its structure. `kind: "speech"` marks queued `.txt` to be read aloud rather than translated. |
 | `POST` | `/api/upload` | multipart `files` → save to `_uploads/` and queue. |
 | `POST` | `/api/job/start` | `{files?, output_dir?, options?, retry_failed?}` → returns at once. |
 | `POST` | `/api/job/resume` | Work the pending set from an interrupted run. |
@@ -696,6 +861,10 @@ Honest limits, as of the last time this was written:
 | `GET` | `/api/translation/models` | The translation models: download size, whether prepared, measured size on disk, languages, licence. |
 | `GET` | `/api/translation/languages?model=…` | What that model translates into, read from its converted vocabulary. Empty until it is prepared. |
 | `POST` | `/api/translation/prepare` | `{model}` → install what is needed, download and convert. Returns at once; watch `/api/status`. |
+| `GET` | `/api/speech/models` | The voice models: download size, whether already on disk, languages, licence, whether they act on `[laugh]`. |
+| `GET` | `/api/speech/languages?model=…` | What that model can read, plus the style vocabulary and its aliases. Answerable before anything is downloaded. |
+| `POST` | `/api/speech/prepare` | `{model}` → install what is needed and download the weights. Returns at once; watch `/api/status`. |
+| `POST` | `/api/speech/preview` | `{text\|path, model?, style?}` → the chunks and delivery a reading would use, and any warnings. Generates no audio. |
 | `POST` | `/api/browse-folder` | Open the OS folder picker on this machine, return the path. |
 
 ## Tests
@@ -754,7 +923,9 @@ Everything the app is made of lives under `app/`.
 ## Not included
 
 No live microphone transcription (file/batch only) and no auth or multi-user
-support — this is a single-user local tool. Whisper's English-only `translate`
+support — this is a single-user local tool. Reading text aloud does **not**
+remove the watermark Chatterbox applies to everything it generates, and no
+option to do so will be added. Whisper's English-only `translate`
 task is not exposed either; [Translating](#translating) covers that case with a
 model that can also do the other ninety-nine languages. Don't bind it to `0.0.0.0` on an
 untrusted network: the scan and queue endpoints will read any path the server
@@ -774,4 +945,12 @@ app never fetches them over the network. Their notices are in
 runtime dependencies.
 
 Whisper models are downloaded from Hugging Face on first use and are not part of
-this repository; each carries its own terms from its publisher.
+this repository; each carries its own terms from its publisher. The same goes
+for the translation and voice models — every one of them was chosen to be
+permissively licensed (MIT or Apache-2.0) so that nothing Tertius does by
+default takes a right away from whoever it is handed to.
+
+The MIT licence gives you this software without warranty and without indemnity.
+It does not give you permission to break the law with it: if you clone a voice,
+[SECURITY.md](SECURITY.md#voice-cloning-your-responsibility-not-the-tools) says
+whose responsibility that is, and it is not this project's.

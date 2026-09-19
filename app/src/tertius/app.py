@@ -19,10 +19,16 @@ from flask import Flask, jsonify, render_template, request, send_file
 from . import __version__
 from .config import (
     COMPUTE_TYPES,
+    DEFAULT_SPEECH_STYLE,
     DEVICES,
     GRANULARITIES,
     MODEL_SIZES,
     OUTPUT_FORMATS,
+    PARALINGUISTIC_TAGS,
+    SPEECH_MODEL_NAMES,
+    SPEECH_MODELS,
+    SPEECH_STYLE_ALIASES,
+    SPEECH_STYLE_NAMES,
     TRANSLATION_MODEL_SIZES,
     TRANSLATION_MODELS,
     UPLOAD_DIRNAME,
@@ -34,6 +40,7 @@ from .config import (
 )
 from . import folder_picker
 from .jobs import JobError, JobManager
+from .state import MODE_SPEAK, MODE_TRANSLATE_TEXT
 from .media import probe_durations_in_background
 from .system import assess_model, check_compute_type, describe_system
 from .transcribe import is_model_cached
@@ -100,6 +107,11 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             translation_models=TRANSLATION_MODEL_SIZES,
             translation_catalog=TRANSLATION_MODELS,
             default_translation_model=TranscriptionOptions().translation_model,
+            speech_models=SPEECH_MODEL_NAMES,
+            speech_catalog=SPEECH_MODELS,
+            default_speech_model=TranscriptionOptions().speech_model,
+            speech_styles=SPEECH_STYLE_NAMES,
+            default_speech_style=DEFAULT_SPEECH_STYLE,
             app_version=__version__,
             default_output_dir=str(manager.output_dir or out),
         )
@@ -232,6 +244,139 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         except JobError as exc:
             return _error(str(exc), 409)
 
+    @app.get("/api/speech/models")
+    def api_speech_models():
+        """The speech models, for the comparison table behind the i button.
+
+        No "on this machine" verdict, for the same reason the translation table
+        has none: nothing here has been run on a GPU yet, so any judgement
+        about whether one of these fits beside Whisper would be invented. What
+        is reported is what is known - the download, and whether it is already
+        on disk.
+        """
+        from .speech import is_downloaded, torch_install_problem
+
+        models = []
+        for name, entry in SPEECH_MODELS.items():
+            try:
+                ready = is_downloaded(name)
+            except Exception:
+                ready = False
+            models.append(
+                {
+                    "model": name,
+                    "repo": entry["repo"],
+                    "license": entry["license"],
+                    "languages": entry["languages"],
+                    "download_bytes": entry["download_bytes"],
+                    "speed": entry["speed"],
+                    "quality": entry["quality"],
+                    "paralinguistic": bool(entry.get("paralinguistic")),
+                    "ready": ready,
+                }
+            )
+        try:
+            problem = torch_install_problem()
+        except Exception:
+            problem = None
+        return jsonify({"models": models, "torch_problem": problem})
+
+    @app.get("/api/speech/languages")
+    def api_speech_languages():
+        """What the chosen speech model can read, and what the styles are.
+
+        Unlike the translation menu this can be answered before anything is
+        downloaded: the list is a constant in the package rather than something
+        read out of a converted vocabulary.
+        """
+        from .speech import is_downloaded, speech_language_choices
+
+        name = request.args.get("model") or TranscriptionOptions().speech_model
+        if name not in SPEECH_MODELS:
+            return _error(f"unknown speech model: {name}", 404)
+        entry = SPEECH_MODELS[name]
+        try:
+            ready = is_downloaded(name)
+        except Exception:
+            ready = False
+        return jsonify(
+            {
+                "model": name,
+                "ready": ready,
+                "languages": list(speech_language_choices(name)),
+                "styles": list(SPEECH_STYLE_NAMES),
+                "aliases": dict(SPEECH_STYLE_ALIASES),
+                "paralinguistic": sorted(PARALINGUISTIC_TAGS)
+                if entry.get("paralinguistic")
+                else [],
+                "download_bytes": entry["download_bytes"],
+                "license": entry["license"],
+            }
+        )
+
+    @app.post("/api/speech/prepare")
+    def api_speech_prepare():
+        """Install what speaking needs and fetch the weights."""
+        body = request.get_json(silent=True) or {}
+        name = body.get("model") or TranscriptionOptions().speech_model
+        try:
+            return jsonify(manager.prepare_speech(name))
+        except JobError as exc:
+            return _error(str(exc), 409)
+
+    @app.post("/api/speech/preview")
+    def api_speech_preview():
+        """Show what a text file's tags did, without generating any audio.
+
+        The whole point: style tags are invisible until something is read
+        aloud, and finding out that `[emphatic]` was spelt `[emphatc]` after
+        forty minutes of synthesis is the failure this exists to prevent.
+        Parsing needs no model and no weights, so the answer is instant.
+        """
+        from .speech import parse_script
+
+        body = request.get_json(silent=True) or {}
+        name = body.get("model") or TranscriptionOptions().speech_model
+        if name not in SPEECH_MODELS:
+            return _error(f"unknown speech model: {name}", 404)
+        style = (body.get("style") or DEFAULT_SPEECH_STYLE).strip().lower()
+
+        text = body.get("text")
+        if text is None:
+            path = (body.get("path") or "").strip()
+            if not path:
+                return _error("text or path is required")
+            source = Path(path).expanduser()
+            if not source.is_file():
+                return _error(f"file not found: {path}", 404)
+            try:
+                text = source.read_text(encoding="utf-8-sig")
+            except OSError as exc:
+                return _error(f"could not read {source.name}: {exc}", 400)
+
+        try:
+            script = parse_script(text, name, style)
+        except ValueError as exc:
+            return _error(str(exc))
+        return jsonify(
+            {
+                "model": name,
+                "chunks": [
+                    {
+                        "text": chunk.text,
+                        "style": chunk.style,
+                        "params": chunk.params,
+                        "starts_paragraph": chunk.starts_paragraph,
+                    }
+                    for chunk in script.chunks
+                ],
+                "count": len(script.chunks),
+                "characters": script.characters,
+                "styles_used": script.styles_used,
+                "warnings": script.warnings,
+            }
+        )
+
     @app.post("/api/browse-folder")
     def api_browse_folder():
         """Open the OS folder picker on this machine and return the chosen path.
@@ -285,8 +430,14 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         if base_dir and not Path(base_dir).expanduser().is_dir():
             return _error(f"not a directory: {base_dir}", 400)
         match_text = bool(body.get("match_reference_text"))
+        # A `.txt` queued as a source is either translated or read aloud, and
+        # only the caller knows which - the file itself cannot say.
+        text_mode = MODE_SPEAK if body.get("kind") == "speech" else MODE_TRANSLATE_TEXT
         added = store.add_files(
-            paths, base_dir=base_dir, match_reference_text=match_text
+            paths,
+            base_dir=base_dir,
+            match_reference_text=match_text,
+            text_mode=text_mode,
         )
         # Lengths fill in behind the queue: the files appear at once, and the
         # Length column and the estimate catch up a moment later.
@@ -437,10 +588,14 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
 
     @app.post("/api/browse-text-file")
     def api_browse_text_file():
-        """Native file picker for choosing a .txt to pair with one audio file."""
+        """Native file picker: a `.txt` to pair with a recording, or a voice clip."""
         body = request.get_json(silent=True) or {}
         script = str(Path(__file__).with_name("folder_picker.py"))
-        command = [sys.executable, script, "--file"]
+        # `kind="audio"` picks a voice clip to read in rather than a text file
+        # to pair with a recording. One route because the two differ only in
+        # which extensions the dialog offers.
+        kind = (body.get("kind") or "text").strip().lower()
+        command = [sys.executable, script, "--audio" if kind == "audio" else "--file"]
         initial = (body.get("initial") or "").strip()
         if initial:
             command.append(initial)

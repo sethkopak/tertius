@@ -339,6 +339,12 @@ button, input, select { font: inherit; color: inherit; }
 .caption.error-text { color: var(--danger); }
 .caption.warn-text { color: var(--accent); }
 
+/* Tag warnings in the reading preview. `warn-text` was only ever defined for
+   `.caption`, so the same class on a panel paragraph rendered as ordinary body
+   text - which is exactly the wrong outcome for the lines telling you a tag
+   was misspelt or removed. */
+.panel-body.warn-text { color: var(--accent); }
+
 /* ── settings grid ────────────────────────────────────────────────────── */
 
 .settings-grid {

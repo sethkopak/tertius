@@ -101,6 +101,179 @@ TRANSLATION_MODELS = {
 TRANSLATION_MODEL_SIZES = tuple(TRANSLATION_MODELS)
 DEFAULT_TRANSLATION_MODEL = "m2m100-418M"
 
+# Speech synthesis - reading a text file aloud. Chatterbox, from Resemble AI.
+#
+# Chosen the same way the translation models were, and for the same reasons:
+# the code is MIT, the weights are MIT, and none of the three repositories is
+# gated on the Hub, so Tertius can fetch them without asking anyone to hold a
+# Hugging Face account or accept a licence on a web page. That last point ruled
+# out more capable options. IndexTTS-2 has native duration control, which is
+# the thing dubbing actually wants, and ships under the bilibili Model Use
+# License Agreement rather than a permissive licence; XTTS-v2 is CPML and
+# forbids commercial use outright. Both would have put a restriction on
+# everyone downstream that Tertius's own MIT licence does not.
+#
+# Unlike the translation models these are *not* converted here. CTranslate2
+# cannot run them - they are a torch stack end to end - so the publisher's
+# weights are loaded as published. That is a real difference in provenance from
+# the translation path, and it is written down rather than glossed: what
+# protects us here is that the repositories are Resemble AI's own, under the
+# organisation that wrote the model, not an individual's re-upload.
+#
+# `baseline` is what this model calls ordinary delivery. It differs per model
+# and is not a detail: Turbo and Nano default `exaggeration` and `cfg_weight`
+# to 0.0 where the multilingual model defaults both to 0.5, so a style table
+# written as absolute numbers would make "neutral" mean two different things.
+# Styles are therefore deltas from this - see SPEECH_STYLES.
+#
+# `download_bytes` is the sum of the files each model's own loader asks for
+# (its `allow_patterns`), not the whole repository, which carries duplicate
+# `.pt`/`.safetensors` copies nobody fetches.
+SPEECH_MODELS = {
+    "chatterbox-multilingual": {
+        "repo": "ResembleAI/chatterbox",
+        "family": "chatterbox-mtl",
+        "license": "MIT",
+        "languages": 23,
+        "download_bytes": 3_209_000_000,
+        # Exactly what ChatterboxMultilingualTTS.from_pretrained asks the Hub
+        # for. Copied here so the download can be done - and reported on -
+        # before the model is loaded, which its own loader does in one step.
+        # Re-check this against mtl_tts.py when the package is upgraded: if
+        # it drifts, from_pretrained fetches the difference itself, so the
+        # failure is a progress bar that stops short, not a broken model.
+        "allow_patterns": [
+            "ve.pt",
+            "t3_mtl23ls_v2.safetensors",
+            "s3gen.pt",
+            "grapheme_mtl_merged_expanded_v1.json",
+            "conds.pt",
+            "Cangjie5_TC.json",
+        ],
+        "baseline": {"exaggeration": 0.5, "cfg_weight": 0.5},
+        # Paralinguistic tags are documented for Turbo and Nano only. Left in
+        # the text here they would simply be read out, so they are stripped.
+        "paralinguistic": False,
+        "speed": "Moderate",
+        "quality": "The only one of the three that speaks anything but English.",
+    },
+    "chatterbox-turbo": {
+        "repo": "ResembleAI/chatterbox-turbo",
+        "family": "chatterbox-turbo",
+        "license": "MIT",
+        "languages": 1,
+        "download_bytes": 4_044_000_000,
+        "allow_patterns": ["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
+        "baseline": {"exaggeration": 0.0, "cfg_weight": 0.0},
+        "paralinguistic": True,
+        "speed": "Fast",
+        "quality": "English only, and the only one that can be told to laugh.",
+    },
+    "chatterbox-nano": {
+        "repo": "ResembleAI/chatterbox-nano",
+        "family": "chatterbox-turbo",
+        "license": "MIT",
+        "languages": 1,
+        "download_bytes": 2_999_000_000,
+        "allow_patterns": ["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"],
+        "baseline": {"exaggeration": 0.0, "cfg_weight": 0.0},
+        "paralinguistic": True,
+        "speed": "Fastest",
+        "quality": "Smallest. The publisher reports 3x realtime on 8 CPU cores.",
+    },
+}
+
+# Read from chatterbox itself when it is installed, for the same reason the
+# Whisper menu is read from faster-whisper: a table kept here by hand goes
+# stale and offers a language the model will reject. These are the 23 in
+# `chatterbox.mtl_tts.SUPPORTED_LANGUAGES` at the version this was written
+# against, and are used only until the package is on the machine.
+FALLBACK_SPEECH_LANGUAGES = (
+    "ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja",
+    "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh",
+)
+
+SPEECH_MODEL_NAMES = tuple(SPEECH_MODELS)
+DEFAULT_SPEECH_MODEL = "chatterbox-multilingual"
+
+# The style vocabulary, and what each style actually does.
+#
+# Read this before adding to it. **Chatterbox has no emotion conditioning.**
+# There is no input that means "sad" to it. What it exposes is `exaggeration`
+# (how far delivery is pushed from flat), `cfg_weight` (roughly, how closely it
+# holds to the reference clip's own pacing - lower is looser and slower) and
+# `temperature`. Everything expressive beyond that comes from the reference
+# clip: a voice sampled from someone reading gently will read gently.
+#
+# So these are named for delivery, not for feeling. Calling one of them
+# `[angry]` would be a promise the model cannot keep, and a user who wrote
+# `[angry]` and got ordinary speech back would rightly conclude the feature was
+# broken rather than that the tag was a lie. Emotion words are accepted as
+# aliases - people will write them - and saying so produces a warning rather
+# than silence.
+#
+# Values are deltas from the model's `baseline`, clamped at use. The numbers
+# are a considered starting point and nothing more: nobody has listened to any
+# of them yet. See STATUS.md.
+SPEECH_STYLES = {
+    "neutral": {"exaggeration": 0.0, "cfg_weight": 0.0, "temperature": 0.8},
+    "calm": {"exaggeration": -0.15, "cfg_weight": 0.0, "temperature": 0.6},
+    "gentle": {"exaggeration": -0.2, "cfg_weight": 0.05, "temperature": 0.65},
+    "solemn": {"exaggeration": -0.1, "cfg_weight": 0.1, "temperature": 0.6},
+    "warm": {"exaggeration": 0.0, "cfg_weight": -0.05, "temperature": 0.75},
+    "bright": {"exaggeration": 0.1, "cfg_weight": -0.05, "temperature": 0.85},
+    "emphatic": {"exaggeration": 0.2, "cfg_weight": -0.15, "temperature": 0.8},
+    "urgent": {"exaggeration": 0.3, "cfg_weight": -0.2, "temperature": 0.85},
+}
+
+SPEECH_STYLE_NAMES = tuple(SPEECH_STYLES)
+DEFAULT_SPEECH_STYLE = "neutral"
+
+# Emotion words map to the nearest delivery. Accepted, because a person writing
+# a script reaches for these before they reach for "emphatic" - and warned
+# about, because the result will be that intensity and not that emotion.
+SPEECH_STYLE_ALIASES = {
+    "excited": "bright",
+    "happy": "bright",
+    "angry": "urgent",
+    "shouting": "urgent",
+    "sad": "solemn",
+    "serious": "solemn",
+    "quiet": "gentle",
+    "soft": "gentle",
+    "whisper": "gentle",
+    "slow": "calm",
+    "normal": "neutral",
+    "plain": "neutral",
+}
+
+# Tags the model itself understands, left in the text for it to act on rather
+# than stripped. Only these three: they are what Resemble AI documents. The
+# model card says "and more" without saying which, and a guessed tag is read
+# out loud as words, so Tertius passes through what is written down and warns
+# about everything else rather than inventing a vocabulary.
+PARALINGUISTIC_TAGS = frozenset({"laugh", "chuckle", "cough"})
+
+# Audio is written as `.wav`, always, alongside whichever text formats were
+# asked for. WAV because writing it needs nothing but the standard library -
+# any compressed format would mean an encoder as a new dependency, to save
+# space on a file the user is about to listen to once and probably re-encode
+# themselves anyway.
+SPEECH_AUDIO_FORMAT = "wav"
+
+# How much text goes to the model in one call. Chatterbox is autoregressive and
+# degrades on long inputs - it starts dropping or repeating clauses - so text is
+# split at sentence boundaries and packed up to this many characters. Sentences
+# longer than this on their own are still sent whole: cutting a sentence mid
+# clause to satisfy a budget is worse than a long one.
+SPEECH_CHUNK_CHARS = 300
+
+# Silence inserted between chunks and between paragraphs, in seconds.
+# Concatenated chunks butt together with no gap at all otherwise, which does
+# not sound like someone reading; it sounds like an edit.
+SPEECH_GAP_SECONDS = 0.28
+SPEECH_PARAGRAPH_GAP_SECONDS = 0.7
+
 # The files each family needs in order to convert. Named explicitly so a
 # download never drags in the duplicate TensorFlow, Flax, Rust and GGUF copies
 # the Hub also carries - on madlad400-3b-mt those alone would add ~4 GB to an
@@ -141,6 +314,11 @@ ALIGNMENT_SHAPE = "alignment"
 # what was said - it is a machine's rendering of it into another language. A
 # reader that treats the two alike would quote a translation as a quotation.
 TRANSLATION_SHAPE = "translation"
+# Audio Tertius generated from a text file, and the timings of that audio.
+# The strongest claim of the four: these words were not said by anyone. A
+# reader that took this for a transcript would be quoting a machine reading
+# a script as though it were a recording of a person.
+SPEECH_SHAPE = "speech"
 
 STATE_FILENAME = "transcription_state.json"
 LOG_FILENAME = "tertius.log"
@@ -235,6 +413,21 @@ class TranscriptionOptions:
     # against 12s for the segment pass, so a 64-second run becomes about 285 -
     # and it changes nothing about the `.srt`, whose timings need segments.
     translate_sentences: bool = True
+    # Read a `.txt` aloud. A source kind of its own, like translating text with
+    # no audio: Whisper is never loaded, because there is nothing to decode.
+    # It is not a post-step on a transcription - speaking a transcript back to
+    # the person who just recorded it is not a thing anyone asked for.
+    speak: bool = False
+    speech_model: str = DEFAULT_SPEECH_MODEL
+    # The language the text is *in*, which the multilingual model must be told.
+    # Defaults to English at use rather than here, so that a stored option set
+    # written before this existed does not claim a language it never chose.
+    speech_language: str | None = None
+    # A recording of the voice to read in. None means the model's own default
+    # voice. Ten seconds of clean speech is what the publisher asks for.
+    speech_voice: str | None = None
+    # The delivery used until the text says otherwise with a `[style]` tag.
+    speech_style: str = DEFAULT_SPEECH_STYLE
 
     def __post_init__(self) -> None:
         self.model_size = MODEL_ALIASES.get(self.model_size, self.model_size)
@@ -277,6 +470,30 @@ class TranscriptionOptions:
                 "a target language is required to translate - pick one from the "
                 "Translate into menu"
             )
+        if self.speech_model not in SPEECH_MODELS:
+            raise ValueError(
+                f"unknown speech model: {self.speech_model!r} "
+                f"(expected one of: {', '.join(SPEECH_MODEL_NAMES)})"
+            )
+        if isinstance(self.speech_style, str):
+            self.speech_style = self.speech_style.strip().lower()
+        if self.speech_style not in SPEECH_STYLES:
+            # Aliases are resolved here rather than at speaking time so that the
+            # stored options say what will actually happen. A style that is
+            # neither a style nor an alias is rejected up front for the same
+            # reason a bad language code is: failing a whole batch one file at a
+            # time is the alternative.
+            resolved = SPEECH_STYLE_ALIASES.get(self.speech_style)
+            if resolved is None:
+                raise ValueError(
+                    f"unknown speaking style: {self.speech_style!r} "
+                    f"(expected one of: {', '.join(SPEECH_STYLE_NAMES)})"
+                )
+            self.speech_style = resolved
+        if isinstance(self.speech_language, str):
+            self.speech_language = self.speech_language.strip().lower() or None
+        if isinstance(self.speech_voice, str):
+            self.speech_voice = self.speech_voice.strip() or None
         if not self.formats:
             raise ValueError("at least one output format is required")
         bad = [f for f in self.formats if f not in OUTPUT_FORMATS]
@@ -321,7 +538,12 @@ def is_text_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS
 
 
-SOURCE_KINDS = ("media", "text")
+# "text" and "speech" scan for the same `.txt` files and differ only in what
+# is then done with them - translated, or read aloud. Kept as two kinds
+# rather than one plus a flag because the queue has to remember which was
+# meant: a file queued to be spoken and a file queued to be translated look
+# identical on disk, and the wrong one is an hour of GPU time.
+SOURCE_KINDS = ("media", "text", "speech")
 
 
 def scan_directory(
@@ -341,7 +563,7 @@ def scan_directory(
     if not directory.is_dir():
         raise NotADirectoryError(f"not a directory: {directory}")
     walker = directory.rglob("*") if recursive else directory.glob("*")
-    matches = is_text_file if kind == "text" else is_media_file
+    matches = is_media_file if kind == "media" else is_text_file
     found = [
         p
         for p in walker

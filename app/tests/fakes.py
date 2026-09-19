@@ -116,6 +116,75 @@ class FakeTranslator:
         self.loaded = False
 
 
+class FakeSpeaker:
+    """Duck-compatible with Speaker, minus the 3 GB model.
+
+    Generates a flat run of samples whose length is proportional to the text,
+    at a sample rate low enough that a whole test file is a few thousand
+    frames. That is what lets a test assert on real measured timings - the
+    `.srt` this produces is timed against audio that was actually written,
+    which is the property the feature turns on.
+    """
+
+    # 1 kHz, and 10 samples per character, so 100 characters is one second.
+    sample_rate = 1000
+    SAMPLES_PER_CHARACTER = 10
+
+    def __init__(
+        self, model_key="chatterbox-multilingual", device="auto", on_download_progress=None
+    ):
+        self.model_key = model_key
+        self.device = device
+        self.on_download_progress = on_download_progress
+        self.loaded = False
+        self.prepared = False
+        self.calls: list[tuple[str, str, str, str | None]] = []
+        self.params: list[dict] = []
+        self.load_error: Exception | None = None
+        self.prepare_error: Exception | None = None
+        self.fail_always = False
+        self.gpu_fallback_reason: str | None = None
+
+    @property
+    def family(self) -> str:
+        from tertius.config import SPEECH_MODELS
+
+        return SPEECH_MODELS[self.model_key]["family"]
+
+    @property
+    def paralinguistic(self) -> bool:
+        from tertius.config import SPEECH_MODELS
+
+        return bool(SPEECH_MODELS[self.model_key].get("paralinguistic"))
+
+    def prepare(self, on_line=None):
+        if self.prepare_error:
+            raise self.prepare_error
+        self.prepared = True
+
+    def download(self) -> None:
+        pass
+
+    def load(self) -> None:
+        if self.load_error:
+            raise self.load_error
+        self.loaded = True
+
+    def speak(self, chunk, language, voice=None):
+        if self.fail_always:
+            raise RuntimeError("simulated speech failure")
+        self.load()
+        self.calls.append((chunk.text, chunk.style, language, voice))
+        self.params.append(dict(chunk.params))
+        # A flat non-zero run: silence would be indistinguishable from the gaps
+        # the writer inserts between chunks, and a test that cannot tell those
+        # apart cannot prove the gaps are there.
+        return [0.5] * (len(chunk.text) * self.SAMPLES_PER_CHARACTER)
+
+    def unload(self) -> None:
+        self.loaded = False
+
+
 def wait_until(predicate, timeout: float = 10.0, description: str = "condition"):
     """Poll until `predicate()` is truthy. Returns its value.
 

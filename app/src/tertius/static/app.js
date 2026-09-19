@@ -174,6 +174,11 @@ function collectOptions() {
     translation_model: $('opt-translation-model').value,
     target_language: $('opt-target-language').value || null,
     translate_sentences: $('opt-translate-sentences').checked,
+    speak: $('opt-speak').checked,
+    speech_model: $('opt-speech-model').value,
+    speech_language: $('opt-speech-language').value || null,
+    speech_voice: $('opt-speech-voice').value.trim() || null,
+    speech_style: $('opt-speech-style').value,
   };
 }
 
@@ -253,6 +258,154 @@ $('btn-prepare-translation').onclick = async () => {
   }, 1000);
 };
 
+// --- reading aloud ---------------------------------------------------------
+
+// Unlike the translation menu this one can be filled before anything is
+// downloaded: the list of languages is a constant in the package rather than
+// something read out of a converted model. So the menu is usable immediately,
+// and the download is only needed to actually speak.
+async function refreshSpeechLanguages() {
+  const model = $('opt-speech-model').value;
+  const select = $('opt-speech-language');
+  const noteEl = $('speech-note');
+  const wanted = select.value;
+  let info;
+  try {
+    const res = await fetch(`/api/speech/languages?model=${encodeURIComponent(model)}`);
+    info = await res.json();
+  } catch (_) {
+    noteEl.textContent = 'Could not ask the server about this model.';
+    $('speech-note-row').hidden = false;
+    return;
+  }
+
+  select.length = 1;
+  (info.languages || []).forEach((code) => {
+    let name = code;
+    try { name = translationDisplay ? translationDisplay.of(code) : code; } catch (_) { /* not a known tag */ }
+    const option = document.createElement('option');
+    option.value = code;
+    option.textContent = name === code ? code : `${name} · ${code}`;
+    select.appendChild(option);
+  });
+  [...select.options].slice(1)
+    .sort((a, b) => a.textContent.localeCompare(b.textContent))
+    .forEach((option) => select.appendChild(option));
+  if (wanted && [...select.options].some((o) => o.value === wanted)) {
+    select.value = wanted;
+  } else if ((info.languages || []).includes('en')) {
+    select.value = 'en';
+  }
+
+  const gb = (info.download_bytes / 1e9).toFixed(1);
+  const count = (info.languages || []).length;
+  const tags = (info.paralinguistic || []).length
+    ? ` Acts on ${info.paralinguistic.map((t) => `[${t}]`).join(' ')}.`
+    : ' Tags like [laugh] are removed on this model - only turbo and nano act on them.';
+  noteEl.textContent = (info.ready
+    ? `Ready. ${count} language${count === 1 ? '' : 's'}, ${info.license}.`
+    : `Not downloaded yet - about ${gb} GB, plus torch the first time. ${info.license}.`) + tags;
+  $('speech-note-row').hidden = false;
+  $('speech-prepare-row').hidden = info.ready;
+}
+
+function setSpeechRows(enabled) {
+  ['speech-model-row', 'speech-language-row', 'speech-voice-row', 'speech-style-row']
+    .forEach((id) => { $(id).hidden = !enabled; });
+  if (!enabled) {
+    $('speech-note-row').hidden = true;
+    $('speech-prepare-row').hidden = true;
+  }
+}
+
+$('opt-speak').onchange = () => {
+  const enabled = $('opt-speak').checked;
+  setSpeechRows(enabled);
+  if (enabled) {
+    // Reading aloud and translating are two different jobs over two different
+    // source kinds, and one queue can only be one of them. Turning this on
+    // turns the other off rather than letting Begin fail with the queue
+    // already full of the wrong thing.
+    if ($('opt-translate').checked) {
+      $('opt-translate').checked = false;
+      $('opt-translate').onchange();
+    }
+    if ($('opt-text-source').checked) $('opt-text-source').checked = false;
+    refreshSpeechLanguages();
+  }
+};
+
+$('opt-speech-model').onchange = () => {
+  if ($('opt-speak').checked) refreshSpeechLanguages();
+};
+
+$('btn-browse-voice').onclick = async () => {
+  const button = $('btn-browse-voice');
+  button.disabled = true;
+  note('add-note', 'File picker open - check for a dialog window.');
+  try {
+    const picked = await jsonPost('/api/browse-text-file', { kind: 'audio' });
+    if (picked.cancelled) {
+      note('add-note', 'No voice clip chosen.');
+    } else {
+      $('opt-speech-voice').value = picked.path;
+      note('add-note', `Reading in the voice from ${basename(picked.path)}.`);
+    }
+  } catch (err) {
+    note('add-note', err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$('btn-prepare-speech').onclick = async () => {
+  const button = $('btn-prepare-speech');
+  button.disabled = true;
+  try {
+    await jsonPost('/api/speech/prepare', { model: $('opt-speech-model').value });
+  } catch (err) {
+    button.disabled = false;
+    return;
+  }
+  // The status poll drives the progress band from here; when it goes idle the
+  // weights are on disk.
+  const waitForIt = setInterval(async () => {
+    const status = await fetch('/api/status').then((r) => r.json());
+    if (status.running) return;
+    clearInterval(waitForIt);
+    button.disabled = false;
+    refreshSpeechLanguages();
+  }, 1000);
+};
+
+// Show what the tags did before anything is generated. Parsing needs no model,
+// so this is instant - and it is the only way a misspelt `[emphatc]` becomes
+// visible before it has been read out loud in the middle of a recording.
+async function previewTags(path) {
+  try {
+    const body = await jsonPost('/api/speech/preview', {
+      path,
+      model: $('opt-speech-model').value,
+      style: $('opt-speech-style').value,
+    });
+    $('speech-warnings').innerHTML = (body.warnings || [])
+      .map((w) => `<p class="panel-body warn-text">${esc(w)}</p>`).join('');
+    $('speech-preview-table').querySelector('tbody').innerHTML =
+      body.chunks.map((chunk, index) => `<tr>
+        <td>${index + 1}</td>
+        <td class="name">${esc(chunk.style)}</td>
+        <td>${esc(chunk.text)}</td>
+      </tr>`).join('');
+    $('panel-speech-preview').hidden = false;
+  } catch (err) {
+    note('add-note', err.message, true);
+  }
+}
+
+$('btn-speech-preview-close').onclick = () => {
+  $('panel-speech-preview').hidden = true;
+};
+
 /** Take the settings the server last ran with, once, at startup. */
 function restoreSettings(status) {
   const options = status.options;
@@ -271,6 +424,20 @@ function restoreSettings(status) {
   if (options.translation_model) $('opt-translation-model').value = options.translation_model;
   if (typeof options.translate_sentences === 'boolean') {
     $('opt-translate-sentences').checked = options.translate_sentences;
+  }
+  if (options.speech_model) $('opt-speech-model').value = options.speech_model;
+  if (options.speech_style) $('opt-speech-style').value = options.speech_style;
+  if (options.speech_voice) $('opt-speech-voice').value = options.speech_voice;
+  if (options.speak) {
+    $('opt-speak').checked = true;
+    setSpeechRows(true);
+    // The language is set after the menu is filled, or there is nothing to
+    // select it on yet.
+    refreshSpeechLanguages().then(() => {
+      if (options.speech_language) {
+        $('opt-speech-language').value = options.speech_language;
+      }
+    });
   }
   if (options.translate) {
     $('opt-translate').checked = true;
@@ -312,11 +479,12 @@ async function scanAndQueue(directory) {
   localStorage.setItem('tertius-source', directory);
   note('add-note', 'Scanning…');
   try {
-    const textSource = $('opt-text-source').checked;
+    const speaking = $('opt-speak').checked;
+    const textSource = $('opt-text-source').checked || speaking;
     const found = await jsonPost('/api/scan', {
       directory,
       recursive: $('scan-recursive').checked,
-      kind: textSource ? 'text' : 'media',
+      kind: speaking ? 'speech' : (textSource ? 'text' : 'media'),
     });
     if (!found.count) {
       return note('add-note', textSource
@@ -327,10 +495,16 @@ async function scanAndQueue(directory) {
     const queued = await jsonPost('/api/queue', {
       files: found.files,
       base_dir: found.directory,
-      // A .txt queued as a source is translated, not matched against audio.
+      // A .txt queued as a source is either translated or read aloud, and the
+      // server cannot tell which from the file - the two look identical on
+      // disk, and picking the wrong one is an hour spent on the wrong output.
+      kind: speaking ? 'speech' : undefined,
       match_reference_text: $('opt-use-text').checked && !textSource,
     });
     let message = `Found ${plural(found.count, 'file', 'files')}; queued ${queued.added} new.`;
+    // Show the first file's tags at once. Nothing is generated by this, and it
+    // is the cheapest possible moment to find out a style tag was misspelt.
+    if (speaking && found.files.length) previewTags(found.files[0]);
     if ($('opt-use-text').checked) {
       message += ` Matched text for ${queued.matched_text}; ${queued.needs_choice} need a choice.`;
     }
@@ -706,6 +880,32 @@ function bandModel(status) {
     };
   }
 
+  if (status.phase === 'installing_speech_deps') {
+    return {
+      tone: 'running',
+      headline: 'Installing the speech libraries',
+      counter: status.notice || 'torch and chatterbox, a couple of gigabytes',
+      right: 'one-time',
+      progress: 0,
+      stats: [],
+    };
+  }
+
+  if (status.phase === 'preparing_speech') {
+    const d = status.download || {};
+    const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
+    return {
+      tone: 'running',
+      headline: 'Fetching the voice model',
+      counter: pct === null
+        ? `${d.model || ''} — starting the download`
+        : `${d.model || ''} · ${pct}% of about ${formatBytes(d.expected_bytes)}`,
+      right: 'one-time, for this voice model',
+      progress: pct === null ? 0 : pct / 100,
+      stats: [],
+    };
+  }
+
   if (status.phase === 'downloading_model' || status.phase === 'loading_model') {
     const d = status.download || {};
     const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
@@ -735,7 +935,9 @@ function bandModel(status) {
       tone: 'running',
       headline: status.cancel_requested
         ? 'Finishing this file'
-        : status.phase === 'translating' ? 'Translating' : 'Transcribing',
+        : status.phase === 'translating' ? 'Translating'
+          : status.phase === 'speaking' ? 'Reading aloud'
+            : 'Transcribing',
       counter: `${processed + 1} of ${total}`,
       right: bits.join(' · '),
       stats: [
@@ -1427,6 +1629,45 @@ $('btn-translation-info').onclick = async () => {
 $('btn-translation-info-close').onclick = () => {
   $('panel-translation-info').hidden = true;
   $('btn-translation-info').setAttribute('aria-expanded', 'false');
+};
+
+function renderSpeechTable(data) {
+  $('speech-table').querySelector('tbody').innerHTML = data.models.map((m) => `<tr>
+      <td class="name">${esc(m.model)}</td>
+      <td>${formatBytes(m.download_bytes)}${m.ready ? ' · on disk' : ''}</td>
+      <td>${esc(String(m.languages))}</td>
+      <td>${m.paralinguistic ? 'yes' : 'no'}</td>
+      <td>${esc(m.license)}</td>
+      <td>${esc(m.speed || '')}</td>
+      <td>${esc(m.quality || '')}</td>
+    </tr>`).join('');
+}
+
+async function refreshSpeechTable() {
+  try {
+    const data = await api('/api/speech/models');
+    renderSpeechTable(data);
+    // The one thing about this machine that is known rather than guessed: a
+    // CPU-only torch sitting in front of a perfectly good GPU.
+    if (data.torch_problem) {
+      $('speech-note').textContent = data.torch_problem;
+      $('speech-note-row').hidden = false;
+    }
+  } catch (err) {
+    $('speech-table').querySelector('tbody').innerHTML =
+      '<tr><td colspan="7">Could not read the voice models.</td></tr>';
+  }
+}
+
+$('btn-speech-info').onclick = async () => {
+  const panel = $('panel-speech-info');
+  panel.hidden = !panel.hidden;
+  $('btn-speech-info').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden) await refreshSpeechTable();
+};
+$('btn-speech-info-close').onclick = () => {
+  $('panel-speech-info').hidden = true;
+  $('btn-speech-info').setAttribute('aria-expanded', 'false');
 };
 
 $('btn-model-info').onclick = async () => {

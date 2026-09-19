@@ -8,7 +8,7 @@ The dialog is modal: it blocks its process until the user answers. That is why
 this is a separate process rather than a call inside a request handler - a
 wedged dialog must never be able to freeze the server. Run it standalone:
 
-    python folder_picker.py [initial_directory]
+    python folder_picker.py [--file|--audio] [initial_directory]
 
 Prints the chosen path to stdout, or nothing if the user cancelled.
 """
@@ -59,14 +59,57 @@ def pick_text_file(initial_dir: str | None = None) -> str:
     return _dialog(filedialog.askopenfilename, **options)
 
 
+def pick_audio_file(initial_dir: str | None = None) -> str:
+    """Open the OS file chooser for a voice clip. Returns "" if cancelled.
+
+    The same extensions the rest of Tertius will decode, so that a clip which
+    passes this dialog is one the model can actually be given - the alternative
+    is a picker that happily accepts a `.wma` and a failure minutes later.
+    """
+    from tkinter import filedialog
+
+    # This module is launched as a standalone script, not imported as part of
+    # the package, so a relative import fails here - and would fail as an
+    # ImportError, which `main` reads as "tkinter is missing" and reports as
+    # the wrong problem entirely. The flat import is the one that works when
+    # the file's own directory is on sys.path; the relative one is for when
+    # something imports this properly. Neither working is survivable.
+    try:
+        from config import MEDIA_EXTENSIONS
+    except ImportError:  # pragma: no cover - only when imported as a module
+        try:
+            from .config import MEDIA_EXTENSIONS
+        except ImportError:
+            MEDIA_EXTENSIONS = ()
+
+    patterns = " ".join(sorted(f"*{ext}" for ext in MEDIA_EXTENSIONS))
+    options = {
+        "title": "Choose a recording of the voice to read in",
+        "filetypes": (
+            [("Audio and video", patterns), ("All files", "*.*")]
+            if patterns
+            else [("All files", "*.*")]
+        ),
+    }
+    if initial_dir:
+        options["initialdir"] = initial_dir
+    return _dialog(filedialog.askopenfilename, **options)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     want_file = "--file" in argv
-    rest = [a for a in argv if a != "--file"]
+    want_audio = "--audio" in argv
+    rest = [a for a in argv if a not in ("--file", "--audio")]
     initial = rest[0] if rest else None
 
     try:
-        path = pick_text_file(initial) if want_file else pick_folder(initial)
+        if want_audio:
+            path = pick_audio_file(initial)
+        elif want_file:
+            path = pick_text_file(initial)
+        else:
+            path = pick_folder(initial)
     except ImportError:
         # tkinter is part of the standard library but is packaged separately on
         # most Linux distributions, so a perfectly good Python can be missing it.

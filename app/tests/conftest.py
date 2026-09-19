@@ -15,6 +15,7 @@ from tertius.app import create_app  # noqa: E402 - needs the path set above
 from tertius.jobs import JobManager  # noqa: E402
 
 from .fakes import (  # noqa: E402
+    FakeSpeaker,
     FakeTranscriber,
     FakeTranslator,
     fake_transcribe_file,
@@ -30,11 +31,16 @@ class ApiHarness:
         self.translator_fails = False
         self.translator_load_error: Exception | None = None
         self.translator_prepare_error: Exception | None = None
+        self.speaker: FakeSpeaker | None = None
+        self.speaker_fails = False
+        self.speaker_load_error: Exception | None = None
+        self.speaker_prepare_error: Exception | None = None
         self.gates: dict[str, threading.Event] = {}
         self.manager = JobManager(
             transcriber_factory=self._factory,
             transcribe_fn=fake_transcribe_file,
             translator_factory=self._translator_factory,
+            speaker_factory=self._speaker_factory,
         )
         self.app = create_app(self.output_dir, manager=self.manager)
         self.app.config["TESTING"] = True
@@ -51,6 +57,13 @@ class ApiHarness:
         self.translator.load_error = self.translator_load_error
         self.translator.prepare_error = self.translator_prepare_error
         return self.translator
+
+    def _speaker_factory(self, model_key, device="auto", on_download_progress=None):
+        self.speaker = FakeSpeaker(model_key, device, on_download_progress)
+        self.speaker.fail_always = self.speaker_fails
+        self.speaker.load_error = self.speaker_load_error
+        self.speaker.prepare_error = self.speaker_prepare_error
+        return self.speaker
 
     def block(self, path) -> threading.Event:
         gate = threading.Event()

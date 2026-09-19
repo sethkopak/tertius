@@ -1,19 +1,20 @@
 # Tertius — status
 
-Last updated: 2026-09-02
+Last updated: 2026-09-18
 
 ## Where it stands
 
 Working, and in real use. Built from `design/original-spec.md`, plus everything
 requested since: the launcher, folder picker, model download progress, model
 comparison + machine check, tooltips, light/dark theme, mirrored output folders,
-timestamping of supplied text, the designed UI, macOS/Linux support, and
-translation.
+timestamping of supplied text, the designed UI, macOS/Linux support,
+translation, and reading text aloud.
 
-**382 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
-CI. Whisper is mocked throughout, and so is the translator — the suite
-downloads nothing, decodes no audio and converts no checkpoints, which is what
-makes it safe to run on a hosted runner.
+**444 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+CI. Whisper is mocked throughout, and so are the translator and the speech
+model — the suite downloads nothing, decodes no audio, generates no audio and
+converts no checkpoints, which is what makes it safe to run on a hosted
+runner.
 
 Run it: double-click `Start Tertius.bat` (Windows), `Tertius.app` (macOS), or
 run `./start-tertius.sh` (Linux).
@@ -71,6 +72,238 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   `.srt` is written, there being no timings to write.
 - **The queue follows you** when the output folder changes. Each folder keeps
   its own history, but files you have lined up are what you are pointing at.
+- **Reads a text file aloud** (2026-09-18), offline, in a voice sampled from a
+  recording you supply. Three Chatterbox models, all MIT and none of them gated
+  on the Hub. Writes a `.wav`, and an `.srt` whose timings are *measured*
+  against the audio as it is generated rather than estimated — the one place
+  here where a cue cannot have drifted from its recording. Style tags in the
+  text (`[solemn]`, `[emphatic]`, …) change delivery from where they appear.
+  Run for real on the GPU at **0.51x realtime** — slower than realtime, and
+  about forty times dearer per minute than transcribing. **Nobody has listened
+  to the output yet**, and voice cloning has never been run.
+
+## 2026-09-18 — speech, actually run
+
+`chatterbox-multilingual` downloaded, loaded onto the GPU, and used. Audio
+exists. What the fakes could not tell us, now known:
+
+- **The API is what the source said it was.** `ChatterboxMultilingualTTS`
+  took `language_id="en"` alongside `exaggeration`, `cfg_weight` and
+  `temperature`, and `model.sr` really is 24000. That was read out of
+  `mtl_tts.py` rather than exercised, and it held.
+- **It runs on the GPU**, loaded on `cuda`, with torch 2.14.0+cu126.
+- **It works against transformers 5.16.1** despite hard-pinning 5.2.0. A pin
+  is not a tested floor.
+- **Six chunks, 22.38s of audio, 1,074,284 bytes.** Measured: 24 kHz, mono,
+  16-bit, peak 96.2% of full scale and not clipped. RMS 2490-4970 in every
+  cue, so there is real speech in all six rather than silence or noise.
+- **The measured `.srt` is measured.** Every gap between cues came out at
+  exactly 0.70s - the paragraph figure, correct for a test file whose blocks
+  are all separated by blank lines - and four of the five gaps are digitally
+  silent, peak 0. (The fifth reads 1056, which is the JSON rounding cue times
+  to 3dp and my analysis window catching a few frames of the neighbouring
+  chunk. Not a defect in the audio.)
+- **`styles_used` came back `['solemn', 'warm', 'urgent']`** - the two written
+  tags plus `[angry]` resolved through the alias. `[inaudible]` and the
+  misspelt `[emphatc]` were read out as words, exactly as the warnings said
+  they would be.
+- **`pkuseg not available - Chinese segmentation will be skipped`** appears at
+  load and is harmless, which is what makes the `--no-deps` install viable.
+
+### The number that matters: 0.51x realtime
+
+22.38 seconds of audio took **43.6 seconds** to generate on the RTX 2060. That
+is *slower than realtime*, and it is the single most useful thing this run
+produced, because nothing anywhere had a figure for it.
+
+For scale: a 40-minute reading is roughly 80 minutes of GPU time. Transcription
+on this same card runs at ~22x realtime. Reading aloud is therefore about forty
+times more expensive per minute of audio than transcribing it, and any UI
+estimate built on the transcription figure would be wrong by that factor.
+
+Model load was 326.9s, but most of that was the 3.2 GB download (4m52s); that
+cost is paid once.
+
+### Worth watching, not yet understood
+
+`alignment_stream_analyzer` fired on **five of six chunks** with
+`forcing EOS token, long_tail=True`, and on the sixth with
+`Detected 2x repetition of token 6486`. That is Chatterbox's own safety net
+cutting generation short. It may be entirely normal for short chunks, or it may
+mean the 300-character budget and the style numbers are pushing it somewhere it
+does not want to go. Nobody has listened yet, so there is no way to tell from
+here whether those chunks are clipped.
+
+### Still not verified
+
+- **Nobody has listened to it.** Every claim above is from the waveform and
+  the metadata. Whether it sounds like English, whether `[solemn]` sounds
+  solemn, and whether the forced-EOS chunks are cut off mid-word are all open.
+  The file is at `transcripts/first-reading/reading.wav`.
+- **Voice cloning has still never been run.** This used the model's default
+  voice; `audio_prompt_path` was never passed.
+- Turbo and Nano have not been downloaded, so `[laugh]` has never reached a
+  model that acts on it.
+- Chinese is now *knowingly* degraded by skipping `spacy-pkuseg`. Untested.
+- Nothing has been read through the UI end to end - this run drove
+  `speak_text_file` directly, through the same code the queue uses.
+
+### The install does not work as published
+
+`pip install chatterbox-tts` **fails outright on this machine**, and would have
+been wrong even if it had succeeded. See CHATTERBOX_DEPENDENCIES in speech.py;
+the short version is three problems in one metadata file:
+
+1. `spacy-pkuseg` publishes **no cp314 wheel in any version**, so pip builds it
+   from source and dies on "Microsoft Visual C++ 14.0 or greater is required",
+   having installed nothing. The code imports it inside a try/except and only
+   loses Chinese segmentation without it.
+2. `transformers==5.2.0` is a hard pin, and translation here runs on 5.16.1.
+   Accepting it would have downgraded the library the translation adapters
+   depend on, to fix a version chatterbox turns out not to need.
+3. `gradio==6.8.0` is never imported by the library at all.
+
+So the installer does the dependencies itself and then `--no-deps
+chatterbox-tts`. Three tests pin that, including one asserting the bare form
+never reappears.
+
+## 2026-09-18 — reading text aloud
+
+Built. Not run against a real model, and the rest of this entry should be read
+with that in front of it: every claim below is about what the code does against
+a fake, not about how anything sounds.
+
+**Chatterbox, chosen on licence and on the gate.** `ResembleAI/chatterbox`,
+`-turbo` and `-nano`: MIT code, MIT weights, and `gated: false` on all three,
+checked against the Hub API rather than taken from a model card. IndexTTS-2 is
+the better model for this — it is the only open one with real duration control,
+which is what dubbing actually wants — and it ships under the *bilibili Model
+Use License Agreement*, not a permissive licence. Three separate roundup
+articles say it is Apache-2.0 or MIT. All three are wrong; the repository says
+otherwise. That is the same trap NLLB-200 was, found the same way, and it is
+the reason licences here get read at the source.
+
+**These are not converted, and that is a real difference.** translate.py
+converts the publisher's own checkpoint precisely so nothing depends on a
+stranger's upload. CTranslate2 cannot run a TTS model, so that argument is
+unavailable and the weights are loaded as published. What stands in for it is
+that the repositories belong to Resemble AI rather than to an individual.
+Written down rather than glossed.
+
+**The style tags are named for delivery, not for feeling, on purpose.**
+Chatterbox has no emotion conditioning — there is no input to it that means
+"sad". It has `exaggeration`, `cfg_weight` and `temperature`. Everything
+expressive comes from the reference clip. So the vocabulary is `neutral`,
+`calm`, `gentle`, `solemn`, `warm`, `bright`, `emphatic`, `urgent`, and an
+emotion word is accepted as an alias *and warned about*. Somebody who writes
+`[angry]` and gets firm-but-calm speech back would fairly conclude the feature
+was broken rather than that the tag was a lie.
+
+**Styles are deltas from each model's baseline, not absolute numbers.** Turbo
+and Nano default `exaggeration` and `cfg_weight` to 0.0; the multilingual model
+defaults both to 0.5. A table of absolute numbers would make `[neutral]` mean
+two different things depending on the model chosen, silently.
+
+**Three kinds of bracket.** A style tag is ours and is stripped. `[laugh]`,
+`[chuckle]` and `[cough]` are the model's own and pass through on Turbo and
+Nano — and are *removed* on the multilingual model, which would read out the
+word "laugh". Anything else stays exactly as written, because transcripts are
+full of `[inaudible]` and a tag vocabulary that ate them would corrupt the very
+files this feature exists to read. The publisher's model card says "and more"
+without saying which, so only the three that are documented are passed through;
+a guessed tag is read out as words.
+
+### A bug the first preview found
+
+Removing a tag flushed the text either side of it as two separate runs. One
+sentence therefore became two calls to the model with a 0.28 s pause inserted
+between them that nobody had written. Found by looking at the preview panel in
+the browser, not by a test — `[laugh]` in the middle of a line is exactly the
+case, and no test had one until this. Fixed by accumulating across a removal
+and only breaking on a real style change, with a test pinning it both ways.
+Runs of spaces are collapsed too, or the hole the bracket left behind reads as
+a gap of its own.
+
+### Confirmed on this machine, in the browser
+
+Not a real reading — nothing has been generated — but the whole path up to the
+model was driven for real: scan a folder of `.txt`, queue it, and the preview
+panel showed six chunks with `[solemn]` held across a paragraph break,
+`[inaudible]` and a misspelt `[emphatc]` surviving in the text with warnings,
+`[angry]` resolved to `urgent` with the honest note about emotion, and
+`[laugh]` removed. Light and dark, no console errors.
+
+One cosmetic bug seen there and fixed: `warn-text` was only ever defined for
+`.caption`, so the tag warnings rendered as ordinary body text — the wrong
+outcome for the lines telling you a tag was misspelt.
+
+### The torch collision, confirmed and then fixed
+
+**Resolved 2026-09-18.** `torch 2.14.0+cu126` is now in the venv and the GPU
+works: `is_available` True, RTX 2060 reported as `sm_75`, and a 512x512 matmul
+actually run on it rather than merely promised. `torch_install_problem()`
+returns None. The translation stack is untouched - transformers 5.16.1,
+ctranslate2 4.8.1, and the converted `m2m100-418M` still on disk - and all 441
+tests still pass. (`--force-reinstall` also rolled setuptools 83.0.0 back to
+78.1.0, which broke nothing.)
+
+Getting there cost two wrong commands, and both are worth keeping:
+
+1. **`cu124` was a guess and has no cp314 wheels at all.** pip answers that
+   with "No matching distribution found for torch", which reads as though
+   torch did not exist. `cu126` was then checked against the index listing
+   rather than assumed: it carries 2.14.0 - the same version as the CPU build,
+   so nothing else shifted - for cp311/cp313/cp314 on win_amd64 and
+   manylinux_2_28, and still builds sm_50 through sm_90, which is what covers
+   a Turing card. The 13.x indexes have dropped some of those.
+2. **Without `--force-reinstall`, pip did nothing and exited 0.** `torch` is
+   satisfied by `2.14.0+cpu`; the local version after the `+` does not make it
+   a different version. "Requirement already satisfied", no change, success
+   exit code. The flag is pinned by a test now, as is the rule that the
+   command names `sys.executable` rather than a bare `pip`.
+
+### The torch collision, as first found
+
+Speaking needs torch as its **runtime**; translating needs it only to convert a
+model once and deliberately installs the **CPU-only** build. One virtual
+environment holds one torch, so whichever installs first wins.
+
+This machine has already lost that race. The check reported, on the real venv:
+
+> There is an NVIDIA GPU here, but the installed torch (2.14.0+cpu) is a
+> CPU-only build, so speaking will run on the CPU and be much slower.
+
+The app says so in the voice-model panel and again when a model is prepared,
+with the command. See the entry above for how that command was wrong twice
+before it worked.
+
+### Not verified
+
+- **No model has ever been loaded, and no audio has ever been generated.** The
+  API shape was read out of `mtl_tts.py` and `tts_turbo.py` at the version this
+  was written against, not exercised. `generate()` taking `language_id` on the
+  multilingual model and rejecting it on Turbo is the sort of thing only a real
+  call proves.
+- **Nobody has listened to anything.** The style numbers were chosen by reading
+  the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
+- The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
+  reads as a breath rather than an edit.
+- Whether a voice model fits on a GPU beside Whisper is unknown. Same as
+  translation, and for the same reason: nothing has been tried.
+- The 300-character chunk budget is a guess at where Chatterbox starts dropping
+  clauses. Not measured.
+- Voice cloning has never been done. Whether ten seconds of clean speech is
+  enough, and what a bad clip does, is entirely unknown.
+
+### The disclaimer
+
+SECURITY.md has a new section, *Voice cloning: your responsibility, not the
+tool's*, and the README points at it from the feature and from the licence.
+Short version: use it only on voices you have the right to use and only
+lawfully; every generated file carries Resemble AI's inaudible PerTh watermark
+and Tertius will not help remove it; every generated `.json` says
+`"kind": "speech"` so a reading can never be mistaken downstream for a
+transcript of something somebody actually said.
 
 ## 2026-09-01 — translation, actually run
 
@@ -874,6 +1107,17 @@ did not.
 6. Packaging is still untouched — run-from-source only, no wheel, no installer.
    Strangers on macOS and Linux will arrive before either platform has been run
    by hand, which is the risk to weigh before publishing.
+7. **Listen to `transcripts/first-reading/reading.wav`.** The model has been run
+   and the audio measured, but not heard. Until someone plays it, "it works"
+   means "it produced a well-formed 22-second file", which is not the same
+   claim. Check in particular the five chunks where the model forced an early
+   EOS.
+8. Clone a voice. Ten seconds of clean speech is what the publisher asks for
+   and nothing here has tested that, or what a bad clip does.
+9. Decide what to do about 0.51x realtime. A 40-minute reading is 80 minutes
+   of GPU. `chatterbox-nano` claims 3x realtime on 8 CPU cores and has never
+   been tried; if that holds on a GPU it changes the feature's economics.
+10. Read something through the **UI**, not just through `speak_text_file`.
 
 ## Ideas not built
 
@@ -887,6 +1131,30 @@ did not.
 - No live microphone input; file/batch only, as the original spec required.
 
 ## Gotchas worth remembering
+
+- **One venv holds one torch, and the two features want different builds.**
+  Translating installs the CPU-only wheel on purpose (it only ever converts).
+  Speaking runs the model and wants CUDA. Whichever installs first wins, and
+  nothing fails - synthesis is simply twenty times slower with no explanation.
+  `speech.torch_install_problem()` exists to say so; this machine is already in
+  that state with `2.14.0+cpu`.
+- **A PyTorch CUDA index without a wheel for your Python says "No matching
+  distribution found for torch".** Not "no CUDA build", not "wrong Python" -
+  it reads exactly as though torch did not exist. `cu124` has no cp314 wheels
+  at all, which is how a guessed index number cost a confusing failure on
+  3.14. Check the index listing before naming one, and remember the CUDA
+  indexes lag the CPU one: at the time of writing cp314 had 2.14.0 on cu126
+  and cu130, but stopped at 2.11.0 on cu128 and 2.9.0 on cu129.
+- **`pip install` in a terminal is not this venv.** Tertius runs from
+  `app/.venv`, and a bare `pip` hits whatever is on PATH - installing
+  gigabytes somewhere with no effect here, announcing "Defaulting to user
+  installation" as it goes. Any install instruction this project prints names
+  `sys.executable` explicitly now.
+- **A roundup article is not a licence.** IndexTTS-2 is reported as Apache-2.0
+  or MIT by several of them and ships under the bilibili Model Use License
+  Agreement. Read the repository, and for a Hub model ask the API whether it is
+  gated - a gated model means every user needs an account and a token, which is
+  a different feature from the one you thought you were adding.
 
 - **PowerShell corrupts UTF-8 text files. Do not use it to rewrite text here.**
   `Get-Content -Raw` decodes as cp1252 in PS 5.1, so read-modify-write
@@ -999,7 +1267,8 @@ THIRD-PARTY-NOTICES.md   bundled fonts (OFL 1.1) and dependency licences
 SECURITY.md          how to report something exploitable
 transcripts/         output, the resume state file, and the log
 app/
-  src/tertius/       the app (transcribe.py and translate.py are the two models)
+  src/tertius/       the app (transcribe.py, translate.py and speech.py
+                     are the three models)
   tests/             the suite
   assets/            the T mark as .svg/.png/.ico/.icns, plus its generator
   design/            UI handoff and the original build spec

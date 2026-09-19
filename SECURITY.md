@@ -37,17 +37,57 @@ code as your user can already do everything Tertius can do.
   1. downloading a Whisper model from Hugging Face the first time it is used;
   2. downloading a translation model from Hugging Face, if you translate;
   3. installing `torch`, `transformers` and `sentencepiece` from PyPI and the
-     PyTorch CPU index, if you translate and they are missing.
+     PyTorch CPU index, if you translate and they are missing;
+  4. downloading a voice model from Hugging Face, and installing
+     `chatterbox-tts` and `torch` from PyPI and a PyTorch index, if you read
+     text aloud.
 
   Anything else — anything that *sends* rather than fetches — is a bug worth
-  reporting.
-- **Reaching `/api/translation/prepare` from a page you merely visit.** It is
-  the one endpoint that installs software, so it is worth aiming at. What
+  reporting. In particular, **no audio you supply as a voice clip ever leaves
+  the machine.** The model runs locally; the clip is read off your disk and
+  handed to it in memory.
+- **Reaching `/api/translation/prepare` or `/api/speech/prepare` from a page
+  you merely visit.** These are the two endpoints that install software, so
+  they are worth aiming at. What
   limits it today: the package names and index URLs are fixed in the source and
   not taken from the request, the model name is checked against a fixed
   catalogue, and it refuses to install outside a virtual environment. If you
-  find a way to make it install something not on that list, or to run outside a
-  venv, that is very much in scope.
+  find a way to make either of them install something not on that list, or to
+  run outside a venv, that is very much in scope.
+
+## Voice cloning: your responsibility, not the tool's
+
+Tertius can read a text file aloud in a voice sampled from a recording you
+supply. That is a synthetic voice saying words the person never said, and it is
+the one thing in this program that can be used to hurt somebody.
+
+**Use it only on voices you have the right to use, and only for purposes that
+are lawful where you are.** Concretely, do not use it to impersonate anyone, to
+make a real person appear to say something they did not say, to defraud, to
+harass, or to evade identity checks that rely on a voice. Several jurisdictions
+regulate synthetic voice directly — biometric and voice-likeness statutes,
+election and deepfake laws, right-of-publicity claims — and in many places
+consent from the person whose voice it is, is required, not merely polite.
+
+The maintainer cannot see what you generate and cannot police it. Complying
+with the law where you are is yours to do. The MIT licence this ships under
+gives you the software without warranty and without indemnity; it does not give
+you permission to break the law with it.
+
+Two things are worth knowing about what Tertius produces:
+
+- **Every generated file carries an inaudible watermark.** Chatterbox applies
+  Resemble AI's PerTh watermarker to everything it generates, and Tertius does
+  not remove it or offer to. Helping you strip it is not a feature that will be
+  added; a request to add one is not a bug report.
+- **Every generated `.json` says what it is.** Its `kind` is `speech` and it
+  names the model, the voice clip and the styles used. That is there so a
+  reading can never be mistaken downstream for a transcript of something
+  somebody actually said.
+
+Reports of *misuse by someone else* are not security vulnerabilities and there
+is nothing this project can do about them. A flaw that makes misuse easier —
+say, an output path that lets a reading overwrite a real transcript — is.
 
 ## Out of scope
 

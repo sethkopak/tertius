@@ -15,6 +15,7 @@ from typing import Callable, Iterable, Sequence
 from .alignment import split_sentences
 from .config import (
     JSON_SHAPE_VERSION,
+    SPEECH_SHAPE,
     TRANSCRIPTION_SHAPE,
     TRANSLATION_SHAPE,
     TranscriptionOptions,
@@ -63,6 +64,11 @@ class TranscriptionResult:
     # what language, into what. Written into the `.json` so a translated file
     # can never be mistaken for a transcript of what was actually said.
     translation: dict | None = None
+    # Set when this result is a *reading* rather than a transcript: text
+    # that was turned into audio, and the timings of the audio that came
+    # out. The one case here where a cue cannot have drifted from its
+    # recording, both having been made in the same pass.
+    speech: dict | None = None
 
 
 def format_timestamp(seconds: float, separator: str = ",") -> str:
@@ -110,6 +116,22 @@ def segments_to_srt(segments: Sequence[Segment]) -> str:
     return "\n".join(blocks)
 
 
+def _shape_of(result: TranscriptionResult) -> str:
+    """What kind of thing this `.json` describes.
+
+    Checked in the order of how badly a reader would be misled by getting
+    it wrong. A reading is the strongest claim of the three - those words
+    were never said by anybody - so it wins over a translation, which in
+    turn wins over a plain transcript. (Timestamped supplied text writes
+    its own `.json` in alignment.py and never comes through here.)
+    """
+    if result.speech:
+        return SPEECH_SHAPE
+    if result.translation:
+        return TRANSLATION_SHAPE
+    return TRANSCRIPTION_SHAPE
+
+
 def result_to_json(result: TranscriptionResult, source: Path) -> str:
     """The transcript as data: every segment with its timings, plus what is known.
 
@@ -131,7 +153,7 @@ def result_to_json(result: TranscriptionResult, source: Path) -> str:
     """
     payload = {
         "version": JSON_SHAPE_VERSION,
-        "kind": TRANSLATION_SHAPE if result.translation else TRANSCRIPTION_SHAPE,
+        "kind": _shape_of(result),
         "source": source.name,
         "language": result.language,
         "duration": result.duration,
@@ -150,6 +172,12 @@ def result_to_json(result: TranscriptionResult, source: Path) -> str:
         # Which model, and which way. Without it a translated `.json` cannot
         # be told from a transcript of speech already in that language.
         payload["translation"] = dict(result.translation)
+    if result.speech:
+        # Which model read it, in what voice, and what the style tags did.
+        # The warnings in here are the record of what Tertius changed about
+        # the text before speaking it, which cannot be recovered from the
+        # audio afterwards.
+        payload["speech"] = dict(result.speech)
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 

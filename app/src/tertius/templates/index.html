@@ -208,6 +208,72 @@
           <p class="note" id="translation-note"></p>
         </div>
 
+        <span>Read aloud</span>
+        <label class="check"
+               title="Turn a folder of .txt files into recordings. Whisper is never loaded — there is no audio to decode. Writes a .wav beside each text file, and an .srt timed against the audio it just made.">
+          <input type="checkbox" id="opt-speak" class="tick">
+          Read text files aloud
+        </label>
+
+        <div class="row-pair" id="speech-model-row" hidden>
+          <label for="opt-speech-model">Voice model</label>
+          <div class="with-info">
+            <div class="select">
+              <select id="opt-speech-model"
+                      title="All three are MIT-licensed. Only the multilingual one speaks anything but English; only turbo and nano act on [laugh] and [cough].">
+                {% for m in speech_models %}<option value="{{ m }}"{% if m == default_speech_model %} selected{% endif %}>{{ m }} — {{ speech_catalog[m]['languages'] }} language{% if speech_catalog[m]['languages'] != 1 %}s{% endif %}, {{ speech_catalog[m]['license'] }}</option>{% endfor %}
+              </select>
+              <span class="chev" aria-hidden="true">⌄</span>
+            </div>
+            <button type="button" id="btn-speech-info" class="info" aria-expanded="false"
+                    title="Compare the voice models">i</button>
+          </div>
+        </div>
+
+        <div class="row-pair" id="speech-language-row" hidden>
+          <label for="opt-speech-language">Language</label>
+          <div class="select">
+            <select id="opt-speech-language"
+                    title="The language the text is written in. Read from the model itself, so it can never offer one the model would reject.">
+              <option value="">choose a language</option>
+            </select>
+            <span class="chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+
+        <div class="row-pair" id="speech-voice-row" hidden>
+          <label for="opt-speech-voice">Voice clip</label>
+          <div class="path-row">
+            <input type="text" id="opt-speech-voice" class="field data" spellcheck="false"
+                   placeholder="the model's own voice"
+                   title="A recording of the person to read in — about ten seconds of clean speech. Everything expressive comes from this clip: a voice sampled reading gently reads gently. Leave it empty to use the model's default voice.">
+            <button type="button" id="btn-browse-voice" class="btn ghost"
+                    title="Choose a recording of the voice to read in">Browse</button>
+          </div>
+        </div>
+
+        <div class="row-pair" id="speech-style-row" hidden>
+          <label for="opt-speech-style">Default style</label>
+          <div class="select">
+            <select id="opt-speech-style"
+                    title="How a line is delivered until the text says otherwise with a [style] tag. These control intensity and pacing, not emotion — this model has no emotion conditioning, and the feeling comes from the voice clip.">
+              {% for s in speech_styles %}<option value="{{ s }}"{% if s == default_speech_style %} selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+            <span class="chev" aria-hidden="true">⌄</span>
+          </div>
+        </div>
+
+        <div class="row-pair" id="speech-prepare-row" hidden>
+          <span></span>
+          <button type="button" id="btn-prepare-speech" class="btn"
+                  title="Install the speech libraries if they are missing, then download this model. Needed once per model, and it is a 3–4 GB download on top of torch.">Download and prepare</button>
+        </div>
+
+        <div class="row-pair" id="speech-note-row" hidden>
+          <span></span>
+          <p class="note" id="speech-note"></p>
+        </div>
+
         <div class="row-pair" id="textdir-row" hidden>
           <label for="opt-textdir">Text folder</label>
           <div class="path-row">
@@ -350,6 +416,63 @@
         <p class="panel-body dim">No verdict for this machine, unlike the transcription
           table &mdash; translation has only been run on the CPU here, so anything said about
           fitting on a GPU would be a guess.</p>
+      </section>
+
+      <section class="panel" id="panel-speech-info" hidden>
+        <div class="panel-head">
+          <strong>Voice models</strong>
+          <button type="button" id="btn-speech-info-close" class="info" title="Hide this table">✕</button>
+        </div>
+        <div class="table-scroll">
+          <table id="speech-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th title="Fetched from the publisher and used as published — these are not converted here.">Download</th>
+                <th>Languages</th>
+                <th title="Whether [laugh], [chuckle] and [cough] do anything.">Tags</th>
+                <th>Licence</th>
+                <th>Speed</th>
+                <th>Quality</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="panel-body dim">All three are MIT and none of them is gated, which is why
+          they are the ones offered. IndexTTS-2 is better at this &mdash; it is the only open
+          model with real duration control &mdash; and ships under the bilibili Model Use
+          License Agreement rather than a permissive licence; XTTS-v2 forbids commercial use
+          outright.</p>
+        <p class="panel-body dim">Unlike the translation models these are loaded as the
+          publisher shipped them rather than converted here. Every file they generate carries
+          Resemble AI&rsquo;s inaudible PerTh watermark.</p>
+        <p class="panel-body dim">No verdict for this machine. Nothing here has been run on a
+          GPU yet, so anything said about whether one of these fits beside Whisper would be a
+          guess.</p>
+      </section>
+
+      <section class="panel" id="panel-speech-preview" hidden>
+        <div class="panel-head">
+          <strong>What your tags did</strong>
+          <button type="button" id="btn-speech-preview-close" class="info" title="Hide this">✕</button>
+        </div>
+        <p class="panel-body dim">Nothing has been generated. This is the text split into the
+          calls that would be made, with the delivery each one would get &mdash; so a
+          misspelt tag shows up here rather than forty minutes into a reading.</p>
+        <div id="speech-warnings"></div>
+        <div class="table-scroll">
+          <table id="speech-preview-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Style</th>
+                <th>Text</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel danger" id="panel-clear-queue" hidden>
