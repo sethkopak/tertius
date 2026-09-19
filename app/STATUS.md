@@ -79,8 +79,43 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   here where a cue cannot have drifted from its recording. Style tags in the
   text (`[solemn]`, `[emphatic]`, …) change delivery from where they appear.
   Run for real on the GPU at **0.51x realtime** — slower than realtime, and
-  about forty times dearer per minute than transcribing. **Nobody has listened
-  to the output yet**, and voice cloning has never been run.
+  about forty times dearer per minute than transcribing. **A Russian speaker
+  has listened to a Russian reading and says it sounds good**; Chinese has been
+  run and heard only by someone who does not speak it.
+
+## 2026-09-19 — somebody listened
+
+The line that had been open since the feature was written is closed, and only
+half of it.
+
+**Russian: verified by a Russian speaker.** Seth ran a Russian reading and had
+someone who speaks the language listen to it. They said it sounds good. That is
+the first time any claim here about how this *sounds* has come from a person
+rather than from a waveform, a language detector or a pitch estimate.
+
+**Chinese: unverified, and should stay that way in this file.** It was run, and
+it sounds good to Seth - who does not speak Chinese. Whisper hearing the right
+words back is evidence the words survived the pipeline; it is not evidence that
+a Mandarin speaker would call it good Chinese, and neither is a non-speaker's
+impression. The honest state is: plausible, unconfirmed.
+
+The distinction matters more here than it would elsewhere, because the two
+failure modes are invisible from outside the language. A reading can be fluent
+and wrong, and everything this program knows how to measure - duration, pitch,
+what a small Whisper model transcribes back - would report it as fine. Russian
+now has a person behind it. Chinese has a machine and a guess.
+
+What this does settle, for both:
+
+- The voice sampled from the recording is good enough to be worth listening to,
+  on real devotional material, with no clip chosen by hand.
+- The chunking fix produced audio a speaker could follow. Before it, the
+  Chinese was truncated garbage; a listener would not have got as far as an
+  opinion.
+- Nothing about the three-stage pipeline gets in the way of the result.
+
+Still open: a Chinese speaker, and anyone at all on the other twenty-one
+languages `chatterbox-multilingual` claims.
 
 ## 2026-09-19 — out of memory, and the bug that found
 
@@ -183,9 +218,9 @@ of much. That it is the *same text* is - before the fix it was unrelated.
 
 ### Still not verified
 
-- **Nobody has listened to any of it**, in any language. Whisper hearing
-  Chinese back proves the words survived, not that a Mandarin speaker would
-  want to listen.
+- **Chinese has not been heard by anyone who speaks it.** Whisper hearing the
+  right words back proves they survived the pipeline, not that the result is
+  good Chinese. Russian has a speaker behind it; Chinese does not.
 - The weight of 4 for dense scripts is reasoned, not measured. So is the
   300-character budget it is applied to.
 - The terminator list covers the scripts Tertius can currently speak into. It
@@ -1330,11 +1365,10 @@ did not.
 6. Packaging is still untouched — run-from-source only, no wheel, no installer.
    Strangers on macOS and Linux will arrive before either platform has been run
    by hand, which is the risk to weigh before publishing.
-7. **Listen to a reading.** Two now exist and neither has been heard:
-   `transcripts/first-reading/reading.wav` (English, default voice) and the
-   Spanish devotional from the 2026-09-19 run. Whisper can say what language
-   came out; only a person can say whether it is worth listening to.
-   Previously: **Listen to `transcripts/first-reading/reading.wav`.** The model has been run
+7. **Find a Chinese speaker.** Russian has been confirmed by one; Chinese has
+   been run and sounds fine to someone who does not speak it, which is not the
+   same claim and should not be written down as if it were. The other twenty-one
+   languages the model claims have nobody behind them at all. The model has been run
    and the audio measured, but not heard. Until someone plays it, "it works"
    means "it produced a well-formed 22-second file", which is not the same
    claim. Check in particular the five chunks where the model forced an early

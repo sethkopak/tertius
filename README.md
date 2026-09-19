@@ -924,6 +924,17 @@ terminator followed by an ASCII capital, so a Chinese translation arrived as a
 single "sentence", became one oversized chunk, and came back truncated. It was
 invisible in the `.txt` and only showed up when something read it aloud.
 
+### What has actually been heard
+
+A Russian speaker has listened to a Russian reading and says it sounds good.
+That is the only claim here about how any of this *sounds* that comes from a
+person rather than from a waveform.
+
+Chinese has been run and sounds fine to someone who does not speak Chinese,
+which is a weaker claim and is kept separate on purpose: a reading can be
+fluent and wrong, and duration, pitch and a back-transcription would all report
+it as fine. The other twenty-one languages have nobody behind them.
+
 ### Honest limits
 
 As of the last time this was written:
