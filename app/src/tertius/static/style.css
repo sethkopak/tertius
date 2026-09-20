@@ -780,8 +780,13 @@ button, input, select { font: inherit; color: inherit; }
 .q-file { flex: 1; min-width: 0; }
 .q-len { width: 120px; flex: none; }
 .q-state { width: 130px; flex: none; }
-.q-out { width: 96px; flex: none; }
-.q-kill { width: 28px; flex: none; text-align: right; }
+/* Was a fixed 96px, which fitted two links. A job producing two languages
+   writes ten, and they ran straight out of the column and underneath the
+   remove button - which then sat on top of a link and swallowed the click. */
+.q-out { width: 188px; flex: none; }
+/* Top-aligned, and with room of its own. The output cell is several lines tall
+   now, and a centred X lands in the middle of them. */
+.q-kill { width: 28px; flex: none; text-align: right; align-self: flex-start; }
 
 .qrow {
   display: flex;
@@ -821,6 +826,36 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .q-out a:hover { text-decoration-color: var(--accent); }
+
+/* One line per language. */
+.out-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+}
+.out-line + .out-line { margin-top: 3px; }
+
+.out-lang {
+  min-width: 17px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+/* The transcript has no language suffix of its own; a dot keeps the links in
+   the same column as the translated rows rather than half a character left. */
+.out-source { color: var(--text-4); }
+
+/* Sets the reading apart from the text it was made from, so two `srt` links on
+   one line are not left to be told apart by position. */
+.out-gap {
+  width: 1px;
+  align-self: stretch;
+  margin: 1px 2px;
+  background: var(--border-subtle);
+}
+.q-out a.is-spoken { font-style: italic; }
 .em-dash { color: var(--text-4); }
 
 .q-kill button {

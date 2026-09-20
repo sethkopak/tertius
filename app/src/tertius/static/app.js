@@ -1364,15 +1364,68 @@ function waveform(path, progress) {
   return `<div class="waveform" aria-hidden="true">${bars.join('')}</div>`;
 }
 
+// Which language an output belongs to, read off its own name.
+//
+// The convention the writers already follow: `talk.txt` is the transcript,
+// `talk.es.txt` the Spanish translation, `talk.es.spoken.wav` the Spanish
+// reading. So everything between the source stem and the extension says what
+// the file is - the first part is the language, and `spoken` marks audio.
+function describeOutput(file, output) {
+  const name = basename(output);
+  const stem = (file.name || '').replace(/\.[^.]*$/, '');
+  let rest = name;
+  if (stem && name.startsWith(stem + '.')) rest = name.slice(stem.length + 1);
+  const parts = rest.split('.');
+  const ext = parts.pop() || '';
+  const spoken = parts.includes('spoken');
+  const language = parts.filter((p) => p !== 'spoken')[0] || '';
+  return { name, ext, spoken, language };
+}
+
 function outputLinks(file) {
-  const links = (file.outputs || []).map((output) => {
-    const name = basename(output);
-    const relative = file.subdir ? `${file.subdir}/${name}` : name;
-    const label = name.split('.').pop();
-    return `<a href="/api/transcript?name=${encodeURIComponent(relative)}" target="_blank"
-              title="Open ${esc(name)}">${esc(label)}</a>`;
+  const outputs = file.outputs || [];
+  if (!outputs.length) return '<span class="em-dash">—</span>';
+
+  // One line per language rather than one run of ten links. Ten of them in a
+  // row is unreadable - which `srt` is the Spanish subtitles and which the
+  // Russian is not a question anybody should have to answer by counting.
+  const groups = new Map();
+  outputs.forEach((output) => {
+    const info = describeOutput(file, output);
+    if (!groups.has(info.language)) groups.set(info.language, []);
+    groups.get(info.language).push({ output, info });
   });
-  return links.join('') || '<span class="em-dash">—</span>';
+
+  const line = ([language, items]) => {
+    const link = ({ output, info }) => {
+      const name = basename(output);
+      const relative = file.subdir ? `${file.subdir}/${name}` : name;
+      return `<a href="/api/transcript?name=${encodeURIComponent(relative)}"
+                 target="_blank" class="${info.spoken ? 'is-spoken' : ''}"
+                 title="Open ${esc(name)}">${esc(info.ext)}</a>`;
+    };
+    // A fixed order, not the order they happened to be written in. The
+    // translation writes its `.srt` before its `.txt` and the transcript the
+    // other way round, so left alone one row reads "txt srt" and the next
+    // "srt txt" for the same two things.
+    // The thing itself first, then what describes it: a `.txt` leads the text
+    // group and the `.wav` leads the reading, with cues after either.
+    const order = (list) => (a, b) =>
+      (list.indexOf(a.info.ext) + 1 || 99) - (list.indexOf(b.info.ext) + 1 || 99);
+    const asText = order(['txt', 'srt', 'json']);
+    const asAudio = order(['wav', 'srt', 'json']);
+    // The reading is a different artefact from the text, so it is set apart
+    // rather than left to be told from two identically-labelled `srt` links.
+    const text = items.filter((i) => !i.info.spoken).sort(asText).map(link).join('');
+    const said = items.filter((i) => i.info.spoken).sort(asAudio).map(link).join('');
+    const label = language
+      ? `<span class="out-lang">${esc(language)}</span>`
+      : '<span class="out-lang out-source" title="the original language">·</span>';
+    const gap = text && said ? '<span class="out-gap" aria-hidden="true"></span>' : '';
+    return `<span class="out-line">${label}${text}${gap}${said}</span>`;
+  };
+
+  return [...groups.entries()].map(line).join('');
 }
 
 function stateCell(file, status) {
