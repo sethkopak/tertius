@@ -405,6 +405,60 @@ def test_the_earlier_stages_give_back_the_gpu_before_speaking(api, tmp_path):
     assert api.translator is not None and api.translator.unloads == 2
 
 
+def test_the_card_is_released_when_the_batch_ends(api, tmp_path, monkeypatch):
+    """Unloading is not releasing.
+
+    Dropping the Python reference leaves torch's caching allocator holding the
+    blocks, so an idle server sits on the card until it is restarted - measured
+    at 4,735 MiB fifteen hours after a job finished, on a 6 GB card. The next
+    job then starts short of the memory it thinks it has, which is the likelier
+    explanation for an out-of-memory failure than anything about the models.
+    """
+    from tertius.jobs import JobManager
+
+    calls = []
+    monkeypatch.setattr(
+        JobManager, "_empty_cuda_cache", staticmethod(lambda: calls.append(1))
+    )
+
+    _queue_audio(api, tmp_path)
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={"translate": True, "target_language": "es", "speak": True},
+    )
+    api.wait_done()
+
+    # Twice: once to make room for the reading, once when the batch ends.
+    assert len(calls) == 2, calls
+
+
+def test_the_card_is_released_when_a_model_will_not_load(api, tmp_path, monkeypatch):
+    """The failure path is the one that most needs to let go of the card.
+
+    These returns happen *before* the batch's try/finally, so whatever had
+    already loaded stayed resident - and the next attempt started shorter
+    still. That is the path an out-of-memory failure actually takes.
+    """
+    from tertius.jobs import JobManager
+
+    calls = []
+    monkeypatch.setattr(
+        JobManager, "_empty_cuda_cache", staticmethod(lambda: calls.append(1))
+    )
+
+    _queue_audio(api, tmp_path)
+    # Whisper loads, then the voice model refuses - so something is resident.
+    api.speaker_load_error = RuntimeError("CUDA out of memory")
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={"translate": True, "target_language": "es", "speak": True},
+    )
+    api.wait_done()
+
+    assert api.manager.status(include_files=False)["state"] == "error"
+    assert calls, "the card was never released on the failure path"
+
+
 def test_nothing_is_unloaded_when_the_work_is_on_the_cpu(api, tmp_path):
     """A reload costs real time; there is nothing to reclaim on the CPU."""
     audio = _queue_audio(api, tmp_path)

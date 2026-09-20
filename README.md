@@ -912,6 +912,12 @@ If it still runs out, the message says so and what to do: close whatever else
 is using the GPU, choose a smaller Whisper model, or set **Device** to `cpu`
 for a slower run that always fits.
 
+The card is also released when a job ends, including when one fails partway.
+Unloading a model only drops the reference; torch keeps the memory, so without
+this an idle server sat on several gigabytes until it was restarted — measured
+at 4,735 MiB fifteen hours after a job finished, which then made the *next* job
+fail for want of room.
+
 ### Languages that do not end sentences with a full stop
 
 Chinese, Japanese, Korean, Greek, Arabic and Hindi are split on their own

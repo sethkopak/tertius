@@ -618,13 +618,35 @@ class JobManager:
                 freed.append(type(model).__name__)
         if not freed:
             return
+        JobManager._empty_cuda_cache()
+        log.info("freed the GPU for the reading: %s", ", ".join(freed))
+
+    @staticmethod
+    def _empty_cuda_cache() -> None:
+        """Hand the freed blocks back to the driver, not merely to torch.
+
+        Unloading a model drops the Python reference; torch's caching allocator
+        keeps the memory anyway. So a server that has finished a job sits on
+        the card indefinitely - measured at **4,735 MiB fifteen hours after the
+        job ended**, on a 6 GB card, with the app idle and the queue empty.
+
+        That is the likelier explanation for an out-of-memory failure than
+        anything about the models: the run that failed was not the first of its
+        session, and it started with several gigabytes already spoken for by a
+        job that had finished the day before. Without this, "restart the server
+        between jobs" is a workaround the user has to know about.
+
+        CTranslate2 - Whisper and the translator - releases its own memory
+        directly and is unaffected; this is for the torch side, which is the
+        voice model and by far the largest of the three.
+        """
         try:
             import torch
 
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         except Exception:  # pragma: no cover - torch may not be installed
             log.debug("could not empty the CUDA cache", exc_info=True)
-        log.info("freed the GPU for the reading: %s", ", ".join(freed))
 
     def _read_aloud(self, path, target_dir, speaker, result, translated, options):
         """Speak a finished transcript. The third stage.
@@ -763,6 +785,10 @@ class JobManager:
                     self._error = f"model failed to load: {exc}"
                     self._finished_at = time.time()
                     self._phase = None
+                # Whatever did load stays on the card otherwise, and the
+                # next attempt starts shorter still - which is the path an
+                # out-of-memory failure actually takes.
+                self._empty_cuda_cache()
                 return
 
         translator = None
@@ -795,6 +821,10 @@ class JobManager:
                     self._error = f"translation is not available: {exc}"
                     self._finished_at = time.time()
                     self._phase = None
+                # Whatever did load stays on the card otherwise, and the
+                # next attempt starts shorter still - which is the path an
+                # out-of-memory failure actually takes.
+                self._empty_cuda_cache()
                 return
 
         speaker = None
@@ -826,6 +856,10 @@ class JobManager:
                     self._error = f"speaking is not available: {exc}"
                     self._finished_at = time.time()
                     self._phase = None
+                # Whatever did load stays on the card otherwise, and the
+                # next attempt starts shorter still - which is the path an
+                # out-of-memory failure actually takes.
+                self._empty_cuda_cache()
                 return
 
         with self._lock:
@@ -1148,6 +1182,10 @@ class JobManager:
                 unload = getattr(model, "unload", None)
                 if callable(unload):
                     unload()
+            # Unloading is not releasing. Without this the process keeps every
+            # block torch ever allocated, and the next job on this server starts
+            # short of the card it thinks it has.
+            self._empty_cuda_cache()
 
         with self._lock:
             self._current_file = None

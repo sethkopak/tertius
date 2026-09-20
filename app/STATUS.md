@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**498 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**500 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,51 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-20 — an idle server was sitting on the card
+
+Noticed while restarting the server: it had been holding **4,735 MiB of a 6 GB
+card for fifteen hours**, with the job long finished and the queue empty.
+Stopping the process dropped the card to 68 MiB.
+
+**Unloading is not releasing.** The batch unloads all three models in its
+`finally`, but that only drops the Python reference - torch's caching allocator
+keeps the blocks. CTranslate2 releases its own memory directly, so Whisper and
+the translator were never the problem; the voice model is on the torch side and
+is the largest of the three.
+
+This is a better explanation of the original out-of-memory failure than the one
+written up two entries ago. That run was not the first of its session. It began
+with several gigabytes already spoken for by a job that had finished earlier,
+which is why the measured totals - 5.72 GB of models on a 6.44 GB card - looked
+like they should *just* fit and did not.
+
+### The failure path was the worst of it
+
+Three load-failure branches `return` before the batch's `try/finally` ever
+begins, so nothing was unloaded and nothing released. Whisper loads, the voice
+model refuses for want of memory, and the job exits leaving Whisper resident -
+so the *next* attempt starts shorter still. That is the path an out-of-memory
+failure actually takes, and it was the one path that let go of nothing.
+
+All three release the card now, and a test covers the failure branch
+specifically rather than only the happy one - the first version of that test
+set an attribute the harness does not have and passed without exercising
+anything.
+
+### Measured
+
+A real job, transcribe -> translate -> speak, on the same card:
+
+```
+peak during the job : 5025 MiB
+after it finished   :  417 MiB
+```
+
+417 MiB is the CUDA context the process keeps while alive, and is not
+reclaimable without exiting. Against 4,735 MiB before, that is about 4.3 GB
+handed back. "Restart the server between jobs" stops being a thing anyone has
+to know.
 
 ## 2026-09-19 — protecting the numbers in a scripture reference
 
