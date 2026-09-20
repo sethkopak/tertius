@@ -86,6 +86,68 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
 
+## 2026-09-19 — the Russian file, re-run on a restarted server
+
+Server stopped and started again before testing, which mattered: the old one
+had been up since before any of the day's fixes and was serving that code. Its
+three processes were also still holding the card - 5903 MiB used dropped to 65
+MiB the moment they went.
+
+Same file, same pipeline, through the HTTP API rather than a script.
+
+### What changed
+
+**552 seconds to 123.** The Russian transcript splits into 8 lines where it had
+been one 70-second chunk, and that is the whole of the difference.
+
+**The GPU unload is visible rather than argued for**, logged per phase:
+
+```
+transcribing   GPU 0.32 GB free
+translating    GPU 0.19 GB free   <- nothing left at all
+speaking       GPU 2.32 GB free   <- the earlier stages handed theirs back
+```
+
+**Both cue files survive**: `0101.ru.spoken.en.srt` with 5 cues timed against
+the Russian recording, and `0101.ru.spoken.en.spoken.srt` with 4 timed against
+the audio that was generated from it. Different artifacts, no longer written to
+one name.
+
+The voice carried through the whole chain - 115.4 Hz in the Russian source,
+112.1 Hz out - and Whisper hears the result as English at p=0.99.
+
+### A round trip is a harsher test than the real use, and found the weak spot
+
+This was English audio that had already been read into Russian, now translated
+back. Four lossy stages rather than the two a real job has: English text ->
+Russian speech -> Whisper -> English translation.
+
+Structure survived it completely: 8 lines in, 8 lines out, all the way round.
+"Daily Heavenly Manna" came back as "The everyday heaven manna", which is what
+a 418M model does twice in a row and is not interesting.
+
+**What did not survive is the scripture references.**
+
+| original | after the round trip |
+| --- | --- |
+| `Psalm 66, verses 8 and 9.` | `In the highway of the sex poems, nonchotini, sachu.` |
+| `Psalm 66 verses 8 and 9.` | `Psalm 66, verses of Father and Nev.` |
+
+The corruption is in the *text*, not the audio - the Russian was already
+nonsense at that line, so it entered upstream and each stage amplified it.
+Numbers and citations are the most fragile thing in the chain, and they are
+also the thing this particular corpus opens and closes every single file with.
+
+**This is not a defect in anything fixed today and should not be filed as one.**
+A one-way job has two stages, and the Spanish and Chinese runs did not do this.
+But it is worth knowing before anyone points a queue of devotional volumes at
+this expecting the verse citations to come out intact, because they will not.
+
+If that ever matters, the fix is not a better model - it is protecting the
+reference from translation at all, the way the alignment code already keeps
+text that is never spoken verbatim. Nobody has asked for it yet, and it is
+recorded here rather than built.
+
 ## 2026-09-19 — the same bug again, in a script I had not checked
 
 Reported as a job stuck on *Reading aloud*. It was not stuck; it took **552
