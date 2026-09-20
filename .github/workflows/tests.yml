@@ -43,6 +43,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          # `num2words` is an optional dependency of the speech stage, and the
+          # only one small enough to install here - it is pure Python and about
+          # a megabyte, where torch and chatterbox are gigabytes and are faked
+          # throughout the suite instead. Without it the number-spelling tests
+          # skip, and the thing they cover is real: the voice model cannot say
+          # an Arabic digit in any language but English.
+          python -m pip install num2words
 
       - name: Run tests
         working-directory: app

@@ -14,6 +14,18 @@ import pytest
 
 from tertius.numbers import MAX_SPELLED, spell, would_change
 
+# `num2words` is optional - it belongs to the speak extra, not the base
+# install. Without it `spell` correctly returns the text unchanged, so every
+# assertion here would fail as though the feature were broken rather than
+# absent. An explicit skip rather than `importorskip`, which is documented
+# around a module being missing and not around one that refuses to load.
+try:  # noqa: SIM105 - the import is the test
+    import num2words as _num2words  # noqa: F401
+except Exception:  # pragma: no cover - only when the extra is not installed
+    pytest.skip(
+        "num2words is part of the speak extra", allow_module_level=True
+    )
+
 
 RU_SIXTY_SIX = "шестьдесят шесть"
 
