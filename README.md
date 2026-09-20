@@ -967,9 +967,12 @@ are kept in step instead:
 - ticking one under **Speak** adds it to **Into**, since the text has to exist first
 - unticking it under **Into** removes it from **Speak**
 
-The cost is linear, and worth knowing before you tick five: translating as
-whole sentences is roughly 220 s per language on a 38-minute talk, and reading
-aloud runs at about half realtime per language.
+Measured on a real two-language run: **translating into another language is
+nearly free, and speaking it is not.** Adding Russian to a file already being
+translated into Spanish cost 17 seconds, because the translator is loaded and
+the sentences are already split. Each *reading*, though, is about half realtime
+on its own — 180 of the 270 seconds that file took. Ticking five languages buys
+five readings rather than five translations.
 
 ### Scripture references keep their numbers
 

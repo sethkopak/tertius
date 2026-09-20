@@ -160,14 +160,48 @@ has codes like `zh_Hant`, and lowercasing produces something it rejects. The
 test existed because the single-target version had been careful about exactly
 that. Trimmed, not lowercased, now.
 
-### Not verified
+### Run for real, and the cost is not what was predicted
 
-- No multi-language job has been run end to end against real models. The
-  linking rules were driven in the browser and the pipeline loop is covered by
-  the suite, but three languages on a real file has not been timed.
-- The cost is linear and worth saying out loud: the sentence pass is ~220s per
-  language on a 38-minute talk, and a reading is ~0.5x realtime per language.
-  Three languages on a 40-minute talk is on the order of four hours.
+Two devotional files into Spanish *and* Russian, through the HTTP API rather
+than the internals. Ten outputs per source and no collisions: the transcript,
+two translations timed against the recording, and two readings with their own
+cues. Whisper hears `es` at p=0.99 and `ru` at p=0.99 in the right files, and
+the chain reads correctly - "Manna for January 3rd." into "Manna para el 3 de
+enero." into "Манна на 3 января.", spoken as "Mana para el tres de enero" with
+the number said properly.
+
+The stage ordering held, which was the thing most likely to be wrong:
+
+```
+translated 0103.mp3 into es
+translated 0103.mp3 into ru
+freed the GPU for the reading      <- once, not once per language
+read 0103.mp3 aloud -> es
+read 0103.mp3 aloud -> ru
+```
+
+**The estimate in the previous entry was wrong in a useful direction.** It said
+the sentence pass costs ~220s per language, and predicted three languages on a
+40-minute talk at about four hours. Measured on the real run, adding Russian to
+a file already being translated into Spanish cost **17 seconds**, not another
+pass - the translator is loaded, the sentences are already split, and the
+second language is only the generation.
+
+Speech is the linear cost. Per file, roughly 21s for both translations against
+90s for *each* reading: 180 of about 270 seconds. So the useful rule is that
+**translating into another language is nearly free and speaking it is not**,
+and anyone ticking five languages is buying five readings rather than five
+translations.
+
+### Still not verified
+
+- A false alarm worth recording, because the next person will see it too: the
+  phase trace appeared to free the card twice with a reload between, which is
+  exactly what a misplaced loop would look like. Two files had run, not one -
+  the queue still held a pending file from earlier. The log settles it, the
+  phase trace does not, and the phase trace is what the UI shows.
+- Nobody has listened to either of these. Whisper hearing the right language
+  proves the language, not the quality.
 
 ## 2026-09-20 — the voice model cannot read a digit
 
