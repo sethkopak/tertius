@@ -12,6 +12,7 @@ Nothing here loads a model. The fakes stand in for all three.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -213,8 +214,18 @@ def test_the_reading_uses_the_sentence_translation_not_the_fragments(api, tmp_pa
     assert "[es]" in spoken  # the fake marks what it translated
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("librosa") is None,
+    reason="cutting a clip out of a recording needs librosa, which belongs to "
+           "the speak extra and is far too heavy for CI",
+)
 def test_the_voice_is_sampled_from_the_recording(api, tmp_path):
-    """No clip chosen, so the speaker in the recording is the voice."""
+    """No clip chosen, so the speaker in the recording is the voice.
+
+    The only test here that opens a real audio file. `best_voice_window` -
+    which is where the judgement lives - is covered separately and needs
+    nothing installed.
+    """
     audio = _real_wav(tmp_path / "audio" / "talk.wav")
     api.manager.attach(api.output_dir)
     api.manager.store.add_files([audio])
@@ -232,6 +243,40 @@ def test_the_voice_is_sampled_from_the_recording(api, tmp_path):
     # the user had to supply.
     assert voice is not None
     assert Path(voice).name.startswith("talk")
+
+
+def test_a_voice_that_cannot_be_cut_falls_back_to_the_default(api, tmp_path):
+    """No librosa, or an unreadable source: the reading still happens.
+
+    A default voice is a worse reading; a failed one is no reading. This is the
+    path every machine without the speak extra takes, and it was previously
+    covered only by accident - as a CI failure.
+    """
+    from tertius.speech import voice_for
+
+    # A file the sampler cannot open, which is what a missing librosa looks
+    # like from here.
+    (audio,) = make_audio(tmp_path / "audio", "talk.mp3")
+    voice, temporary = voice_for(audio, None, None, tmp_path)
+    assert voice is None and temporary is False
+
+    # And the job still completes, using the model's own voice.
+    api.manager.attach(api.output_dir)
+    api.manager.store.add_files([audio])
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={
+            "translate": True,
+            "target_languages": ["es"],
+            "speak": True,
+            "speech_languages": ["es"],
+        },
+    )
+    api.wait_done()
+
+    assert api.manager.store.get(audio)["status"] == "done"
+    assert api.speaker is not None and api.speaker.calls
+    assert {v for _t, _s, _l, v in api.speaker.calls} == {None}
 
 
 def test_an_explicit_clip_still_wins(api, tmp_path):
