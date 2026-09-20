@@ -278,23 +278,52 @@ def apply_windows_folder_icon(say=print) -> bool:
     if not icon.is_file():
         return False
     ini = project_dir() / "desktop.ini"
-    try:
-        # newline="" so the explicit \r\n is written as-is. Text mode would
-        # translate it again and put a blank line between every entry.
-        with open(ini, "w", encoding="utf-8", newline="") as handle:
-            handle.write(
-                "[.ShellClassInfo]\r\n"
-                f"IconResource={icon},0\r\n"
-                "ConfirmFileOp=0\r\n"
-            )
-        # Explorer only reads desktop.ini from a folder marked system or
-        # read-only, and only honours a hidden+system desktop.ini.
+    # newline="" so the explicit \r\n is written as-is. Text mode would
+    # translate it again and put a blank line between every entry.
+    wanted = (
+        "[.ShellClassInfo]\r\n"
+        f"IconResource={icon},0\r\n"
+        "ConfirmFileOp=0\r\n"
+    )
+
+    def attrib(*flags: str) -> None:
         subprocess.run(
-            ["attrib", "+h", "+s", str(ini)],
+            ["attrib", *flags, str(ini)],
             capture_output=True,
             timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+
+    try:
+        if ini.is_file():
+            # Nothing to do if it already says the right thing, which is every
+            # launch after the first. Worth checking rather than rewriting
+            # blindly: the rewrite is the step that fails, so not needing it is
+            # the fix for the ordinary case.
+            try:
+                if ini.read_text(encoding="utf-8", newline="") == wanted:
+                    return True
+            except OSError:
+                pass  # unreadable; fall through and try to replace it
+
+            # Explorer only honours a *hidden and system* desktop.ini, so the
+            # first run marks it as both - and Windows then refuses to open it
+            # for writing, CreateFile failing with ACCESS_DENIED on a file
+            # carrying either attribute. This was setting the very flags that
+            # made its own next run fail, and printed "Permission denied" on
+            # every launch after the first for seven weeks.
+            #
+            # Harmless while the folder stays put, because what is on disk is
+            # already right. Not harmless once it moves: IconResource is an
+            # absolute path, so a moved folder needs this rewrite and silently
+            # was not getting it.
+            attrib("-h", "-s")
+
+        with open(ini, "w", encoding="utf-8", newline="") as handle:
+            handle.write(wanted)
+        # Explorer only reads desktop.ini from a folder marked system or
+        # read-only, and only honours a hidden+system desktop.ini.
+        attrib("+h", "+s")
         subprocess.run(
             ["attrib", "+r", str(project_dir())],
             capture_output=True,

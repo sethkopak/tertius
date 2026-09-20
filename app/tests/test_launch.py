@@ -6,6 +6,7 @@ polled forever and never opened anything), hence the coverage.
 
 from __future__ import annotations
 
+import sys
 import threading
 
 import pytest
@@ -214,3 +215,65 @@ def test_thread_is_real_when_not_stubbed():
 @pytest.mark.parametrize("flag", ["--host", "--port", "--output-dir"])
 def test_parser_accepts_documented_flags(flag):
     assert flag in entry.build_parser().format_help()
+
+
+# ------------------------------------------------------------- the folder icon
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="desktop.ini is Windows-only")
+def test_the_folder_icon_survives_its_own_attributes(tmp_path, monkeypatch):
+    """The launcher set the flags that made its own next run fail.
+
+    Explorer only honours a *hidden and system* `desktop.ini`, so the first run
+    marks it as both - and Windows then refuses to open a file carrying either
+    attribute for writing. Every launch after the first printed "could not set
+    the folder icon: [Errno 13] Permission denied", which it did for seven
+    weeks before anybody mentioned it.
+
+    Harmless while the folder stays put. Not harmless once it moves, because
+    `IconResource` is an absolute path: the rewrite that a moved folder needs
+    is exactly the one that could not happen.
+    """
+    from tertius import launcher
+
+    assets = tmp_path / "app" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "tertius.ico").touch()
+    monkeypatch.setattr(launcher, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "app_dir", lambda: tmp_path / "app")
+
+    said: list[str] = []
+    assert launcher.apply_windows_folder_icon(say=said.append) is True
+    assert said == [], said
+    ini = tmp_path / "desktop.ini"
+    assert ini.is_file()
+
+    # Second run: the file is hidden+system by now. This is the one that broke.
+    said.clear()
+    assert launcher.apply_windows_folder_icon(say=said.append) is True
+    assert said == [], said
+
+    # And a moved folder, where the content genuinely has to change.
+    moved = tmp_path / "elsewhere" / "assets"
+    moved.mkdir(parents=True)
+    (moved / "tertius.ico").touch()
+    monkeypatch.setattr(launcher, "app_dir", lambda: tmp_path / "elsewhere")
+
+    said.clear()
+    assert launcher.apply_windows_folder_icon(say=said.append) is True
+    assert said == [], said
+    assert "elsewhere" in ini.read_text(encoding="utf-8", newline="")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="desktop.ini is Windows-only")
+def test_a_missing_icon_file_is_not_an_error(tmp_path, monkeypatch):
+    """Cosmetic, and never the reason a launch fails."""
+    from tertius import launcher
+
+    (tmp_path / "app" / "assets").mkdir(parents=True)
+    monkeypatch.setattr(launcher, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(launcher, "app_dir", lambda: tmp_path / "app")
+
+    said: list[str] = []
+    assert launcher.apply_windows_folder_icon(say=said.append) is False
+    assert not (tmp_path / "desktop.ini").exists()
