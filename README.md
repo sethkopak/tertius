@@ -918,6 +918,26 @@ this an idle server sat on several gigabytes until it was restarted — measured
 at 4,735 MiB fifteen hours after a job finished, which then made the *next* job
 fail for want of room.
 
+### Numbers are spelled out before they are spoken
+
+The voice model can only say an Arabic digit in English. In Russian it drops
+the number — `Манна на 1 января` came out as `манна на января` — and in Spanish
+it says a different one: `Salmo 66, versos 8 y 9` became `Salmo 15 tibesos o
+39`.
+
+So digits become words in the target language immediately before the model sees
+them, via [num2words](https://github.com/savoirfairelinux/num2words) (LGPL-2.1,
+which binds the library rather than what imports it). It covers 18 of the 23
+languages; `el`, `hi`, `ms`, `sw` and `zh` keep their digits, which is no worse
+than before, and Chinese handles them itself anyway.
+
+**The subtitles keep the digits.** Only the model gets the words, so an `.srt`
+still reads `Псалом 66` rather than `Псалом шестьдесят шесть`.
+
+One known gap: an ordinal that was lost in translation stays lost. `January
+1st` becomes `1 января` becomes "один января", where Russian wants "первое".
+Wrong but intelligible, against a number that used to vanish entirely.
+
 ### Languages that do not end sentences with a full stop
 
 Chinese, Japanese, Korean, Greek, Arabic and Hindi are split on their own

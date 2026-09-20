@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**500 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**514 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,75 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-20 — the voice model cannot read a digit
+
+Reported as "numbers get translated into gibberish" in the Russian output. The
+translation was innocent - `Псалм 66, стихи 8 и 9` and `Манна на 1 января` are
+both correct, numbers intact, so the scripture protection had done its job. It
+is the *speech* stage that cannot cope.
+
+Measured, the same line into three languages:
+
+| text | what the audio said |
+| --- | --- |
+| `Psalm 66, verses 8 and 9.` | `Psalm 66 verses 8 and 9.` (English, fine) |
+| `Псалом 66, стихи 8 и 9.` | `Салом шитая он секс, стихи от что и не.` |
+| `Salmo 66, versos 8 y 9.` | `Salmo 15 tibesos o 39. Y no...` |
+
+**Chatterbox can only say an Arabic digit in English.** Everywhere else it
+drops the number - `Манна на 1 января` came out as `манна на января`, the digit
+simply gone - or renders it as something else: Spanish turned 66 into 15 and
+"8 y 9" into 39. English is fine because that is where the training data is.
+
+Proved by speaking the same Russian line spelled out, which came back correct:
+`стихи восемь и девять`.
+
+### num2words, and a correction to what was said about it
+
+Digits are replaced with words in the target language immediately before the
+model sees them. `num2words`, LGPL-2.1 - which binds the library rather than
+what imports it, so Tertius stays MIT, and unlike the CC-BY-NC that ruled out
+NLLB it takes no rights away from anyone downstream.
+
+**It covers 18 of the 23 languages, not the 22 first reported here.** That
+number came from the advertised language list; testing each one against the
+real package gives `el`, `hi`, `ms`, `sw` and `zh` raising
+`NotImplementedError`. Their digits are left alone, which is no worse than
+before. Chinese is the notable absence and the notable non-problem: it writes
+numerals in running text and handles digits itself.
+
+### Where it happens, and where it deliberately does not
+
+In `Speaker.speak`, the last moment before the model - **not** in the chunk
+text. The cues keep the digits, because an `.srt` reading "Псалом 66" is what a
+person wants and "Псалом шестьдесят шесть" is not. A test pins both halves.
+
+A reference is spoken part by part: `4:17` becomes "four seventeen" rather than
+"four hundred and seventeen", which is what a person reading aloud does.
+Anything above 9999 keeps its digits - years are the reason for the ceiling
+rather than an exception to it, since "1914" wants "nineteen fourteen" and
+num2words offers "one thousand nine hundred and fourteen".
+
+### Measured after
+
+| | before | after |
+| --- | --- | --- |
+| Spanish | `Salmo 15 tibesos o 39` | `Salmos 66, Versos 8 y 9.` |
+| Russian | `Салом шитая он секс, стихи от что и не.` | `Салом 66 с 18 и 9.` |
+
+Whisper normalises spoken numbers back to digits, which is why
+"шестьдесят шесть" reads as 66 there. Spanish is now exactly right. Russian is
+much improved and still not perfect - "8 и 9" came back as "18 и 9".
+
+### Known and not fixed
+
+**Ordinals.** `Манна на 1 января` is spoken as "один января" where Russian
+wants "первое января". The ordinal information was lost in translation - the
+English said "January 1st" - and neither num2words nor a hand-written table can
+recover it without knowing that the number sits next to a month name. It is
+wrong but intelligible, where before the number was silently dropped. This is
+line 2 of every file in this corpus, so it is worth doing properly one day.
 
 ## 2026-09-20 — an idle server was sitting on the card
 

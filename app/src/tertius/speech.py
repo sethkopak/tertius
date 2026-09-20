@@ -92,6 +92,11 @@ SPEECH_REQUIREMENTS = {"torch": "torch", "chatterbox": "chatterbox-tts"}
 # package is upgraded: a dependency dropped from this list fails at *use*,
 # which is minutes into a reading rather than at install time.
 CHATTERBOX_DEPENDENCIES = (
+    # Not chatterbox's: ours. Digits have to be spelled out before the model
+    # sees them or it cannot say them in any language but English. LGPL-2.1,
+    # which restricts the library and not programs that import it, so Tertius
+    # stays MIT - see numbers.py.
+    "num2words",
     "librosa",
     "resemble-perth",
     "s3tokenizer",
@@ -874,12 +879,21 @@ class Speaker:
         """
         self.load()
         assert self._model is not None
+
+        # Digits are spelled out here and nowhere else: the last moment before
+        # the model, so the cues keep "Псалом 66" while the audio says
+        # "Псалом шестьдесят шесть". Chatterbox cannot read an Arabic digit in
+        # anything but English - it drops it or makes noise. See numbers.py.
+        from .numbers import spell
+
+        text = spell(chunk.text, language)
+
         arguments = dict(chunk.params)
         if voice:
             arguments["audio_prompt_path"] = voice
         if self.family == "chatterbox-mtl":
             arguments["language_id"] = language
-        return self._model.generate(chunk.text, **arguments)
+        return self._model.generate(text, **arguments)
 
     def unload(self) -> None:
         self._model = None

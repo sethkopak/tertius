@@ -61,6 +61,10 @@ translate = [
 # tertius/speech.py. Installing this extra gets the rest ready.
 speak = [
     "torch>=2.2",
+    # Spells digits out before the voice model has to read them; it can only
+    # manage them in English. LGPL-2.1, which binds the library rather than
+    # what imports it.
+    "num2words",
     "librosa",
     "resemble-perth",
     "s3tokenizer",
