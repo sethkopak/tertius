@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**514 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**516 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,89 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-20 — several languages at once, and a settings panel that groups
+
+Three asks, one change.
+
+### Many targets, not one
+
+`target_language` becomes `target_languages`, a list, and the job loops. One
+pass over a queue of volumes is the expensive part, and doing it three times to
+get three languages paid that cost three times over.
+
+The output names had already anticipated it: a translation has always landed as
+`talk.es.txt`, so `talk.ru.txt` sits beside it with nothing to reconcile.
+
+Order matters for the card: **every translation first, then every reading.**
+The translator stays loaded across all the languages, then hands its VRAM back
+once, then the voice model loads once. Freeing per language would reload
+Whisper and the translator for each one.
+
+A state file written before this carries `target_language` as a string.
+`from_dict` migrates it; dropped as unknown, a queue set up to produce Spanish
+would quietly have stopped doing so.
+
+### Two lists, kept in step
+
+The translator knows 100 languages and the voice model 23. Narrowing the
+translation menu to what can be spoken - which is what the previous version
+did - takes Romanian *text* away from somebody who wanted it, to prevent a
+mistake they were not making.
+
+So there are two lists and they are linked in both directions:
+
+* ticking a language under **Into** selects it under **Speak** when the voice
+  model can manage it - nobody should have to ask for Spanish audio twice;
+* unticking it under **Speak** leaves the text translation alone;
+* ticking one under **Speak** adds it to **Into**, because the text has to
+  exist before it can be read;
+* unticking it under **Into** removes it from **Speak**, for the same reason.
+
+`speech_languages` is validated as a subset of `target_languages` in the
+options as well, so the rule holds for anything driving the HTTP API by hand.
+Languages the voice model cannot say are never offered in the second list, and
+the first marks the ones that can be spoken rather than hiding the ones that
+cannot.
+
+A hundred languages is too many for a listbox and far too many for chips, so
+each list is a scrolling column of checkboxes with a filter above it.
+
+### The panel groups by stage
+
+The settings column was one undifferentiated list of rows, legible once you
+know what it says and not before. There are hairlines between the stages now,
+so Transcribe, Translate and Read aloud read as three groups rather than
+nineteen settings.
+
+### The sentence pass stops being sticky
+
+Every setting here is restored from the last run, and for
+`translate_sentences` that was a trap: unticking it once stuck to that output
+folder for good, and every later run there quietly produced the run-on `.txt`
+the setting exists to prevent. Found in the wild - `transcripts/` was holding
+`false` from an old run.
+
+The forgetting belongs in the page rather than the options: the page no longer
+*restores* it, and `TranscriptionOptions` still honours an explicit `False`,
+because turning it off on purpose has to keep working.
+
+### A regression the existing tests caught
+
+`_language_list` lowercased the codes it normalised, and
+`test_target_language_is_trimmed_not_lowercased` failed immediately - MADLAD
+has codes like `zh_Hant`, and lowercasing produces something it rejects. The
+test existed because the single-target version had been careful about exactly
+that. Trimmed, not lowercased, now.
+
+### Not verified
+
+- No multi-language job has been run end to end against real models. The
+  linking rules were driven in the browser and the pipeline loop is covered by
+  the suite, but three languages on a real file has not been timed.
+- The cost is linear and worth saying out loud: the sentence pass is ~220s per
+  language on a 38-minute talk, and a reading is ~0.5x realtime per language.
+  Three languages on a 40-minute talk is on the order of four hours.
 
 ## 2026-09-20 — the voice model cannot read a digit
 

@@ -380,6 +380,30 @@ def translation_language_choices(model_key: str) -> tuple[str, ...]:
     return supported_target_languages(model_key)
 
 
+def _language_list(value) -> list[str]:
+    """Normalise a language selection: trimmed, in order, no repeats.
+
+    Accepts a list, a single string, or a comma-separated string, because all
+    three arrive: from the UI, from an older state file, and from anyone
+    driving the HTTP API by hand.
+
+    **Trimmed but not lowercased**, unlike the Whisper `language` field.
+    MADLAD-400 has codes like `zh_Hant`, and lowercasing them produces
+    something it will reject - the same reason the single-target version of
+    this was careful about it.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.replace(",", " ").split()
+    out: list[str] = []
+    for item in value:
+        code = str(item).strip()
+        if code and code not in out:
+            out.append(code)
+    return out
+
+
 @dataclass
 class TranscriptionOptions:
     """Per-job transcription settings, exposed in the UI."""
@@ -408,7 +432,14 @@ class TranscriptionOptions:
     # translation lands beside them as `talk.<target>.txt`.
     translate: bool = False
     translation_model: str = DEFAULT_TRANSLATION_MODEL
-    target_language: str | None = None
+    # Languages to translate into. A list, because one job over a queue of
+    # volumes is the expensive part and doing it three times to get three
+    # languages pays that cost three times over.
+    #
+    # The output names already anticipated this: a translation has always
+    # landed as `talk.es.txt`, so `talk.ru.txt` sits beside it with nothing to
+    # reconcile.
+    target_languages: list[str] = field(default_factory=list)
     # Translate the `.txt` as whole sentences rather than as the timing-cut
     # segments Whisper produced. Measured on a 38-minute talk: 71% of segments
     # begin mid-sentence and 54% are fragments at both ends, and translating
@@ -419,6 +450,17 @@ class TranscriptionOptions:
     # to avoid. It costs a second pass over the whole file - measured at 221s
     # against 12s for the segment pass, so a 64-second run becomes about 285 -
     # and it changes nothing about the `.srt`, whose timings need segments.
+    #
+    # **Deliberately not remembered between sessions.** Every other setting
+    # here is restored from the last run, and for this one that was a trap: a
+    # single unticking stuck to that output folder for good, and every later
+    # run there quietly produced the run-on `.txt` this exists to prevent. A
+    # stale preference is a bad reason to hand somebody a worse file.
+    #
+    # The forgetting belongs in the UI rather than here: this still honours an
+    # explicit `False` for the run in front of it, because turning it off on
+    # purpose has to keep working. What the page does not do is *restore* the
+    # last run's answer.
     translate_sentences: bool = True
     # Read the result aloud. The third stage, after transcribing and
     # translating, and deliberately not a source kind of its own.
@@ -438,6 +480,16 @@ class TranscriptionOptions:
     # hand here is a language that can disagree with the words, and Chatterbox
     # does not translate: told `zh` over English text it reads the English.
     speech_language: str | None = None
+    # Which of the translations to read aloud. Always a subset of
+    # `target_languages`: speaking a language the text was never translated
+    # into is not a thing that can be done, and the UI keeps the two in step
+    # in both directions.
+    #
+    # Separate from `target_languages` rather than derived from it because the
+    # two sets are genuinely different sizes - the translator knows a hundred
+    # languages and the voice model twenty-three, and wanting Romanian *text*
+    # is not the same as being unable to have Romanian text at all.
+    speech_languages: list[str] = field(default_factory=list)
     # A recording of the voice to read in. None means: sample it from the audio
     # being transcribed, which is what "in the original speaker's voice" needs,
     # and what a queue of different speakers needs. For a text source with no
@@ -477,15 +529,25 @@ class TranscriptionOptions:
                 f"unknown translation model: {self.translation_model!r} "
                 f"(expected one of: {', '.join(TRANSLATION_MODEL_SIZES)})"
             )
-        if isinstance(self.target_language, str):
-            self.target_language = self.target_language.strip() or None
-        if self.translate and not self.target_language:
+        self.target_languages = _language_list(self.target_languages)
+        self.speech_languages = _language_list(self.speech_languages)
+        if self.translate and not self.target_languages:
             # Rejected up front rather than per file: the alternative is a whole
             # batch failing one file at a time, which is the shape of the
             # language check above and exists for the same reason.
             raise ValueError(
-                "a target language is required to translate - pick one from the "
-                "Translate into menu"
+                "a target language is required to translate - pick at least "
+                "one from the Translate into menu"
+            )
+        # Reading aloud is a stage on top of translating, never instead of it.
+        # A language can only be spoken if the text exists in it first.
+        extra = [c for c in self.speech_languages if c not in self.target_languages]
+        if extra:
+            raise ValueError(
+                "cannot read "
+                + ", ".join(extra)
+                + " aloud without translating into it as well - the text has to "
+                "exist before it can be spoken"
             )
         if self.speech_model not in SPEECH_MODELS:
             raise ValueError(
@@ -520,15 +582,12 @@ class TranscriptionOptions:
             from .speech import speech_language_choices
 
             speakable = speech_language_choices(self.speech_model)
-            if (
-                speakable
-                and self.target_language
-                and self.target_language not in speakable
-            ):
+            unsayable = [c for c in self.speech_languages if c not in speakable]
+            if speakable and unsayable:
                 raise ValueError(
                     f"{self.speech_model} cannot speak "
-                    f"{self.target_language!r}. With Read aloud on, choose a "
-                    f"language it knows: {', '.join(speakable)}"
+                    + ", ".join(unsayable)
+                    + f". It knows: {', '.join(speakable)}"
                 )
         if not self.formats:
             raise ValueError("at least one output format is required")
@@ -543,8 +602,29 @@ class TranscriptionOptions:
     @classmethod
     def from_dict(cls, data: dict | None) -> "TranscriptionOptions":
         data = dict(data or {})
+
+        # A state file written before there could be more than one target
+        # carries `target_language` as a string. Left alone it is dropped as
+        # unknown, and a queue set up to produce Spanish quietly stops doing so.
+        single = data.pop("target_language", None)
+        if single and not data.get("target_languages"):
+            data["target_languages"] = [single]
+        single_speech = data.get("speech_language")
+        if (
+            data.get("speak")
+            and single_speech
+            and not data.get("speech_languages")
+            and single_speech in (data.get("target_languages") or [])
+        ):
+            data["speech_languages"] = [single_speech]
+
         known = {f for f in cls.__dataclass_fields__}  # noqa: SLF001 - dataclass API
         return cls(**{k: v for k, v in data.items() if k in known})
+
+    @property
+    def target_language(self) -> str | None:
+        """The first target, for anything that still thinks there is only one."""
+        return self.target_languages[0] if self.target_languages else None
 
     def resolved_compute_type(self) -> str | None:
         """`default` means: let CTranslate2 pick for the device."""
@@ -570,8 +650,8 @@ class TranscriptionOptions:
 
         Falls back to English, which is what the model assumes anyway.
         """
-        if self.translate and self.target_language:
-            return self.target_language
+        if self.translate and self.target_languages:
+            return self.target_languages[0]
         return (detected or self.speech_language or "en").strip().lower()
 
 

@@ -950,6 +950,27 @@ terminator followed by an ASCII capital, so a Chinese translation arrived as a
 single "sentence", became one oversized chunk, and came back truncated. It was
 invisible in the `.txt` and only showed up when something read it aloud.
 
+### Several languages at once
+
+**Into** takes as many languages as you like — the job translates into each of
+them in one pass over the queue, which is the expensive part. Files are already
+named by language (`talk.es.txt`, `talk.ru.txt`), so they sit beside each other
+with nothing to reconcile.
+
+**Speak** is a second, separate list. The translator knows a hundred languages
+and the voice model twenty-three, and wanting Romanian *text* is not the same
+as being unable to have it — so the translation list is never narrowed. The two
+are kept in step instead:
+
+- ticking a language under **Into** selects it under **Speak** if it can be spoken
+- unticking it under **Speak** leaves the text translation alone
+- ticking one under **Speak** adds it to **Into**, since the text has to exist first
+- unticking it under **Into** removes it from **Speak**
+
+The cost is linear, and worth knowing before you tick five: translating as
+whole sentences is roughly 220 s per language on a 38-minute talk, and reading
+aloud runs at about half realtime per language.
+
 ### Scripture references keep their numbers
 
 A translation model destroys verse citations. Measured across twelve real lines

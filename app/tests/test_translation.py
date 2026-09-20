@@ -64,18 +64,39 @@ def test_nllb_is_not_offered():
 def test_target_language_is_trimmed_not_lowercased():
     # MADLAD has codes like `zh_Hant`, so lowercasing would break them - unlike
     # the Whisper `language` field just above it, which is lowercased on purpose.
-    options = TranscriptionOptions(translate=True, target_language="  zh_Hant ")
-    assert options.target_language == "zh_Hant"
+    options = TranscriptionOptions(translate=True, target_languages=["  zh_Hant "])
+    assert options.target_languages == ["zh_Hant"]
+    assert options.target_language == "zh_Hant"   # the first, for old callers
 
 
 def test_options_round_trip_through_a_dict():
     options = TranscriptionOptions(
-        translate=True, target_language="es", translation_model="m2m100-1.2B"
+        translate=True, target_languages=["es"], translation_model="m2m100-1.2B"
     )
     again = TranscriptionOptions.from_dict(options.to_dict())
     assert again.translate is True
-    assert again.target_language == "es"
+    assert again.target_languages == ["es"]
     assert again.translation_model == "m2m100-1.2B"
+
+
+def test_a_state_file_from_before_multiple_targets_still_works():
+    """`target_language` was a string. Dropped, a queue silently stops translating."""
+    again = TranscriptionOptions.from_dict(
+        {"translate": True, "target_language": "es", "translation_model": "m2m100-418M"}
+    )
+    assert again.target_languages == ["es"]
+
+
+def test_turning_the_sentence_pass_off_for_a_run_still_works():
+    """The forgetting lives in the page, not here.
+
+    Restoring the last run's answer was the trap - unticking it once stuck to
+    that output folder for good. Asking for it off *now* must still work.
+    """
+    assert TranscriptionOptions.from_dict(
+        {"translate_sentences": False}
+    ).translate_sentences is False
+    assert TranscriptionOptions().translate_sentences is True
 
 
 # -------------------------------------------------------------------- adapters
@@ -1082,7 +1103,7 @@ def test_the_setting_reaches_the_translator_through_a_job(api, tmp_path):
             "options": {
                 "formats": ["txt"],
                 "translate": True,
-                "target_language": "es",
+                "target_languages": ["es"],
                 "translate_sentences": False,
             }
         },

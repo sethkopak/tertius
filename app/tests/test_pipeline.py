@@ -31,7 +31,11 @@ from .fakes import FakeSpeaker, FakeTranslator, make_audio
 def test_translating_makes_the_target_the_speaking_language():
     """The menu that caused the bug does not get a say when translating."""
     options = TranscriptionOptions(
-        translate=True, target_language="es", speak=True, speech_language="zh"
+        translate=True,
+        target_languages=["es"],
+        speak=True,
+        speech_languages=["es"],
+        speech_language="zh",
     )
     # `zh` is stale UI state; the words about to be spoken are Spanish.
     assert options.resolved_speech_language() == "es"
@@ -60,10 +64,18 @@ def test_a_text_source_may_still_state_its_own_language():
 def test_a_target_the_voice_model_cannot_say_is_refused_up_front():
     """Translating a whole queue into Romanian then failing to say it."""
     with pytest.raises(ValueError, match="cannot speak"):
-        TranscriptionOptions(translate=True, target_language="ro", speak=True)
+        TranscriptionOptions(
+            translate=True,
+            target_languages=["ro"],
+            speak=True,
+            speech_languages=["ro"],
+        )
 
-    # Fine when nothing is going to read it aloud.
-    assert TranscriptionOptions(translate=True, target_language="ro").target_language == "ro"
+    # Fine when nothing is going to read it aloud - Romanian text is still
+    # worth having even though nothing can say it.
+    assert TranscriptionOptions(
+        translate=True, target_languages=["ro"]
+    ).target_languages == ["ro"]
 
 
 # ------------------------------------------------------------- the voice window
@@ -131,8 +143,9 @@ def test_a_talk_is_transcribed_translated_and_read_aloud(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
+            "speech_languages": ["es"],
             "formats": ["txt", "srt"],
         },
     )
@@ -158,7 +171,7 @@ def test_the_reading_is_in_the_target_language_not_the_menu(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
             # Stale, and must not reach the model.
             "speech_language": "zh",
@@ -184,8 +197,9 @@ def test_the_reading_uses_the_sentence_translation_not_the_fragments(api, tmp_pa
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
+            "speech_languages": ["es"],
             "formats": ["srt"],  # no .txt asked for at all
         },
     )
@@ -207,7 +221,7 @@ def test_the_voice_is_sampled_from_the_recording(api, tmp_path):
 
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_language": "es", "speak": True},
+        options={"translate": True, "target_languages": ["es"], "speak": True, "speech_languages": ["es"]},
     )
     api.wait_done()
 
@@ -229,7 +243,7 @@ def test_an_explicit_clip_still_wins(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
             "speech_voice": str(clip),
         },
@@ -253,8 +267,9 @@ def test_a_failed_reading_does_not_throw_away_the_transcript(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
+            "speech_languages": ["es"],
             "formats": ["txt"],
         },
     )
@@ -274,7 +289,7 @@ def test_no_speaker_is_loaded_when_the_stage_is_off(api, tmp_path):
 
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_language": "es", "speak": False},
+        options={"translate": True, "target_languages": ["es"], "speak": False},
     )
     api.wait_done()
 
@@ -395,7 +410,7 @@ def test_the_earlier_stages_give_back_the_gpu_before_speaking(api, tmp_path):
 
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_language": "es", "speak": True},
+        options={"translate": True, "target_languages": ["es"], "speak": True, "speech_languages": ["es"]},
     )
     api.wait_done()
 
@@ -424,7 +439,7 @@ def test_the_card_is_released_when_the_batch_ends(api, tmp_path, monkeypatch):
     _queue_audio(api, tmp_path)
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_language": "es", "speak": True},
+        options={"translate": True, "target_languages": ["es"], "speak": True, "speech_languages": ["es"]},
     )
     api.wait_done()
 
@@ -451,7 +466,7 @@ def test_the_card_is_released_when_a_model_will_not_load(api, tmp_path, monkeypa
     api.speaker_load_error = RuntimeError("CUDA out of memory")
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_language": "es", "speak": True},
+        options={"translate": True, "target_languages": ["es"], "speak": True, "speech_languages": ["es"]},
     )
     api.wait_done()
 
@@ -468,7 +483,7 @@ def test_nothing_is_unloaded_when_the_work_is_on_the_cpu(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
             "device": "cpu",
         },
@@ -492,8 +507,9 @@ def test_an_out_of_memory_failure_says_what_to_do_about_it(api, tmp_path):
         output_dir=api.output_dir,
         options={
             "translate": True,
-            "target_language": "es",
+            "target_languages": ["es"],
             "speak": True,
+            "speech_languages": ["es"],
             "formats": ["txt"],
         },
     )
@@ -581,13 +597,14 @@ def test_a_text_file_with_neither_stage_on_says_so(api, tmp_path):
 # ------------------------------------------------------------------- the API
 
 
-def test_the_target_menu_narrows_to_what_can_be_spoken(api, monkeypatch):
-    """Offering a language the last stage cannot say is the same bug again."""
-    import tertius.app as app_module
+def test_the_menu_reports_which_languages_can_also_be_spoken(api, monkeypatch):
+    """Two lists, not one narrowed list.
 
-    monkeypatch.setattr(
-        app_module, "is_media_file", app_module.is_media_file, raising=False
-    )
+    Narrowing the translation menu to what the voice model can say would take
+    Romanian *text* away from someone who wanted it, to prevent a mistake they
+    were not making. The page offers both and keeps them in step instead; the
+    API only has to say which of the translator's languages are also sayable.
+    """
     from tertius import translate as translate_module
 
     monkeypatch.setattr(translate_module, "is_converted", lambda name: True)
@@ -597,19 +614,16 @@ def test_the_target_menu_narrows_to_what_can_be_spoken(api, monkeypatch):
         lambda name: ("en", "es", "ro", "cy", "zh"),
     )
 
-    wide = api.client.get("/api/translation/languages?model=m2m100-418M").get_json()
-    assert "ro" in wide["languages"]
-    assert wide["restricted_to_speakable"] is False
-
-    narrow = api.client.get(
-        "/api/translation/languages?model=m2m100-418M&speak=1"
+    body = api.client.get(
+        "/api/translation/languages?model=m2m100-418M"
         "&speech_model=chatterbox-multilingual"
     ).get_json()
-    assert narrow["restricted_to_speakable"] is True
-    # Romanian and Welsh are translatable and unspeakable.
-    assert "ro" not in narrow["languages"]
-    assert "cy" not in narrow["languages"]
-    assert set(narrow["languages"]) == {"en", "es", "zh"}
+
+    # Everything the translator can reach is still on offer.
+    assert "ro" in body["languages"] and "cy" in body["languages"]
+    # And the sayable subset is named rather than silently applied.
+    assert set(body["speakable"]) == {"en", "es", "zh"}
+    assert "ro" not in body["speakable"]
 
 
 def test_the_page_reads_as_a_pipeline(api):

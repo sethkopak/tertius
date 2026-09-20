@@ -224,30 +224,32 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             ready = False
         languages = list(supported_target_languages(name)) if ready else []
 
-        # With Read aloud on, only offer languages that can then be *said*.
-        # The translator knows a hundred or four hundred; the voice model knows
-        # 23. Offering the difference would translate a whole queue into
-        # Romanian and fail at the last stage, which is the same failure the
-        # menu itself exists to prevent - it is read from the model rather than
-        # hand-written precisely so it cannot offer what will be rejected.
-        speaking = request.args.get("speak", "").lower() in ("1", "true", "yes")
+        # Which of these the voice model can also *say*, rather than a
+        # narrowed list. The two sets are genuinely different sizes - a hundred
+        # languages against twenty-three - and wanting Romanian text is not the
+        # same as being unable to have Romanian text at all. The page offers
+        # both lists and keeps them in step; this only has to say which is
+        # which.
         speech_model = request.args.get(
             "speech_model", TranscriptionOptions().speech_model
         )
         spoken: list[str] = []
-        if speaking and speech_model in SPEECH_MODELS:
+        if speech_model in SPEECH_MODELS:
             from .speech import speech_language_choices
 
-            spoken = list(speech_language_choices(speech_model))
-            languages = [code for code in languages if code in spoken]
+            spoken = [
+                code
+                for code in speech_language_choices(speech_model)
+                if not languages or code in languages
+            ]
 
         return jsonify(
             {
                 "model": name,
                 "ready": ready,
                 "languages": languages,
-                "restricted_to_speakable": bool(speaking and spoken),
-                "speakable_count": len(spoken),
+                "speakable": spoken,
+                "speech_model": speech_model,
                 "download_bytes": entry["download_bytes"],
                 "license": entry["license"],
                 "language_count": entry["languages"],

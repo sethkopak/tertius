@@ -648,7 +648,9 @@ class JobManager:
         except Exception:  # pragma: no cover - torch may not be installed
             log.debug("could not empty the CUDA cache", exc_info=True)
 
-    def _read_aloud(self, path, target_dir, speaker, result, translated, options):
+    def _read_aloud(
+        self, path, target_dir, speaker, result, translated, options, language=None
+    ):
         """Speak a finished transcript. The third stage.
 
         Two things are decided here rather than by the user, because in both
@@ -672,7 +674,9 @@ class JobManager:
 
         from .speech import chunks_from_prose, speak_chunks, voice_for
 
-        language = options.resolved_speech_language(getattr(result, "language", None))
+        language = language or options.resolved_speech_language(
+            getattr(result, "language", None)
+        )
         source = translated if translated is not None else result
         text = getattr(source, "prose", None)
         if not text:
@@ -1011,7 +1015,7 @@ class JobManager:
                         return
                     continue
 
-                translated = None
+                translated_by_language: dict[str, object] = {}
                 if translator is not None and mode != MODE_TEXT:
                     # The transcript is already written and correct at this
                     # point. A translation that fails must therefore not fail
@@ -1026,29 +1030,42 @@ class JobManager:
                         # continuation of the first.
                         self._active["progress"] = 0.0
                     try:
-                        translated_outputs, translated = self._translate_fn(
-                            result,
-                            path,
-                            target_dir,
-                            options.formats,
-                            translator,
-                            options.target_language,
-                            **(
-                                {"sentence_pass": options.translate_sentences}
-                                if translate_takes_sentence_pass
-                                else {}
-                            ),
-                            **(
-                                {"for_speech": True}
-                                if options.speak and translate_takes_for_speech
-                                else {}
-                            ),
-                            **(
-                                {"on_progress": self._note_translation_progress}
-                                if translate_reports_progress
-                                else {}
-                            ),
-                        )
+                        # One pass per language. The translator stays loaded
+                        # across all of them, so the second language costs a
+                        # translation rather than a model load.
+                        translated_outputs = []
+                        for language in options.target_languages:
+                            written_one, translated_one = self._translate_fn(
+                                result,
+                                path,
+                                target_dir,
+                                options.formats,
+                                translator,
+                                language,
+                                **(
+                                    {"sentence_pass": options.translate_sentences}
+                                    if translate_takes_sentence_pass
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "for_speech": language
+                                        in options.speech_languages
+                                    }
+                                    if translate_takes_for_speech
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "on_progress":
+                                            self._note_translation_progress
+                                    }
+                                    if translate_reports_progress
+                                    else {}
+                                ),
+                            )
+                            translated_outputs.extend(written_one)
+                            translated_by_language[language] = translated_one
                         outputs = list(outputs) + list(translated_outputs)
                         translation_failures = 0
                     except Exception as exc:
@@ -1094,6 +1111,9 @@ class JobManager:
                     with self._lock:
                         self._phase = TRANSCRIBING
 
+                # Every translation first, then every reading. The earlier
+                # stages give their VRAM back once, between the two, rather
+                # than once per language.
                 if speaker is not None and mode != MODE_TEXT:
                     # The third stage. Like translation before it, a failure
                     # here must not fail the file: the transcript and the
@@ -1108,9 +1128,24 @@ class JobManager:
                         # transcribes while it reads aloud, so the earlier
                         # stages give their VRAM back first.
                         self._free_gpu_for_speech(transcriber, translator)
-                        spoken = self._read_aloud(
-                            path, target_dir, speaker, result, translated, options
-                        )
+                        spoken = []
+                        for language in (
+                            options.speech_languages
+                            or [options.resolved_speech_language(
+                                getattr(result, "language", None)
+                            )]
+                        ):
+                            spoken.extend(
+                                self._read_aloud(
+                                    path,
+                                    target_dir,
+                                    speaker,
+                                    result,
+                                    translated_by_language.get(language),
+                                    options,
+                                    language,
+                                )
+                            )
                         outputs = list(outputs) + list(spoken)
                         speech_failures = 0
                     except Exception as exc:

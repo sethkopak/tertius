@@ -354,6 +354,67 @@ button, input, select { font: inherit; color: inherit; }
 }
 #pipeline-hint { margin: 0; }
 
+/* A hairline between stages. The settings column was one undifferentiated list
+   of rows, which is legible once you know what it says and not before. */
+.stage-break {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-subtle);
+  margin: 10px 0 2px;
+}
+
+/* Pick several languages, from a hundred of them. A multi-select listbox is
+   unreadable at that length and a row of chips is worse, so: a filter and a
+   scrolling column of checkboxes. */
+.picker { min-width: 0; }
+/* The grid centres every row, which is right for a one-line control and wrong
+   for a list six inches tall - it drops the label to the middle of the
+   scrollbox, nowhere near the thing it names. */
+.picker,
+.settings-grid > label:has(+ .picker),
+.settings-grid > .row-pair > label:has(+ .picker) { align-self: start; }
+.settings-grid > label:has(+ .picker),
+.settings-grid > .row-pair > label:has(+ .picker) { padding-top: 7px; }
+.picker .field { margin-bottom: 6px; }
+
+.checklist {
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border-control);
+  border-radius: 6px;
+  padding: 4px 2px;
+  background: var(--bg-sunken);
+}
+
+.checklist label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.checklist label:hover { background: var(--row-hover); }
+.checklist input { margin: 0; flex: none; }
+.checklist .muted { color: var(--text-3); }
+.checklist:empty::after {
+  content: "prepare the model to see its languages";
+  display: block;
+  padding: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* Marks a language that can also be read aloud, in the translation list. */
+.checklist .sayable {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+
 
 /* ── settings grid ────────────────────────────────────────────────────── */
 

@@ -160,6 +160,8 @@
           </div>
         </div>
 
+        <div class="stage-break" aria-hidden="true"></div>
+
         <span class="stage">Translate</span>
         <label class="check"
                title="Also write the transcript in another language. The original-language files are always written too — the translation lands beside them as talk.es.txt.">
@@ -183,13 +185,14 @@
         </div>
 
         <div class="row-pair" id="translation-target-row" hidden>
-          <label for="opt-target-language">Into</label>
-          <div class="select">
-            <select id="opt-target-language"
-                    title="The language to translate into. Read from the model itself, so it can never offer one the model would reject.">
-              <option value="">choose a language</option>
-            </select>
-            <span class="chev" aria-hidden="true">⌄</span>
+          <label for="opt-target-languages">Into</label>
+          <div class="picker">
+            <input type="search" id="target-language-filter" class="field"
+                   placeholder="filter languages…" spellcheck="false"
+                   aria-controls="opt-target-languages">
+            <div class="checklist" id="opt-target-languages" role="group"
+                 aria-label="Languages to translate into"></div>
+            <p class="caption" id="target-language-count"></p>
           </div>
         </div>
 
@@ -212,6 +215,8 @@
           <span></span>
           <p class="note" id="translation-note"></p>
         </div>
+
+        <div class="stage-break" aria-hidden="true"></div>
 
         <div class="row-pair" id="speak-row" hidden>
           <span class="stage">Read aloud</span>
@@ -237,11 +242,20 @@
           </div>
         </div>
 
+        <div class="row-pair" id="speech-languages-row" hidden>
+          <label for="opt-speech-languages">Speak</label>
+          <div class="picker">
+            <div class="checklist" id="opt-speech-languages" role="group"
+                 aria-label="Languages to read aloud"></div>
+            <p class="caption" id="speech-language-count"></p>
+          </div>
+        </div>
+
         <div class="row-pair" id="speech-language-row" hidden>
           <label for="opt-speech-language">Language</label>
           <div class="select">
             <select id="opt-speech-language"
-                    title="The language this text is written in. Only asked when nothing else already knows: translating makes the target language the answer, and transcribing detects it. Chatterbox does not translate — telling it zh over English text makes it read the English.">
+                    title="The language this text is written in. Only asked for a text file that is not being translated — everywhere else it is derived. Chatterbox does not translate: telling it zh over English text makes it read the English.">
               <option value="">choose a language</option>
             </select>
             <span class="chev" aria-hidden="true">⌄</span>

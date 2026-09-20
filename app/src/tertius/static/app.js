@@ -220,6 +220,9 @@ function refreshStageRows() {
   const on = offered && $('opt-speak').checked;
   ['speech-model-row', 'speech-voice-row', 'speech-style-row']
     .forEach((id) => { $(id).hidden = !on; });
+  // The list of translations to speak, and - only for a text file nothing is
+  // translating - the single "what language is this written in" menu.
+  $('speech-languages-row').hidden = !(on && $('opt-translate').checked);
   $('speech-language-row').hidden = !(on && speechLanguageIsAsked());
   if (!on) {
     $('speech-note-row').hidden = true;
@@ -238,12 +241,13 @@ function collectOptions() {
     alignment_granularity: $('opt-granularity').value,
     translate: $('opt-translate').checked,
     translation_model: $('opt-translation-model').value,
-    target_language: $('opt-target-language').value || null,
+    target_languages: [...targetLanguages],
     translate_sentences: $('opt-translate-sentences').checked,
     speak: $('opt-speak').checked && speakIsOffered(),
     speech_model: $('opt-speech-model').value,
     // Only meaningful when nothing else knows the language; sent as null
     // otherwise so a stale menu value cannot contradict the words.
+    speech_languages: [...speechLanguages],
     speech_language: speechLanguageIsAsked()
       ? ($('opt-speech-language').value || null)
       : null,
@@ -262,15 +266,11 @@ try { translationDisplay = new Intl.DisplayNames(['en'], { type: 'language' }); 
 
 async function refreshTargetLanguages() {
   const model = $('opt-translation-model').value;
-  const select = $('opt-target-language');
   const note = $('translation-note');
-  const wanted = select.value;
   let info;
   try {
-    const speaking = $('opt-speak').checked;
     const res = await fetch(
       `/api/translation/languages?model=${encodeURIComponent(model)}`
-      + `&speak=${speaking ? '1' : '0'}`
       + `&speech_model=${encodeURIComponent($('opt-speech-model').value)}`
     );
     info = await res.json();
@@ -280,27 +280,24 @@ async function refreshTargetLanguages() {
     return;
   }
 
-  select.length = 1;
-  (info.languages || []).forEach((code) => {
-    let name = code;
-    try { name = translationDisplay ? translationDisplay.of(code) : code; } catch (_) { /* not a known tag */ }
-    const option = document.createElement('option');
-    option.value = code;
-    option.textContent = name === code ? code : `${name} · ${code}`;
-    select.appendChild(option);
-  });
-  [...select.options].slice(1)
-    .sort((a, b) => a.textContent.localeCompare(b.textContent))
-    .forEach((option) => select.appendChild(option));
-  if (wanted && [...select.options].some((o) => o.value === wanted)) select.value = wanted;
+  const codes = (info.languages || []).slice().sort((a, b) =>
+    languageName(a).localeCompare(languageName(b)));
+  $('opt-target-languages').dataset.codes = codes.join(' ');
+  speakableLanguages = (info.speakable || []).slice().sort((a, b) =>
+    languageName(a).localeCompare(languageName(b)));
+
+  // Anything chosen before that this model cannot reach is dropped rather than
+  // carried silently into a job that would reject it.
+  targetLanguages = new Set([...targetLanguages].filter((c) => codes.includes(c)));
+  speechLanguages = new Set(
+    [...speechLanguages].filter((c) => targetLanguages.has(c) && speakableLanguages.includes(c))
+  );
+  paintLanguages();
 
   const gb = (info.download_bytes / 1e9).toFixed(1);
-  // Say why the list is short, or the missing Romanian reads as a bug.
-  const narrowed = info.restricted_to_speakable
-    ? ` Narrowed to the ${info.speakable_count} the voice model can say, because Read aloud is on.`
-    : '';
+  const sayable = (info.speakable || []).length;
   note.textContent = info.ready
-    ? `${info.languages.length} languages available.${narrowed} ${info.license}.`
+    ? `${info.languages.length} languages, ${sayable} of which can also be read aloud. ${info.license}.`
     : `No languages yet — this model has to be downloaded (about ${gb} GB) and `
       + `converted before it can say what it translates into. The first time, `
       + `that also installs the translation libraries (about 150 MB). ${info.license}.`;
@@ -310,7 +307,6 @@ async function refreshTargetLanguages() {
   // step rather than something Begin does silently: this used to be a deadlock
   // — no language could be picked, and a job could not start without one.
   $('translation-prepare-row').hidden = info.ready;
-  $('opt-target-language').disabled = !info.ready;
   $('translation-sentences-row').hidden = false;
 }
 
@@ -334,6 +330,107 @@ $('btn-prepare-translation').onclick = async () => {
     button.disabled = false;
     refreshTargetLanguages();
   }, 1000);
+};
+
+// --- languages -------------------------------------------------------------
+//
+// Two lists, not one. The translator knows a hundred languages and the voice
+// model twenty-three, and wanting Romanian *text* is not the same as being
+// unable to have Romanian text at all - so narrowing the translation menu to
+// what can be spoken would take something away for no reason.
+//
+// They are kept in step in both directions instead: reading a language aloud
+// requires the text to exist in it, so ticking it under Speak ticks it under
+// Into, and unticking it under Into unticks it under Speak.
+let targetLanguages = new Set();
+let speechLanguages = new Set();
+let speakableLanguages = [];
+
+function languageName(code) {
+  try {
+    const name = translationDisplay ? translationDisplay.of(code) : code;
+    return name === code ? code : `${name} · ${code}`;
+  } catch (_) {
+    return code;
+  }
+}
+
+function renderLanguageList(host, codes, chosen, onToggle, extra) {
+  host.innerHTML = '';
+  const filter = (host.dataset.filter || '').toLowerCase();
+  let shown = 0;
+  codes.forEach((code) => {
+    const label = languageName(code);
+    if (filter && !label.toLowerCase().includes(filter)) return;
+    shown += 1;
+    const row = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = code;
+    box.checked = chosen.has(code);
+    box.onchange = () => onToggle(code, box.checked);
+    row.appendChild(box);
+    const text = document.createElement('span');
+    text.textContent = label;
+    row.appendChild(text);
+    const note = extra ? extra(code) : '';
+    if (note) {
+      const tag = document.createElement('span');
+      tag.className = 'sayable';
+      tag.textContent = note;
+      row.appendChild(tag);
+    }
+    host.appendChild(row);
+  });
+  return shown;
+}
+
+function paintLanguages() {
+  const into = $('opt-target-languages');
+  const speak = $('opt-speech-languages');
+  const all = into.dataset.codes ? into.dataset.codes.split(' ') : [];
+
+  renderLanguageList(into, all, targetLanguages, (code, on) => {
+    if (on) {
+      targetLanguages.add(code);
+      // Offered aloud by default when the voice model can manage it. Somebody
+      // asking for Spanish audio should not have to say so twice; somebody who
+      // wants the text only unticks it on the right, and that sticks, because
+      // nothing here re-adds a language that is already selected.
+      if (speakableLanguages.includes(code)) speechLanguages.add(code);
+    } else {
+      targetLanguages.delete(code);
+      // Cannot speak what was never translated.
+      speechLanguages.delete(code);
+    }
+    paintLanguages();
+  }, (code) => (speakableLanguages.includes(code) ? 'can speak' : ''));
+
+  const speakableChosen = speakableLanguages.filter((c) => true);
+  renderLanguageList(speak, speakableChosen, speechLanguages, (code, on) => {
+    if (on) {
+      speechLanguages.add(code);
+      // Reading it aloud needs the text first.
+      targetLanguages.add(code);
+    } else {
+      speechLanguages.delete(code);
+    }
+    paintLanguages();
+  });
+
+  const n = targetLanguages.size;
+  $('target-language-count').textContent = n
+    ? `${n} selected` + (all.length ? ` of ${all.length}` : '')
+    : 'none selected';
+  const m = speechLanguages.size;
+  $('speech-language-count').textContent = m
+    ? `${m} to read aloud`
+    : 'none — the translations will be text only';
+}
+
+$('target-language-filter').oninput = (event) => {
+  $('opt-target-languages').dataset.filter = event.target.value || '';
+  paintLanguages();
 };
 
 // --- reading aloud ---------------------------------------------------------
@@ -457,7 +554,7 @@ async function previewTags(path) {
     // one that cost 46 seconds of GPU and produced English for someone who
     // asked for Chinese.
     const spoken = $('opt-translate').checked
-      ? ($('opt-target-language').value || '(no language chosen)')
+      ? ([...speechLanguages].join(', ') || '(no language chosen)')
       : (speechLanguageIsAsked()
           ? ($('opt-speech-language').value || 'en')
           : 'the language of the recording');
@@ -497,9 +594,11 @@ function restoreSettings(status) {
   }
   if (options.alignment_granularity) $('opt-granularity').value = options.alignment_granularity;
   if (options.translation_model) $('opt-translation-model').value = options.translation_model;
-  if (typeof options.translate_sentences === 'boolean') {
-    $('opt-translate-sentences').checked = options.translate_sentences;
-  }
+  // `translate_sentences` is deliberately *not* restored. Every other setting
+  // here remembers the last run; for this one that was a trap - unticking it
+  // once stuck to that output folder for good, and every later run there
+  // quietly produced the run-on .txt the setting exists to prevent. It starts
+  // on each session and can still be turned off for the run in front of you.
   if (options.speech_model) $('opt-speech-model').value = options.speech_model;
   if (options.speech_style) $('opt-speech-style').value = options.speech_style;
   if (options.speech_voice) $('opt-speech-voice').value = options.speech_voice;
@@ -514,13 +613,19 @@ function restoreSettings(status) {
     });
   }
   refreshStageRows();
+  if (Array.isArray(options.target_languages)) {
+    targetLanguages = new Set(options.target_languages);
+  } else if (options.target_language) {
+    targetLanguages = new Set([options.target_language]);   // an older state file
+  }
+  if (Array.isArray(options.speech_languages)) {
+    speechLanguages = new Set(options.speech_languages);
+  }
   if (options.translate) {
     $('opt-translate').checked = true;
     $('translation-model-row').hidden = false;
     $('translation-target-row').hidden = false;
-    refreshTargetLanguages().then(() => {
-      if (options.target_language) $('opt-target-language').value = options.target_language;
-    });
+    refreshTargetLanguages();
   }
   // Off unless the queue in front of you actually uses it. The saved option
   // alone is not enough: `use_reference_text` sticks in the state file from
