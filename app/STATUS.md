@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**473 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**498 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,78 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-19 — protecting the numbers in a scripture reference
+
+Asked for after a round trip turned `Psalm 66, verses 8 and 9` into `In the
+highway of the sex poems, nonchotini, sachu`. That particular corruption came
+from the TTS-and-Whisper stages rather than the translator, and saying so was
+the honest answer - but it prompted the right question, and measuring the
+translator turned out to justify the feature on its own terms.
+
+### The translator really does destroy references
+
+Twelve real lines from the corpus, each carrying at least one citation,
+translated unprotected. Counting whether every numeric run in the source is
+still somewhere in the output:
+
+| | Russian | Chinese | Spanish |
+| --- | --- | --- | --- |
+| unprotected | 12/16 | 10/16 | 16/16 |
+| **protected** | **16/16** | **16/16** | **16/16** |
+
+The failures are not subtle. Whole citations vanish - `2 Chron. 7:3` simply
+gone. Chinese rendered `1 Peter 5:5` as `彼得五:5`, turning the chapter into a
+Chinese numeral, and hallucinated 《古兰经》 - "the Quran" - in place of a
+reference to Chronicles. Spanish, for what it is worth, never needed help.
+
+### Numbers only, not the whole reference
+
+The first attempt held the entire citation back and it was wrong. The book name
+is not fragile, and a reader in the target language wants it translated:
+`2 Коринфянам 4:17,18` is what a Russian reader expects, where holding the
+whole thing back leaves `2 Cor. 4:17,18` sitting in a Russian sentence.
+
+So only the numeric runs are lifted out, and `Psalm`, `chapter`, `verses` and
+`and` all go to the model as ordinary words:
+
+    Psalm 66, verses 8 and 9  ->  Psalm @0@, verses @1@ and @2@
+                              ->  Псалом @0@, стихи @1@ и @2@
+                              ->  Псалом 66, стихи 8 и 9
+
+The ordinal in front of a book is deliberately left alone: `2 Cor.` needs its
+`2`, or the model is translating "Cor." with nothing to say which one.
+
+### The placeholder was chosen by experiment
+
+Seven forms through m2m100 into Russian, Spanish, German and Chinese.
+`⟦0⟧`, `#0#`, `xx0xx`, `|0|` and a control character were all destroyed.
+`{{0}}` survived Russian, Spanish and German - and in Chinese the model
+replaced it with 《古兰经》. Only `@0@` survived all four, in order, three to a
+sentence. The obvious-looking brace form is the one that fails, which is the
+reason this is written down rather than left to whoever edits it next.
+
+### What the guarantee actually is
+
+**No reference is lost.** That is not the same as "every placeholder survives":
+they are dropped often enough on real lines to matter, and the append is what
+closes the gap. So a citation may end up at the end of its sentence rather than
+in the middle of it. A reference in the wrong place beats one that is gone, and
+both beat the model's own rendering.
+
+A known book name is what makes this safe to leave on. "Capitalised word
+followed by a number" would have swallowed `Section 2`, `Volume 6 chapter 2`
+and `Figure 3`, all of which are in this corpus. 21.7% of lines in a 200-file
+sample carry a reference.
+
+### Not verified
+
+- Only m2m100-418M has been measured. madlad400 may behave differently and has
+  never been run at all.
+- The book list covers the 66 Protestant books and the abbreviations this
+  corpus uses. Apocrypha, and any abbreviation style other than this one, are
+  not handled and will simply not be recognised - which fails safe, into
+  translating the reference as before.
 
 ## 2026-09-19 — the Russian file, re-run on a restarted server
 

@@ -438,12 +438,18 @@ class Translator:
         model_key: str,
         device: str = "auto",
         on_download_progress: Callable[[int, int], None] | None = None,
+        protect_references: bool = True,
     ):
         if model_key not in TRANSLATION_MODELS:
             raise ValueError(f"unknown translation model: {model_key!r}")
         self.model_key = model_key
         self.requested_device = device
         self.on_download_progress = on_download_progress
+        # Scripture references are lifted out before the model sees them and
+        # put back afterwards. On by default because a reference is a pointer
+        # rather than prose - "Psalm 66:8" means the same thing in Spanish -
+        # and a model handed one renders the numbers as words. See scripture.py.
+        self.protect_references = protect_references
         self._translator = None
         self._adapter = None
         self.active_device: str | None = None
@@ -562,18 +568,41 @@ class Translator:
 
         # Remember where the blanks were, so they can be put back afterwards.
         wanted = [i for i, text in enumerate(texts) if text and text.strip()]
+
+        # A line that is nothing but a citation never reaches the model. There
+        # is no prose in a pointer to translate, and handing it `@0@.` - a
+        # placeholder and no sentence - makes it hallucinate: `0 0 0 0` and
+        # `El 0@` were what came back. Passed through exactly as written.
+        if self.protect_references:
+            from .scripture import is_only_reference
+
+            wanted = [i for i in wanted if not is_only_reference(texts[i])]
+
         if not wanted:
             return list(texts)
+
+        # Lift the scripture references out before the model sees them. This is
+        # the one place it has to happen: every path into the translator -
+        # segments for the `.srt`, sentences for the `.txt`, chunks for a
+        # reading - comes through here, and a citation mangled in any of them
+        # is mangled for good.
+        prepared = [texts[i].strip() for i in wanted]
+        if self.protect_references:
+            from .scripture import protect, unprotect
+
+            prepared, references = protect(prepared)
+        else:
+            references = None
 
         source_language = source_language or "en"
         if adapter.family == "t5":
             encoded = [
-                adapter.encode_for(texts[i].strip(), target_language) for i in wanted
+                adapter.encode_for(text, target_language) for text in prepared
             ]
             prefixes = None
         else:
             encoded = [
-                adapter.encode(texts[i].strip(), source_language) for i in wanted
+                adapter.encode(text, source_language) for text in prepared
             ]
             prefixes = [adapter.target_prefix(target_language)] * len(wanted)
 
@@ -591,8 +620,13 @@ class Translator:
             results = self._translator.translate_batch(
                 chunk, target_prefix=chunk_prefixes, beam_size=4
             )
-            for index, result in zip(wanted[start : start + BATCH_SIZE], results):
-                out[index] = adapter.decode(result.hypotheses[0]).strip()
+            for offset, (index, result) in enumerate(
+                zip(wanted[start : start + BATCH_SIZE], results)
+            ):
+                rendered = adapter.decode(result.hypotheses[0]).strip()
+                if references is not None:
+                    rendered = unprotect([rendered], [references[start + offset]])[0]
+                out[index] = rendered
             done += len(chunk)
             if on_progress is not None:
                 # A reporting callback must never be able to fail a translation.

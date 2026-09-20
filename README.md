@@ -924,6 +924,29 @@ terminator followed by an ASCII capital, so a Chinese translation arrived as a
 single "sentence", became one oversized chunk, and came back truncated. It was
 invisible in the `.txt` and only showed up when something read it aloud.
 
+### Scripture references keep their numbers
+
+A translation model destroys verse citations. Measured across twelve real lines
+of this corpus, unprotected, every numeric run survived in only 12 of 16 cases
+into Russian and 10 of 16 into Chinese — whole citations vanish, and Chinese
+turned `1 Peter 5:5` into `彼得五:5` and replaced a reference to Chronicles with
+《古兰经》, "the Quran".
+
+So the **numbers** are lifted out before the model sees them and put back
+afterwards, while the words around them translate normally:
+
+    Psalm 66, verses 8 and 9  →  Псалом 66, стихи 8 и 9
+
+Only the numbers, not the whole reference: the book name is not fragile and a
+reader in the target language wants it translated. With this on, every numeric
+run survived in all three languages tested. A placeholder the model drops has
+its reference appended rather than lost, so a citation may move to the end of
+its sentence — which beats being gone, and both beat the model's rendering.
+
+Recognition needs a known book name, so `Section 2`, `Volume 6 chapter 2` and
+`Figure 3` are left alone. Anything it does not recognise is simply translated
+as before.
+
 ### What has actually been heard
 
 A Russian speaker has listened to a Russian reading and says it sounds good.
