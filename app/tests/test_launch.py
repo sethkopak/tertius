@@ -262,7 +262,8 @@ def test_the_folder_icon_survives_its_own_attributes(tmp_path, monkeypatch):
     said.clear()
     assert launcher.apply_windows_folder_icon(say=said.append) is True
     assert said == [], said
-    assert "elsewhere" in ini.read_text(encoding="utf-8", newline="")
+    with open(ini, encoding="utf-8", newline="") as handle:
+        assert "elsewhere" in handle.read()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="desktop.ini is Windows-only")

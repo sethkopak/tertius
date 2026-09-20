@@ -301,8 +301,14 @@ def apply_windows_folder_icon(say=print) -> bool:
             # blindly: the rewrite is the step that fails, so not needing it is
             # the fix for the ordinary case.
             try:
-                if ini.read_text(encoding="utf-8", newline="") == wanted:
-                    return True
+                # `open(..., newline="")` rather than `Path.read_text(newline=)`:
+                # that argument arrived in 3.13 and this supports 3.11, where it
+                # is a TypeError - and not one the handler below would catch, so
+                # it would have taken the whole launcher down rather than
+                # printing the cosmetic line this function exists to print.
+                with open(ini, encoding="utf-8", newline="") as handle:
+                    if handle.read() == wanted:
+                        return True
             except OSError:
                 pass  # unreadable; fall through and try to replace it
 
