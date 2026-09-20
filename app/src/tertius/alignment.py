@@ -37,28 +37,53 @@ GRANULARITIES = (AUTO, PARAGRAPH, SENTENCE)
 # something that starts a new sentence. Matched rather than used as a
 # lookbehind, because the closing-quote part is variable width. Common
 # abbreviations are protected below.
-# Two alternations, because the first one only ever worked for Latin script.
+# Two alternations, and a Python-side check the regex cannot do.
 #
-# The original required an ASCII terminator, whitespace after it, *and* a
-# following ASCII capital. Chinese has none of the three: it ends sentences with
-# an ideographic full stop, usually with no space, followed by a Han character.
-# So Chinese, Japanese, Greek, Arabic and Devanagari text never split at all -
-# a whole translation came back as one "sentence".
+# The original required an ASCII terminator, whitespace, *and* a following
+# ASCII capital. That is three assumptions about English, and scripts break
+# them in different combinations:
 #
-# That was invisible until something read it aloud. A `.txt` of one long line
-# is ugly; one 326-character chunk handed to a speech model is truncated
-# audio - measured, 23.6s of garbled Mandarin for 79 seconds of source.
+# * Chinese ends a sentence with an ideographic full stop, usually with no
+#   space, followed by a Han character - fails all three.
+# * Russian and Greek end sentences with an ordinary full stop and a space,
+#   then a capital that `[A-Z]` does not match, because `re` character classes
+#   like that are ASCII even when the pattern is a `str`. Fails only the third,
+#   which is why it was missed the first time this was fixed.
 #
-# The second alternation needs no following capital, because these scripts have
-# no case, and tolerates a missing space. Not exhaustive: it covers the
-# terminators of the languages Tertius can currently speak and translate into.
+# Both produced the same outcome: the whole text came back as one "sentence".
+# Invisible in a `.txt`; in a reading it is one enormous chunk, which the
+# speech model grinds on and then truncates. Measured on a 70-second Russian
+# file: 552 seconds of GPU for one chunk.
+#
+# So the "does a sentence start here" test moved into Python, where
+# `str.isupper()` knows about Cyrillic, Greek, Armenian and the rest. The regex
+# only has to find a candidate.
 _SENTENCE_END = re.compile(
-    # Latin: a terminator, space, and something that looks like a new sentence.
-    r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])"
-    # CJK, Arabic, Devanagari, Armenian: the terminator is enough on its own.
-    r"|[\u3002\uff01\uff1f\u061f\u06d4\u0964\u0589\u3001\uff0e]+"
-    r"[\"')\]\u300d\u300f\uff09]*\s*"
+    # A terminator and a space; whether what follows really opens a sentence is
+    # decided by `_opens_a_sentence` below.
+    r"[.!?][\"')\]]*\s+(?=[\"'(\[]?(?P<opener>\S))"
+    # Terminators that need no following capital, because these scripts have no
+    # case: CJK, Arabic, Devanagari, Armenian. Not exhaustive - it covers the
+    # languages Tertius can currently speak and translate into.
+    r"|[。！？؟۔।։、．]+"
+    r"[\"')\]」』）]*\s*"
 )
+
+
+def _opens_a_sentence(match: "re.Match") -> bool:
+    """Does the character after this candidate boundary start a new sentence?
+
+    `str.isupper()` rather than a character class, because `re` has no
+    Unicode-aware uppercase class and the ASCII one silently excluded every
+    cased script that is not Latin.
+    """
+    opener = match.group("opener")
+    # The caseless alternation matched: the terminator is the whole story.
+    if opener is None:
+        return True
+    return opener.isupper() or opener.isdigit()
+
+
 _ABBREVIATIONS = (
     "mr.",
     "mrs.",
@@ -151,6 +176,8 @@ def split_sentences(text: str) -> list[str]:
         pieces: list[str] = []
         cursor = 0
         for boundary in _SENTENCE_END.finditer(flat):
+            if not _opens_a_sentence(boundary):
+                continue
             # Keep the terminator with the sentence it ends.
             pieces.append(flat[cursor : boundary.end()].strip())
             cursor = boundary.end()

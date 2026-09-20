@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**470 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**473 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -86,6 +86,53 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
 
+## 2026-09-19 — the same bug again, in a script I had not checked
+
+Reported as a job stuck on *Reading aloud*. It was not stuck; it took **552
+seconds for a 70-second file** and then finished. One chunk, start to end.
+
+Cyrillic never split. The fix two entries up added non-Latin *terminators* and
+stopped there, but the Latin branch still read:
+
+    [.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])
+
+Three assumptions about English, and scripts break them in different
+combinations. Chinese fails all three, which is why it was caught. **Russian
+and Greek fail only the third** - an ordinary full stop, an ordinary space, and
+then a capital that `[A-Z]` does not match, because `re` character classes like
+that stay ASCII even when the pattern is a `str`. So the earlier fix walked
+straight past them.
+
+The test that pinned the Chinese fix could not have caught this: it tested the
+script I had just been looking at. The new one covers every script Tertius can
+currently speak, which is the test that should have been written the first time.
+
+The "does a sentence start here" decision is Python's now, not the regex's,
+because `str.isupper()` knows about Cyrillic, Greek and Armenian and no `re`
+character class does. The abbreviation guard - the one that stopped "Christ."
+swallowing the next sentence - is pinned alongside it, since this was a chance
+to undo it.
+
+### And a second thing the same job exposed
+
+The options recorded `translate: false`, `speak: true`, `speech_language: "en"`
+over Russian audio. So Whisper transcribed Russian, and the reading was told to
+say it in English.
+
+`speech_language` outranked the detected language. That was backwards:
+**detection is evidence about the words in front of us, and the menu is a
+setting that can be years stale.** It is the other way round now, and a text
+source with nothing to detect still falls back to the menu, which remains the
+one case where nobody else knows. The UI hides the option that produced this;
+the ordering means it no longer matters whether the UI is reached first.
+
+### Worth knowing
+
+The output landed as `0101.ru.spoken.en.spoken.wav` - the source was already a
+reading, so the suffix stacked. Ugly, honest, and left alone: it is what
+feeding generated audio back in actually produces, and a name that hides that
+would be worse.
+
 ## Next: diarization, and why it is a decision rather than a task
 
 Multi-speaker panels are the one thing asked for that Tertius still cannot do.
@@ -146,10 +193,70 @@ built to avoid. `onnx-community` is a Hugging Face organisation rather than an
 individual, which is better than the case that argument was written against,
 but it is still not the people who trained the model.
 
-**Decide this before writing any code.** The options are: gate and document it;
-assemble it ungated and own the clustering; or offer diarization only when the
-user has already provided a token, so the default install stays clean. Nothing
-below matters until that is settled.
+### Decided (2026-09-19): assemble it ungated, and own the clustering
+
+Seth's call. Tertius fetches nothing the user did not choose and needs no
+account for anything; a gated model would be the first exception, and the first
+one is the one that makes the second easy. Paying for that in code we have to
+maintain is the trade being accepted deliberately.
+
+**What that commits us to.**
+
+The pipeline becomes three steps we own rather than one call we make:
+
+1. **Segmentation** - who is speaking at each moment, as overlapping activity
+   rather than a clean split. `pyannote/segmentation-3.0` is MIT and gated;
+   `onnx-community/pyannote-segmentation-3.0` is MIT and not. Taking the
+   re-export means depending on someone who is not the publisher, which is
+   exactly what `translate.py` converts weights to avoid. It is a Hugging Face
+   organisation rather than an individual, which is better than the case that
+   argument was written against, and it is still a weaker claim than any other
+   model here has. **Say so in the model table rather than burying it**, the
+   way the speech models already say they are loaded as published rather than
+   converted. If a first-party ungated export appears, switch to it.
+2. **Embeddings** - a fingerprint per speech region.
+   `pyannote/wespeaker-voxceleb-resnet34-LM` is CC-BY-4.0, ungated, from
+   pyannote's own organisation, and needs no re-export.
+   `speechbrain/spkrec-ecapa-voxceleb` is Apache-2.0 and ungated as a fallback
+   if the first disappoints.
+3. **Clustering** - ours. This is the part being taken on, and it is the part
+   the packaged pipeline exists to get right.
+
+**Clustering is the whole risk, so plan it honestly.**
+
+Agglomerative clustering on cosine distance with a threshold is the standard
+approach and is perhaps thirty lines. The thirty lines are not the problem.
+The problem is that the threshold decides *how many people are in the room*,
+and there is no threshold that is right for both a two-person interview and a
+six-person panel recorded on one microphone. Get it wrong high and two people
+merge into one voice; get it wrong low and one person is split across two, and
+the reading gives them two different voices mid-sentence.
+
+So:
+
+- **Let the user say how many speakers there are**, and treat that as the
+  common case rather than the escape hatch. Somebody queueing a panel knows how
+  many people were on it. Asking is more honest than inferring, and it turns
+  the hard problem into an easy one - with a known `k`, the clustering is
+  ordinary and the threshold stops mattering.
+- **Estimate only when they do not say**, and say that it was estimated. A
+  guessed speaker count should appear in the UI as a guess, next to a control
+  for correcting it, rather than silently deciding whose voice says what.
+- **Make it visible before it is expensive.** The speaker split has to be
+  reviewable before any GPU time goes into reading, and the tag preview panel
+  is the obvious home - it already exists to catch this class of mistake, and
+  it now names the language for the same reason.
+- **Measure it against something.** The published pipeline is the benchmark
+  even though we are not shipping it: run both over the same file, compare the
+  turns, and record the difference. "Ours is worse than pyannote by this much"
+  is a fact worth having written down before anybody relies on it. Accepting a
+  gate for one comparison run on a development machine is not the same as
+  shipping one.
+
+**What would reverse this decision.** A first-party, ungated, permissively
+licensed diarization pipeline appearing - at which point assembling it by hand
+is just maintenance we no longer need. Worth re-checking whenever the models
+are next reviewed, and the re-export dependency is the thing to check first.
 
 ### What the code would then need
 

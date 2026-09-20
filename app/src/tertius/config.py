@@ -559,14 +559,20 @@ class TranscriptionOptions:
 
         * translating - the target, necessarily. The words about to be spoken
           are the ones the translator just produced.
-        * otherwise - whatever the transcription was in, or `speech_language`
-          for a text source that nothing has detected a language for.
+        * transcribing - whatever Whisper detected. **Detection beats the
+          menu**, because detection is evidence about the words in front of us
+          and the menu is a setting that may be years stale. It was the other
+          way round once, and a Russian recording was transcribed into Russian
+          and then read aloud as English, because a menu left on `en` outranked
+          a language the app had just identified with high confidence.
+        * a text source with nothing to detect - `speech_language`, the one
+          case where nobody else knows.
 
         Falls back to English, which is what the model assumes anyway.
         """
         if self.translate and self.target_language:
             return self.target_language
-        return (self.speech_language or detected or "en").strip().lower()
+        return (detected or self.speech_language or "en").strip().lower()
 
 
 def default_output_dir() -> Path:

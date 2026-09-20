@@ -42,6 +42,16 @@ def test_without_a_translation_the_detected_language_wins():
     assert options.resolved_speech_language("fr") == "fr"
 
 
+def test_what_whisper_detected_beats_a_stale_menu():
+    """Reported: Russian audio transcribed to Russian, then read as English.
+
+    The menu had been left on `en` from an earlier run and outranked a language
+    the app had just identified from the audio itself.
+    """
+    options = TranscriptionOptions(speak=True, speech_language="en")
+    assert options.resolved_speech_language("ru") == "ru"
+
+
 def test_a_text_source_may_still_state_its_own_language():
     options = TranscriptionOptions(speak=True, speech_language="de")
     assert options.resolved_speech_language() == "de"
@@ -287,6 +297,41 @@ def test_chinese_splits_into_sentences():
     from tertius.alignment import split_sentences
 
     assert len(split_sentences(ZH)) == 3
+
+
+def test_every_script_tertius_can_speak_splits_into_sentences():
+    """Three assumptions about English, and scripts break them differently.
+
+    Chinese fails all three - ideographic stop, no space, no capital. Russian
+    and Greek fail only the *third*: an ordinary full stop and a space, then a
+    capital that `[A-Z]` does not match because `re` classes like that stay
+    ASCII. That is why Cyrillic survived the first attempt at this fix, and it
+    cost 552 seconds of GPU on one 70-second Russian file read as a single
+    chunk.
+    """
+    from tertius.alignment import split_sentences
+
+    three_sentences = {
+        "en": "Bless our God. Let his praise be heard. This keeps us alive.",
+        "ru": "Благослови Бога. Пусть его хвала будет услышана. Это оживляет душу.",
+        "el": "Ευλογείτε τον Θεό. Ας ακουστεί ο έπαινός. Αυτό κρατά ζωντανή.",
+        "zh": "每日天堂曼娜。祝福上帝。讓他的讚美被聽到。",
+    }
+    for code, text in three_sentences.items():
+        assert len(split_sentences(text)) == 3, (code, split_sentences(text))
+
+
+def test_abbreviations_are_still_protected():
+    """The Unicode-aware check must not undo the older fix.
+
+    `endswith` on an abbreviation list once glued the next sentence onto any
+    word ending in one - and "Christ." ends with "st." constantly in scripture.
+    """
+    from tertius.alignment import split_sentences
+
+    assert len(split_sentences("He met Dr. Smith. They spoke of Christ. It was late.")) == 3
+    # A digit opens a sentence just as a capital does.
+    assert len(split_sentences("It cost five pounds. 1914 was the year. Then it ended.")) == 3
 
 
 def test_a_dense_script_costs_more_of_the_budget():
