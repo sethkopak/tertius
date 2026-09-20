@@ -19,7 +19,10 @@ runner.
 Run it: double-click `Start Tertius.bat` (Windows), `Tertius.app` (macOS), or
 run `./start-tertius.sh` (Linux).
 
-Repo: `github.com/sethkopak/tertius` (private), branch `main`. Translation
+Repo: `github.com/sethkopak/tertius`, **public, MIT**, branch `main`. That
+is not just a licence change: a dependency that costs *you* one click costs
+every stranger who clones it the same click, and they have no reason to
+trust it. See *Diarization* below, where it decides the design. Translation
 merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
 
 **Windows is the only platform anyone has actually run this on.** See
@@ -82,6 +85,121 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## Next: diarization, and why it is a decision rather than a task
+
+Multi-speaker panels are the one thing asked for that Tertius still cannot do.
+Whisper does not diarize, so a panel discussion transcribes as one undifferentiated
+stream and a translated reading of it comes back in one voice - the wrong
+outcome in a way that is worse than no feature, because it sounds plausible.
+
+Everything below assumes the pipeline that now exists: diarization would be a
+stage *before* transcription, feeding speaker labels into everything after it.
+
+### The licensing problem, which has no clean answer yet
+
+Checked against the Hub API rather than model cards, because the two disagree:
+
+| model | gated | licence |
+| --- | --- | --- |
+| `pyannote/speaker-diarization-3.1` | **yes** (auto) | MIT |
+| `pyannote/speaker-diarization-community-1` | **yes** (auto) | CC-BY-4.0 |
+| `pyannote/segmentation-3.0` | **yes** (auto) | MIT |
+| `pyannote/wespeaker-voxceleb-resnet34-LM` | no | CC-BY-4.0 |
+| `onnx-community/pyannote-segmentation-3.0` | no | MIT |
+| `nvidia/diar_sortformer_4spk-v1` | no | **CC-BY-NC-4.0** |
+| `nvidia/speakerverification_en_titanet_large` | no | CC-BY-4.0 |
+| `speechbrain/spkrec-ecapa-voxceleb` | no | Apache-2.0 |
+
+**The two obvious candidates fail on opposite axes.**
+
+`pyannote` is the standard, is MIT, and is *gated* - every user needs a Hugging
+Face account, has to accept terms on a web page, and has to put a token where
+Tertius can find it. "Auto" approval means no human waits on it, not that no
+account is needed. Its `config.yaml` cannot even be read without authenticating,
+which is how this was confirmed.
+
+`nvidia/diar_sortformer_4spk-v1` is ungated and is **CC-BY-NC-4.0**. That is
+the NLLB decision again, word for word: shipping a default feature that forbids
+commercial use to everyone downstream is worse than shipping a weaker one. It
+is out for the same reason, and `test_nllb_is_not_offered` is the pattern for
+making a future change argue with that.
+
+Now that the repo is public this is sharper than it was. A gate cost Seth one
+click. It costs every stranger who clones this the same click plus a token in
+their environment, for a model they did not choose, in an app whose whole
+selling point is that it runs offline and fetches nothing it did not name.
+
+**There is a third route, and it is the interesting one.** The pyannote
+*pipeline* is gated, but it is segmentation plus embeddings plus clustering,
+and the embedding half - `pyannote/wespeaker-voxceleb-resnet34-LM`, from
+pyannote's own organisation - is **not gated** and is CC-BY-4.0. Only the
+segmentation half is, and there is an ungated MIT re-export of it under
+`onnx-community`. Assembling the three steps here rather than calling the
+packaged pipeline would be ungated end to end.
+
+That is not free. It means owning the clustering, which is the part that
+decides how many speakers there are - the hard part, and the part the packaged
+pipeline exists to get right. And it means depending on a re-export rather than
+the publisher, which is precisely the provenance argument `translate.py` was
+built to avoid. `onnx-community` is a Hugging Face organisation rather than an
+individual, which is better than the case that argument was written against,
+but it is still not the people who trained the model.
+
+**Decide this before writing any code.** The options are: gate and document it;
+assemble it ungated and own the clustering; or offer diarization only when the
+user has already provided a token, so the default install stays clean. Nothing
+below matters until that is settled.
+
+### What the code would then need
+
+Roughly in order of how much thought each needs, not how much typing.
+
+1. **Rejoining prose per speaker.** `prose_sentences` in `translate.py` joins
+   *every* segment into one blob before re-splitting it into sentences. With
+   two speakers that silently welds the end of one person's sentence to the
+   start of another's, and the translation then renders the join as though it
+   were one thought. This is the subtlest thing on the list and the easiest to
+   miss, because the output looks fine.
+
+2. **A voice per chunk, not per file.** `speak_chunks` takes one `voice` for
+   the whole reading and `SpokenChunk` has no speaker on it. Both need one, and
+   chunk packing must stop at a speaker change the way it already stops at a
+   style change - `_pack` currently only knows about the character budget.
+
+3. **Sampling a voice per speaker.** `best_voice_window` already finds the
+   densest ten seconds of speech in a recording by scoring segment timings; run
+   it over one speaker's segments instead of all of them and it answers the
+   right question unchanged. The warning it emits when the best window is
+   mostly silence becomes more useful, not less: on a panel, the person who
+   said four words will not clone well and the user should be told which one.
+
+4. **Aligning turns to segments.** Diarization emits `(start, end, speaker)`;
+   Whisper emits segments. Assign each segment the speaker it overlaps most.
+   Cheap, and worth a test with a deliberately ambiguous overlap.
+
+5. **A fourth model on a six-gigabyte card.** Already measured: whisper 2.23 GB
+   + m2m100 0.27 GB + chatterbox 3.22 GB against 5.36 GB free. Diarization runs
+   *before* transcription and is finished by the time anything else loads, so
+   `_free_gpu_for_speech` generalises to it - but it does have to be unloaded,
+   not merely left to the garbage collector, and nobody has measured what
+   pyannote takes.
+
+6. **Speaker in the output.** `segment` gains a `speaker` key in the `.json`.
+   Adding a key does not need a `JSON_SHAPE_VERSION` bump by the rule already
+   written in `config.py`; renaming or repurposing one does.
+
+7. **What happens when it is wrong.** A misattributed segment is read in
+   another person's voice, which is the failure this feature can produce that
+   nothing else here can. There should be a way to see the speaker split before
+   committing GPU time - the tag preview panel is the obvious home, since it
+   already exists to catch exactly this class of mistake before a run.
+
+### Not worth doing
+
+Speaker *identification* - putting a name to a voice - is a different feature
+with a different risk profile, and nothing has asked for it. Diarization only
+needs to know that speaker A is not speaker B.
 
 ## 2026-09-19 — somebody listened
 
