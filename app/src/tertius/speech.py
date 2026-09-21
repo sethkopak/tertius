@@ -50,6 +50,8 @@ from .config import (
     PARALINGUISTIC_TAGS,
     SPEECH_CHUNK_CHARS,
     SPEECH_GAP_SECONDS,
+    SPEECH_TRUNCATED_TAIL_RATIO,
+    SPEECH_TRUNCATION_RETRIES,
     SPEECH_MODELS,
     SPEECH_PARAGRAPH_GAP_SECONDS,
     SPEECH_STYLE_ALIASES,
@@ -339,28 +341,93 @@ _DENSE_SCRIPT = re.compile(
 )
 DENSE_CHARACTER_WEIGHT = 4
 
+# Hebrew and Arabic. An abjad writes the consonants and leaves most of the
+# vowels to the reader, so a word arrives shorter on the page than it is in the
+# mouth - less extreme than a Han character, but far from a Latin one.
+#
+# Unlike the factor above, this one is *measured*: the same devotional read
+# aloud by the same model runs 9.78 Hebrew letters per second of speech against
+# 15.02 Spanish, so a Hebrew character is worth 1.54 Latin ones of duration.
+# (Russian came out at 13.38, near enough to Spanish to leave at parity.)
+# Hebrew is one file against Spanish's two, so the figure is worth re-measuring
+# if more material appears. Devanagari is very likely dense too and is left
+# alone because nothing has measured it.
+#
+# Getting this wrong is audible, not merely untidy. Under a budget written for
+# Latin text a Hebrew chunk runs long, and a long generation is what walks into
+# Chatterbox's repetition detector - which stops it mid-word at full volume,
+# and that abrupt cut is the growl that sent us looking.
+_ABJAD_SCRIPT = re.compile(
+    r"[֐-׿؀-ۿݐ-ݿࢠ-ࣿ"
+    r"יִ-﷿ﹰ-﻿]"
+)
+ABJAD_CHARACTER_WEIGHT = 1.54
+
 
 def spoken_length(text: str) -> int:
     """How long `text` is in the units the chunk budget is written in.
 
-    Characters, except that a character carrying a whole word counts for
-    several. Without this a Chinese translation sails under a budget written
-    for English and arrives at the model as one oversized chunk, which it
-    truncates.
+    Characters, except that a character carrying more speech than a Latin
+    letter counts for more. Without this a Chinese translation sails under a
+    budget written for English and arrives at the model as one oversized chunk,
+    which it truncates.
     """
     dense = len(_DENSE_SCRIPT.findall(text))
-    return len(text) + dense * (DENSE_CHARACTER_WEIGHT - 1)
+    abjad = len(_ABJAD_SCRIPT.findall(text))
+    return round(
+        len(text)
+        + dense * (DENSE_CHARACTER_WEIGHT - 1)
+        + abjad * (ABJAD_CHARACTER_WEIGHT - 1)
+    )
 
 
-def _pack(sentences: Sequence[str], budget: int) -> list[str]:
-    """Group sentences into chunks of at most `budget` characters of speech.
+# Where a sentence may be cut when it will not fit whole: the punctuation a
+# reader pauses at anyway. A colon or comma between digits is not one of them,
+# or `4:17,18` becomes three chunks and the citation is read as a list.
+_CLAUSE_END = re.compile(
+    # A comma, semicolon or colon, except between digits.
+    r"(?<!\d)[,;:](?!\d)\s*"
+    # The same marks as Arabic and CJK write them.
+    r"|[،؛、，；：]\s*"
+    # A dashed aside. The spaces matter: an unspaced dash is a range.
+    r"|\s+[–—]\s+"
+)
 
-    A sentence longer than the budget on its own is still sent whole. Cutting
-    one mid-clause to satisfy a number would put a breath in the middle of a
-    thought, which is worse than a long generation.
+
+def _clauses(sentence: str) -> list[str]:
+    """Break a sentence at its clause boundaries, punctuation kept on the left."""
+    pieces: list[str] = []
+    cursor = 0
+    for match in _CLAUSE_END.finditer(sentence):
+        piece = sentence[cursor:match.end()].strip()
+        if piece:
+            pieces.append(piece)
+        cursor = match.end()
+    tail = sentence[cursor:].strip()
+    if tail:
+        pieces.append(tail)
+    return pieces
+
+
+def _units(sentences: Sequence[str], budget: int) -> list[str]:
+    """The pieces `_pack` is allowed to group: sentences, or clauses of one.
+
+    A sentence that fits is one unit. One that does not is offered as its
+    clauses instead, so the packer can put the break at a comma rather than
+    wherever the model happens to give up.
+
+    This reverses an earlier decision. A sentence over the budget used to be
+    sent whole, on the reasoning that a breath in the middle of a thought is
+    worse than a long generation. Measuring a Hebrew reading showed what a long
+    generation actually costs: Chatterbox's repetition detector fires, stops
+    the audio mid-word at full volume, and the cut is plainly audible as a
+    growl. A pause at a comma is the better of the two, and it is where the
+    reader would have breathed anyway.
+
+    A clause still over the budget on its own is sent whole - there is nowhere
+    left to break it that a listener would forgive.
     """
-    chunks: list[str] = []
-    current = ""
+    units: list[str] = []
     for sentence in sentences:
         # Runs of spaces are collapsed here rather than left alone, because
         # removing a tag from the middle of a line leaves two spaces glued
@@ -368,6 +435,19 @@ def _pack(sentences: Sequence[str], budget: int) -> list[str]:
         sentence = re.sub(r"[ 	]+", " ", sentence).strip()
         if not sentence:
             continue
+        if spoken_length(sentence) <= budget:
+            units.append(sentence)
+            continue
+        pieces = _clauses(sentence)
+        units.extend(pieces if len(pieces) > 1 else [sentence])
+    return units
+
+
+def _pack(sentences: Sequence[str], budget: int) -> list[str]:
+    """Group sentences into chunks of at most `budget` characters of speech."""
+    chunks: list[str] = []
+    current = ""
+    for sentence in _units(sentences, budget):
         if not current:
             current = sentence
         elif spoken_length(current) + 1 + spoken_length(sentence) <= budget:
@@ -462,6 +542,27 @@ def _as_samples(wav) -> Sequence[float]:
     ):
         wav = wav[0]
     return list(wav)
+
+
+def _rms(samples: Sequence[float]) -> float:
+    if not samples:
+        return 0.0
+    return (sum(float(v) * float(v) for v in samples) / len(samples)) ** 0.5
+
+
+def tail_ratio(samples: Sequence[float], sample_rate: int, window: float = 0.5) -> float:
+    """How loud a chunk's last half-second is against the whole of it.
+
+    Near zero when the speaker finished the sentence and the audio decayed to
+    silence. Near one when generation was stopped while they were still
+    talking, which is what a forced EOS does and what a listener hears as a
+    growl. See SPEECH_TRUNCATED_TAIL_RATIO for the measured split.
+    """
+    whole = _rms(samples)
+    if not whole:
+        return 0.0
+    tail = samples[-max(1, int(sample_rate * window)):]
+    return _rms(tail) / whole
 
 
 class WavWriter:
@@ -893,7 +994,40 @@ class Speaker:
             arguments["audio_prompt_path"] = voice
         if self.family == "chatterbox-mtl":
             arguments["language_id"] = language
-        return self._model.generate(text, **arguments)
+
+        # Generate, then listen to what came back. The model stops itself when
+        # it thinks it is repeating, and when it does that mid-word the chunk
+        # ends at full volume and growls into the following silence. Sampling
+        # makes the next attempt a different one, so a retry usually clears it.
+        #
+        # The best take is kept rather than the last, so a chunk that never
+        # comes out clean is no worse off than it is today.
+        best = None
+        for attempt in range(1 + SPEECH_TRUNCATION_RETRIES):
+            wav = self._model.generate(text, **arguments)
+            try:
+                ratio = tail_ratio(_as_samples(wav), self.sample_rate)
+            except Exception:  # pragma: no cover - never fail a reading on this
+                log.debug("could not measure the chunk tail", exc_info=True)
+                return wav
+            if best is None or ratio < best[0]:
+                best = (ratio, wav)
+            if ratio <= SPEECH_TRUNCATED_TAIL_RATIO:
+                break
+            log.info(
+                "chunk ended abruptly (tail %.0f%% of full volume); "
+                "attempt %d of %d",
+                ratio * 100,
+                attempt + 1,
+                1 + SPEECH_TRUNCATION_RETRIES,
+            )
+        assert best is not None
+        if best[0] > SPEECH_TRUNCATED_TAIL_RATIO:
+            log.warning(
+                "a chunk still ends abruptly after %d attempts; keeping the "
+                "least bad take", 1 + SPEECH_TRUNCATION_RETRIES,
+            )
+        return best[1]
 
     def unload(self) -> None:
         self._model = None

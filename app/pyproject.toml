@@ -84,7 +84,10 @@ tertius = "tertius.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tertius = ["templates/*.html", "static/*", "static/fonts/*"]
+# `data/*.json` is the Wikidata book-name table. Without it every scripture
+# citation silently stays in English in every language, which is not an error
+# anything reports - so it must not be left out of the wheel.
+tertius = ["templates/*.html", "static/*", "static/fonts/*", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

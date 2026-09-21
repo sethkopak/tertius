@@ -900,3 +900,104 @@ def test_nothing_is_installed_outside_a_virtual_environment(monkeypatch):
     with pytest.raises(speech.SpeechUnavailableError, match="virtual environment"):
         speech.install_requirements()
     assert _FakePopen.calls == []
+
+
+# ------------------------------------------------- a chunk that was cut short
+
+
+def _take(sample_rate=24000, seconds=2.0, *, truncated):
+    """Two seconds of tone, either decaying to silence or stopped flat."""
+    n = int(sample_rate * seconds)
+    if truncated:
+        return [0.5] * n                      # still at full volume at the end
+    half = n // 2
+    return [0.5] * half + [0.5 * (1 - i / max(1, n - half)) for i in range(n - half)]
+
+
+def test_tail_ratio_tells_a_finished_chunk_from_a_stopped_one():
+    from tertius.speech import tail_ratio
+
+    assert tail_ratio(_take(truncated=False), 24000) < 0.55
+    assert tail_ratio(_take(truncated=True), 24000) > 0.55
+
+
+def test_a_chunk_stopped_mid_word_is_generated_again():
+    """Chatterbox forces an EOS when it thinks it is repeating.
+
+    Mid-word that leaves the audio at full volume, and the cut growls into the
+    silence before the next chunk. Sampling makes the next attempt a different
+    one, so the fix is to listen to what came back and ask again.
+    """
+    from tertius.speech import Speaker, SpokenChunk, style_params, tail_ratio
+
+    calls = []
+
+    class _Model:
+        sr = 24000
+
+        def generate(self, text, **kwargs):
+            calls.append(text)
+            return _take(truncated=len(calls) == 1)
+
+    speaker = Speaker("chatterbox-multilingual", device="cpu")
+    speaker._model = _Model()
+    speaker.load = lambda: None
+
+    chunk = SpokenChunk(
+        text="a sentence", style="neutral",
+        params=style_params("chatterbox-multilingual", "neutral"),
+    )
+    wav = speaker.speak(chunk, "en")
+
+    assert len(calls) == 2, "the truncated take should have been retried"
+    assert tail_ratio(wav, 24000) < 0.55, "the clean take should be the one kept"
+
+
+def test_a_clean_chunk_is_not_generated_twice():
+    """The check is free: it listens to audio that already exists."""
+    from tertius.speech import Speaker, SpokenChunk, style_params
+
+    calls = []
+
+    class _Model:
+        sr = 24000
+
+        def generate(self, text, **kwargs):
+            calls.append(text)
+            return _take(truncated=False)
+
+    speaker = Speaker("chatterbox-multilingual", device="cpu")
+    speaker._model = _Model()
+    speaker.load = lambda: None
+    speaker.speak(
+        SpokenChunk(text="a sentence", style="neutral",
+                    params=style_params("chatterbox-multilingual", "neutral")),
+        "en",
+    )
+    assert len(calls) == 1
+
+
+def test_a_chunk_that_never_comes_out_clean_keeps_the_best_take():
+    """No worse off than before the retry existed, and it says so in the log."""
+    from tertius.config import SPEECH_TRUNCATION_RETRIES
+    from tertius.speech import Speaker, SpokenChunk, style_params
+
+    calls = []
+
+    class _Model:
+        sr = 24000
+
+        def generate(self, text, **kwargs):
+            calls.append(text)
+            return _take(truncated=True)
+
+    speaker = Speaker("chatterbox-multilingual", device="cpu")
+    speaker._model = _Model()
+    speaker.load = lambda: None
+    wav = speaker.speak(
+        SpokenChunk(text="a sentence", style="neutral",
+                    params=style_params("chatterbox-multilingual", "neutral")),
+        "en",
+    )
+    assert len(calls) == 1 + SPEECH_TRUNCATION_RETRIES
+    assert wav is not None and len(wav) > 0

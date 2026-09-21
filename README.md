@@ -950,6 +950,46 @@ terminator followed by an ASCII capital, so a Chinese translation arrived as a
 single "sentence", became one oversized chunk, and came back truncated. It was
 invisible in the `.txt` and only showed up when something read it aloud.
 
+Hebrew and Arabic are weighted too, at ×1.54 rather than CJK's ×4. An abjad
+writes the consonants and leaves most of the vowels to the reader, so a word is
+shorter on the page than in the mouth. Measured on the same devotional read by
+the same model: 9.78 Hebrew letters per second of speech against 15.02 Spanish.
+Cyrillic came out at 13.38, near enough to Latin to leave alone.
+
+### Chunks that growl
+
+Chatterbox watches its own output for a repeating token and forces an end when
+it sees one. Mid-word, that leaves the audio at full volume, and the cut growls
+into the silence before the next chunk. It is the one defect here that a
+listener noticed before any measurement did.
+
+Three things were wrong, and all three are addressed:
+
+- Hebrew was not weighted in the chunk budget, so its chunks ran long, and a
+  long generation is what trips the detector.
+- A sentence over the budget was sent whole, on the reasoning that a breath
+  mid-thought beats a long generation. Measurement settled it the other way, so
+  an oversized sentence is now broken at a comma — where the reader would have
+  breathed anyway. A clause still over the budget is sent whole, since there is
+  nowhere left to break that a listener would forgive.
+- The detector still fires sometimes regardless, so the audio is checked
+  against itself: a chunk whose final half-second is more than 55% as loud as
+  the whole was stopped rather than finished, and is generated again. Sampling
+  makes the next attempt a different one. The best take is kept, so a chunk
+  that never comes out clean is no worse off than before.
+
+The threshold is read off the distribution rather than guessed. The same five
+Hebrew chunks were generated 40 times: 37 takes landed between 0.00 and 0.44,
+three landed at 0.61, 0.85 and 1.22, and nothing landed in between. A ratio
+above 1 means the last half-second was *louder* than the chunk's own average —
+stopped mid-sentence, at volume.
+
+Honest limits on this one. Chatterbox's own "forcing EOS" notice would be
+better evidence than a loudness ratio, but it reaches neither `redirect_stdout`
+nor `redirect_stderr`, so it cannot be tied to a particular chunk. And nobody
+has yet listened to a Hebrew reading — the growl was reported by ear, and the
+fix is so far confirmed only by waveform.
+
 ### Several languages at once
 
 **Into** takes as many languages as you like — the job translates into each of
@@ -974,24 +1014,60 @@ the sentences are already split. Each *reading*, though, is about half realtime
 on its own — 180 of the 270 seconds that file took. Ticking five languages buys
 five readings rather than five translations.
 
-### Scripture references keep their numbers
+### Scripture references are held back whole
 
-A translation model destroys verse citations. Measured across twelve real lines
-of this corpus, unprotected, every numeric run survived in only 12 of 16 cases
-into Russian and 10 of 16 into Chinese — whole citations vanish, and Chinese
-turned `1 Peter 5:5` into `彼得五:5` and replaced a reference to Chronicles with
+A translation model destroys verse citations, in both halves.
+
+**The numbers.** Measured across twelve real lines of this corpus,
+unprotected, every numeric run survived in only 12 of 16 cases into Russian and
+10 of 16 into Chinese — whole citations vanish, and Chinese turned
+`1 Peter 5:5` into `彼得五:5` and replaced a reference to Chronicles with
 《古兰经》, "the Quran".
 
-So the **numbers** are lifted out before the model sees them and put back
-afterwards, while the words around them translate normally:
+**The book name.** Measured over all 66 books as `<Book> 3:16`, English into
+Russian and back: 25 came back a different book, or not a book at all. Job
+became `Работа` ("Work"), Lamentations `Пожалуйста` ("Please"), Ecclesiastes
+`Искусство` ("The Art"), and Joel, Obadiah, Nahum, Habakkuk and Haggai all
+collapsed into one word: `Иоанн`, "John". Chinese renders Deuteronomy as
+"Catholic"; Arabic renders Genesis as "the Bible".
 
-    Psalm 66, verses 8 and 9  →  Псалом 66, стихи 8 и 9
+So the **whole reference** is lifted out before the model sees it, and put back
+from a table the model had no part in building:
 
-Only the numbers, not the whole reference: the book name is not fragile and a
-reader in the target language wants it translated. With this on, every numeric
-run survived in all three languages tested. A placeholder the model drops has
-its reference appended rather than lost, so a citation may move to the end of
-its sentence — which beats being gone, and both beat the model's rendering.
+    We read in 2 Cor. 4:17,18 that our affliction is brief.
+    →  Мы читаем в 2-е послание к Коринфянам 4:17,18, что наша скорбь кратковременна.
+
+The names come from **Wikidata, which is CC0**, fetched by
+`app/tools/fetch_book_names.py` and shipped as
+`app/src/tertius/data/book_names.json`. That script is the only network request
+Tertius makes that is not a model download, and it is a build step — nothing at
+run time contacts Wikidata. Every entry records its Wikidata item id, so any
+name can be traced back to where it came from. 20 of the 23 languages that can
+be read aloud have all 66 books; Greek, Hindi and Malay are partial, and a book
+the table cannot name stays in English rather than being guessed.
+
+A spoken citation is normalised to the written form on the way through —
+`Psalm 66, verses 8 and 9` becomes `תהילים 66:8,9`. That avoids needing
+"chapter", "verse" and "and" in the target language, which are exactly the
+words a model renders badly next to a placeholder.
+
+The names are taken from Wikidata **verbatim**, descriptive part and all:
+Russian for Job is `Книга Иова`, "Book of Job", where a citation would
+normally read `Иов`. Stripping that is not done — the word for "book" differs
+per language, and in Russian what is left behind is a genitive rather than the
+nominative a citation wants. The aliases are no better: Russian Revelation
+carries twenty, including "doomsday" and an adjective. A slightly long citation
+naming the right book beats a short one naming the wrong one.
+
+A line that is *only* a citation never reaches the model at all — there is no
+prose in a pointer to translate. It is named from the table instead. That
+matters more than it sounds: every file in this corpus opens and closes with
+such a line, and leaving them in English left whole English *sentences* in the
+reading, which is audible immediately.
+
+A placeholder the model drops has its reference appended rather than lost, so a
+citation may move to the end of its sentence — which beats being gone, and both
+beat the model's rendering.
 
 Recognition needs a known book name, so `Section 2`, `Volume 6 chapter 2` and
 `Figure 3` are left alone. Anything it does not recognise is simply translated
@@ -1012,14 +1088,12 @@ it as fine. The other twenty-one languages have nobody behind them.
 
 As of the last time this was written:
 
-- **Not one line of this has met a real model.** Everything below is what the
-  code does against a fake; no audio has been generated, no voice has been
-  cloned, and nobody has listened to any of it.
 - **The style numbers are a considered starting point and nothing more.** They
   were chosen by reading the publisher's guidance, not by listening.
-- Whether a voice model fits on a GPU beside Whisper is unknown, which is why
-  the comparison table has no verdict column — the same reason the translation
-  one has none.
+- **The three models do not fit on a 6 GB card together.** Measured:
+  large-v3-turbo 2.23 GB + m2m100-418M 0.27 GB + chatterbox 3.22 GB = 5.72 GB,
+  before anything else on the machine. Earlier stages are unloaded before
+  speaking rather than held.
 - The gaps between chunks (0.28 s, and 0.7 s at a paragraph) are a guess at
   what reads as a breath rather than an edit.
 

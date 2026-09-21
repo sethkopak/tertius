@@ -281,6 +281,28 @@ SPEECH_CHUNK_CHARS = 300
 SPEECH_GAP_SECONDS = 0.28
 SPEECH_PARAGRAPH_GAP_SECONDS = 0.7
 
+# A chunk that ends at nearly full volume was not finished - it was stopped.
+# Chatterbox watches its own output for a repeating token and forces an EOS
+# when it sees one, which cuts the audio mid-word; the result is audible as a
+# growl where the next chunk's silence begins.
+#
+# The threshold is read off the distribution, not guessed. The same five Hebrew
+# chunks were generated 40 times: 37 takes landed between 0.00 and 0.44, three
+# landed at 0.61, 0.85 and 1.22, and *nothing* landed in between. 1.22 means the
+# last half-second was louder than the chunk's own average - mid-sentence, at
+# volume. The threshold sits in that empty gap.
+#
+# Chatterbox's own "forcing EOS / token_repetition" notice would be better
+# ground truth, but it is not reachable from Python: it survives neither
+# redirect_stdout nor redirect_stderr, so it cannot be attributed to a
+# particular chunk. The gap in the distribution is what there is.
+#
+# Generation is stochastic, so the same text usually survives a second attempt.
+# A chunk that came out clean costs one pass over samples that were about to be
+# written anyway; only a chunk that was actually cut costs a generation.
+SPEECH_TRUNCATED_TAIL_RATIO = 0.55
+SPEECH_TRUNCATION_RETRIES = 2
+
 # The files each family needs in order to convert. Named explicitly so a
 # download never drags in the duplicate TensorFlow, Flax, Rust and GGUF copies
 # the Hub also carries - on madlad400-3b-mt those alone would add ~4 GB to an

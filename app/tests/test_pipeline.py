@@ -682,3 +682,92 @@ def test_the_page_reads_as_a_pipeline(api):
         "pipeline-hint",
     ):
         assert marker in page, marker
+
+
+def test_an_abjad_costs_more_of_the_budget_than_latin():
+    """Hebrew and Arabic drop their vowels, so a character is more speech.
+
+    Measured on the same devotional read by the same model: 9.78 Hebrew
+    letters per second of speech against 15.02 Spanish. Weighted at ×1 a
+    Hebrew chunk runs half again as long as the budget intends, and a long
+    generation is what trips Chatterbox's repetition detector.
+    """
+    from tertius.speech import spoken_length
+
+    assert spoken_length("ש" * 100) == 154      # Hebrew
+    assert spoken_length("ب" * 100) == 154      # Arabic
+    # Denser than Latin, nowhere near a Han character.
+    assert spoken_length("a" * 100) < spoken_length("ש" * 100)
+    assert spoken_length("ש" * 100) < spoken_length("每" * 100)
+    # Cyrillic measured at parity with Latin and is deliberately not weighted.
+    assert spoken_length("д" * 100) == 100
+
+
+def test_an_oversized_sentence_is_broken_at_a_clause():
+    """It used to be sent whole, and that is what growled.
+
+    The old reasoning was that a breath mid-thought beats a long generation.
+    Measuring a Hebrew reading settled it the other way: the model's repetition
+    detector force-stops an over-long chunk mid-word at full volume, which is
+    audible as a growl. A pause at a comma is where the reader would have
+    breathed anyway.
+    """
+    from tertius.speech import chunks_from_prose, spoken_length
+
+    sentence = ", ".join(["the mercy of God endures for ever and is not withdrawn"] * 6)
+    assert spoken_length(sentence) > 300, "sample must exceed the budget"
+
+    chunks = chunks_from_prose(sentence, "chatterbox-multilingual")
+    assert len(chunks) > 1
+    assert all(spoken_length(c.text) <= 300 for c in chunks)
+    # Broken at the commas, and every word still present.
+    assert all(not c.text.endswith(("for", "and", "the")) for c in chunks)
+    assert sentence.count("mercy") == sum(c.text.count("mercy") for c in chunks)
+
+
+def test_a_citation_is_not_a_clause_boundary():
+    """`4:17,18` is one reference, not three clauses."""
+    from tertius.speech import _clauses
+
+    pieces = _clauses("He read 2 Cor. 4:17,18 aloud, slowly, and then sat down.")
+    assert "2 Cor. 4:17,18" in pieces[0], pieces
+    assert len(pieces) == 3, pieces
+
+
+def test_a_sentence_with_nowhere_to_break_is_still_sent_whole():
+    """Better one long generation than a cut at an arbitrary character."""
+    from tertius.speech import chunks_from_prose, spoken_length
+
+    sentence = "mercy " * 60
+    assert spoken_length(sentence) > 300
+    chunks = chunks_from_prose(sentence, "chatterbox-multilingual")
+    assert len(chunks) == 1
+
+
+def test_translate_is_restored_before_the_stage_rows_are_painted():
+    """Reported: Read aloud was missing until Translate was toggled off and on.
+
+    `refreshStageRows` decides whether to offer Read aloud by reading
+    `opt-translate`, and it *unticks* Read aloud when it finds nothing to read.
+    Restoring the saved options painted the rows first and set `opt-translate`
+    second, so reloading a translate-and-speak job came back with the whole
+    section gone and the box silently cleared.
+
+    There is no JavaScript test runner here, so this asserts the ordering in
+    the source. Crude, but it pins the exact thing that was wrong.
+    """
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1]
+          / "src" / "tertius" / "static" / "app.js").read_text(encoding="utf-8")
+
+    start = js.index("function restoreSettings")
+    end = js.index("\nfunction ", start + 1)
+    body = js[start:end]
+
+    checked = body.index("$('opt-translate').checked = true;")
+    painted = body.index("refreshStageRows();")
+    assert checked < painted, (
+        "refreshStageRows() must run after opt-translate is restored, or it "
+        "hides Read aloud and unticks it"
+    )

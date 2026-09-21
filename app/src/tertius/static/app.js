@@ -602,17 +602,14 @@ function restoreSettings(status) {
   if (options.speech_model) $('opt-speech-model').value = options.speech_model;
   if (options.speech_style) $('opt-speech-style').value = options.speech_style;
   if (options.speech_voice) $('opt-speech-voice').value = options.speech_voice;
-  if (options.speak) {
-    $('opt-speak').checked = true;
-    // The language is set after the menu is filled, or there is nothing to
-    // select it on yet.
-    refreshSpeechLanguages().then(() => {
-      if (options.speech_language) {
-        $('opt-speech-language').value = options.speech_language;
-      }
-    });
-  }
-  refreshStageRows();
+  // **Translate is restored before Read aloud, and the rows are painted after
+  // both.** The order is not cosmetic. `refreshStageRows` decides whether to
+  // offer Read aloud by reading `opt-translate`, and it *unticks* Read aloud
+  // when it finds nothing to read. Painting first and restoring Translate
+  // second meant every reload of a translate-and-speak job came back with the
+  // whole Read aloud section missing, and the box it had just silently
+  // cleared. Ticking Translate off and on again brought it back, which is how
+  // this was reported.
   if (Array.isArray(options.target_languages)) {
     targetLanguages = new Set(options.target_languages);
   } else if (options.target_language) {
@@ -627,6 +624,17 @@ function restoreSettings(status) {
     $('translation-target-row').hidden = false;
     refreshTargetLanguages();
   }
+  if (options.speak) {
+    $('opt-speak').checked = true;
+    // The language is set after the menu is filled, or there is nothing to
+    // select it on yet.
+    refreshSpeechLanguages().then(() => {
+      if (options.speech_language) {
+        $('opt-speech-language').value = options.speech_language;
+      }
+    });
+  }
+  refreshStageRows();
   // Off unless the queue in front of you actually uses it. The saved option
   // alone is not enough: `use_reference_text` sticks in the state file from
   // whenever it was last run, so honouring it meant opening a folder full of

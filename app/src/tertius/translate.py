@@ -445,10 +445,11 @@ class Translator:
         self.model_key = model_key
         self.requested_device = device
         self.on_download_progress = on_download_progress
-        # Scripture references are lifted out before the model sees them and
-        # put back afterwards. On by default because a reference is a pointer
-        # rather than prose - "Psalm 66:8" means the same thing in Spanish -
-        # and a model handed one renders the numbers as words. See scripture.py.
+        # Scripture references are lifted out whole before the model sees them
+        # and put back afterwards. On by default because a reference is a
+        # pointer rather than prose - "Psalm 66:8" points at the same verse in
+        # Spanish - and a model handed one rewrites both halves: the numbers
+        # into words, and the book into a different book. See scripture.py.
         self.protect_references = protect_references
         self._translator = None
         self._adapter = None
@@ -572,14 +573,25 @@ class Translator:
         # A line that is nothing but a citation never reaches the model. There
         # is no prose in a pointer to translate, and handing it `@0@.` - a
         # placeholder and no sentence - makes it hallucinate: `0 0 0 0` and
-        # `El 0@` were what came back. Passed through exactly as written.
+        # `El 0@` were what came back.
+        #
+        # It is not passed through untouched, though. These are whole lines -
+        # every file in this corpus opens and closes with one - so leaving them
+        # in English left English *sentences* in the output, which a listener
+        # hears immediately as a foreign voice in the middle of the reading.
+        # They are named from the book table instead, which needs no model.
+        out = list(texts)
         if self.protect_references:
-            from .scripture import is_only_reference
+            from .scripture import is_only_reference, localize, mask, restore
 
-            wanted = [i for i in wanted if not is_only_reference(texts[i])]
+            bare = [i for i in wanted if is_only_reference(texts[i])]
+            wanted = [i for i in wanted if i not in set(bare)]
+            for i in bare:
+                masked, refs = mask(texts[i])
+                out[i] = restore(masked, refs, language=target_language)
 
         if not wanted:
-            return list(texts)
+            return out
 
         # Lift the scripture references out before the model sees them. This is
         # the one place it has to happen: every path into the translator -
@@ -609,7 +621,9 @@ class Translator:
         # Batched here rather than left to CTranslate2's own `max_batch_size`,
         # so there is somewhere to report from between batches. The work is the
         # same either way.
-        out = list(texts)
+        #
+        # `out` was seeded above, and must not be re-seeded here: the bare
+        # citations have already been written into it.
         done = 0
         total = len(wanted)
         for start in range(0, total, BATCH_SIZE):
@@ -625,7 +639,9 @@ class Translator:
             ):
                 rendered = adapter.decode(result.hypotheses[0]).strip()
                 if references is not None:
-                    rendered = unprotect([rendered], [references[start + offset]])[0]
+                    rendered = unprotect(
+                        [rendered], [references[start + offset]], target_language
+                    )[0]
                 out[index] = rendered
             done += len(chunk)
             if on_progress is not None:

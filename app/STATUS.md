@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-09-19
+Last updated: 2026-09-21
 
 ## Where it stands
 
@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**516 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**552 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,191 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-21 — the book-name table, and Read aloud going missing
+
+Two reports. One was a small ordering bug; the other was my own change coming
+back with a bill attached.
+
+### Read aloud vanished until Translate was toggled
+
+`restoreSettings()` painted the stage rows *before* it restored
+`opt-translate`. `refreshStageRows` decides whether to offer Read aloud by
+reading that checkbox, and when it finds nothing to read it also unticks
+`opt-speak`. So reloading a translate-and-speak job came back with the whole
+Read aloud section gone and the box silently cleared; ticking Translate off and
+on again brought it back, which is exactly how it was reported.
+
+Translate and Read aloud are now restored first and the rows painted once,
+afterwards. There is no JavaScript test runner here, so the guard is a source-
+order assertion in `test_pipeline.py`. Crude, and it pins the thing that broke.
+
+### "I heard random English words"
+
+He did. They were `Psalm`, `verses`, `and` and `Thessalonians`, at 0s, 32s and
+47s of the Hebrew reading - and they were **my change from the day before**.
+
+Masking the whole reference kept citations correct and left them in English.
+Two lines of this file are *nothing but* a citation, so they were spoken as
+whole English sentences inside a Hebrew reading. I had stated that cost as "40
+Russian book names go untranslated", which is how it reads in a `.txt` and not
+at all how it sounds in a `.wav`. Understating it was the error.
+
+### So the table got built
+
+The day before I wrote that a real table "has not been looked for yet". It
+exists, it is CC0, and it took one query.
+
+**Wikidata.** `wdt:P31 wd:Q29154430` - instance of "book of the Bible" -
+returns exactly 67 items: the 66, plus an Estonian-only duplicate with no
+English label, which is dropped. Every Q-id is recorded in
+`tools/fetch_book_names.py` beside its English name, so any entry can be traced
+back. The fetch is a **build step**: the table ships as
+`src/tertius/data/book_names.json` (159 KB) and nothing at run time contacts
+Wikidata.
+
+Coverage: 20 of the 23 speakable languages have all 66 books. Greek has 53,
+Malay 63, Hindi 44. A book the table cannot name stays in English rather than
+being guessed. Norwegian first came back with *zero* - m2m100 calls it `no`,
+Wikidata files it under `nb`/`nn` - so the fetcher carries a small alias map.
+
+**Labels are taken verbatim.** Russian for Job is `Книга Иова`, "Book of
+Job", where a citation would read `Иов`. Stripping the descriptor is not done:
+the word for "book" differs per language, and in Russian what is left is a
+genitive rather than the nominative a citation wants. The aliases are worse -
+Russian Revelation carries twenty, including `Светопреставление` ("doomsday")
+and an adjective - so there is no safe rule for choosing one. Long and right
+beats short and wrong.
+
+**Spoken citations are normalised to the written form.** `Psalm 66, verses 8
+and 9` becomes `תהילים 66:8,9`. Saying "chapter", "verse" and "and" in the
+target language would need a second table of exactly the words a model renders
+badly beside a placeholder - the defect this whole thing exists to remove.
+`66:8,9` needs no words at all.
+
+`_BOOKS` was only ever a *guard* - "is this a citation" - so it gained a second
+map answering "which of the 66", with the ordinal read together with the name:
+`2 Cor.` is Second Corinthians, `Cor.` alone identifies nothing, `John` without
+an ordinal is the Gospel. A test asserts the guard and the map cannot drift
+apart, and another that every name the map can produce exists in the table.
+
+### Measured
+
+- 552 tests pass.
+- The same file, retranslated: **zero Latin words in the Hebrew or the
+  Russian.** Lines 4 and 8 now read `תהילים 66:8,9` and `Псалтирь 66:8,9`.
+- Re-read aloud: 5 chunks, **no English in any of them**, 0 of 5 ending
+  abruptly, 47.1s.
+- `num2words` handles Hebrew, so the digits are spoken: `שישים ושש`.
+
+### Still not verified
+
+- **Nobody has listened to this one either.** No English is *present*, which is
+  a waveform-and-text claim, not a "it sounds right" claim.
+- Whether `Книга Иова 3:16` reads naturally to a Russian speaker, or merely
+  correctly. A native speaker could settle it in a minute.
+- `dicta_onnx not available - Hebrew text processing skipped` appears on every
+  Hebrew chunk. Chatterbox has a Hebrew-specific text processor and it is not
+  installed. Unexamined; it predates all of this.
+
+## 2026-09-20 — the growl between Hebrew sentences, and a reversal
+
+Seth: *"The hebrew translation wav file has some growling sounds between
+sentences. What is going on there?"* It was not between the sentences. It was
+the end of each chunk.
+
+### What it actually was
+
+The gaps are clean digital silence, exactly the 0.28 s that gets inserted. The
+noise is the last moment of the audio before them. In the file he was listening
+to, chunks 2 and 3 ended at near-full volume — a final half-second measuring
+0.66 and 0.63 against the chunk's own average, where a chunk that ends properly
+measures around 0.06. They were stopped, not finished.
+
+Chatterbox watches its own output for a repeating token and forces an EOS when
+it sees one. Mid-word that leaves the audio at volume, and the cut growls into
+the silence that follows.
+
+### Three causes, three fixes
+
+**Hebrew was not weighted in the chunk budget.** `_DENSE_SCRIPT` weighted CJK
+and Hangul at ×4 and everything else at ×1. An abjad drops its vowels, so a
+Hebrew word is shorter written than spoken. Measured on the same devotional
+read by the same model: **9.78 Hebrew letters per second of speech against
+15.02 Spanish**, so ×1.54. Russian came out at 13.38 and is left at parity.
+Devanagari is probably dense too and is left alone because nothing has measured
+it.
+
+**An oversized sentence was sent whole.** `_pack` deliberately refused to cut a
+sentence that exceeded the budget, on the reasoning that "a breath in the
+middle of a thought is worse than a long generation". That reasoning predates
+knowing what a long generation costs. It is now broken at a clause — comma,
+semicolon, colon, or a dashed aside — with a digit guard so `4:17,18` stays
+one piece. A clause still over budget is sent whole; there is nowhere left to
+break it.
+
+**The detector fires anyway, sometimes.** So the audio is checked against
+itself and regenerated if it was cut. The threshold is read off a distribution,
+not guessed: the same five chunks generated 40 times gave 37 takes between 0.00
+and 0.44, three at 0.61, 0.85 and 1.22, and nothing in between. Sampling makes
+the retry a different take. The best take is kept, so a chunk that never comes
+out clean is no worse off than before.
+
+### The reversal: whole references, not just their numbers
+
+Chasing the growl found stranded English — `Psalm 66, verses 8 ו 9.`, where only
+"and" had translated. My own placeholders caused it: a model will not translate
+the words beside a `@0@`.
+
+The obvious fix was to stop masking. Measuring that instead refuted the premise
+the whole feature was built on. **All 66 books as `<Book> 3:16`, English into
+Russian and back, under the shipped numbers-only masking: 65 were translated by
+the model and 25 came back wrong.** Job as `Работа` ("Work"), Lamentations as
+`Пожалуйста` ("Please"), Ecclesiastes as `Искусство` ("The Art"), and Joel,
+Obadiah, Nahum, Habakkuk and Haggai all collapsing into `Иоанн`, "John".
+Chinese renders Deuteronomy as "Catholic"; Arabic renders Genesis as "the
+Bible".
+
+The 2026-09-19 entry below says "the book name is not fragile at all". That was
+asserted, not measured, and it is wrong. **Russian readings have been shipping
+with mislabelled citations**, in the one language a native speaker checked —
+they would not have caught it unless a citation happened to come up.
+
+So the whole reference is masked now. The cost is real and is stated plainly in
+the README: roughly 40 of the 65 Russian book names were previously coming out
+right, and those are English now too. An untranslated citation is visible to a
+reader; a rewritten one is not.
+
+A line that is *only* a citation now masks to `@0@.` and is passed through
+untouched rather than sent to a model that would invent a sentence around it.
+On 40 corpus lines into Hebrew this also left *less* English in the surrounding
+prose — 4 lines affected fell to 1 — because there are fewer placeholders to
+suppress their neighbours.
+
+### What would be better
+
+Restoring the book name properly translated, from a real multilingual table of
+the 66 books. **The translation model cannot be used to build that table** —
+that is what the measurement above shows. It needs a licence-clean external
+source, which has not been looked for yet.
+
+> **Built the next day, from Wikidata (CC0) — see the 2026-09-21 entry.** The
+> source took one query. Writing that it "has not been looked for" and leaving
+> it there was the wrong call: the cost of not having it turned up in the audio
+> within the hour.
+
+### Measured, and not
+
+- 527 tests pass. New ones cover abjad weighting, clause splitting, the digit
+  guard, the truncation retry and whole-reference masking.
+- Hebrew re-read end to end: 3 chunks with 2 ending abruptly, before; 5 chunks
+  with 0 ending abruptly, after.
+- **Nobody has listened to it.** The growl was reported by ear and the fix is
+  confirmed only by waveform. Hebrew still has no speaker behind it, and the
+  density figure rests on one file against Spanish's two.
+- Chatterbox's own forced-EOS notice would be better evidence than a loudness
+  ratio. It reaches neither `redirect_stdout` nor `redirect_stderr`, so it
+  cannot be attributed to a chunk.
 
 ## 2026-09-20 — several languages at once, and a settings panel that groups
 
@@ -342,6 +527,11 @@ Chinese numeral, and hallucinated 《古兰经》 - "the Quran" - in place of a
 reference to Chronicles. Spanish, for what it is worth, never needed help.
 
 ### Numbers only, not the whole reference
+
+> **Reversed on 2026-09-20 — see the entry at the top of this file.**
+> "The book name is not fragile" was asserted here and never measured.
+> Measured, 25 of 66 book names come back as a different book in Russian.
+> The whole reference is masked now.
 
 The first attempt held the entire citation back and it was wrong. The book name
 is not fragile, and a reader in the target language wants it translated:
