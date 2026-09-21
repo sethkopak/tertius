@@ -158,6 +158,35 @@ PyPI. Conversion loads a checkpoint and writes it back out — it never runs the
 model — so the CPU build is sufficient, and on Linux it avoids a bundled CUDA
 runtime well over a gigabyte.
 
+## Code bundled in this repository
+
+### BertForDiacritization (Dicta)
+
+`app/src/tertius/hebrew.py` contains a vendored, reduced copy of the
+`BertForDiacritization` model class published with the model below. It is
+carried here rather than loaded with `trust_remote_code=True` so that no code
+from the Hugging Face Hub is executed at run time.
+
+| Source | Licence |
+| --- | --- |
+| [dicta-il/dictabert-large-char-menaked](https://huggingface.co/dicta-il/dictabert-large-char-menaked) | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) |
+
+**Changes made**, as CC-BY-4.0 requires them to be indicated: only the forward
+pass is kept, with the training losses and label plumbing removed; the
+published `predict` method is not used at all, because on transformers 5.x its
+tokenizer returns one `[UNK]` per word where the model needs one token per
+character; the two classifier heads are inlined, leaving parameter names
+unchanged so the published weights load as they are.
+
+CC-BY-4.0 permits commercial use and redistribution and imposes no conditions
+on the rest of Tertius, which remains MIT.
+
+**The `dicta-onnx` package is deliberately not used.** Chatterbox imports it to
+do this same job, and cannot: it calls `Dicta()` with no arguments where the
+package requires a model path, so the hook never runs. It also carries no
+licence of any kind — no `LICENSE` file and no `license` field in its
+`pyproject.toml` — which makes it unshippable here.
+
 ## Data bundled in this repository
 
 ### Bible book names (Wikidata)
@@ -192,6 +221,7 @@ at first use and carries its own terms from its publisher.
 | Whisper (all sizes) | OpenAI | MIT |
 | m2m100_418M, m2m100_1.2B | Meta | MIT |
 | madlad400-3b-mt | Google | Apache-2.0 |
+| dictabert-large-char-menaked | Dicta | CC-BY-4.0 |
 
 Every translation model Tertius offers is permissively licensed and may be used
 commercially. This is deliberate. NLLB-200 is a better model than any of them at

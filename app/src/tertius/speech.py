@@ -846,6 +846,7 @@ class Speaker:
         self.model_key = model_key
         self.requested_device = device
         self.on_download_progress = on_download_progress
+        self._diacritizer = None
         self._model = None
         self.active_device: str | None = None
         self.gpu_fallback_reason: str | None = None
@@ -989,6 +990,16 @@ class Speaker:
 
         text = spell(chunk.text, language)
 
+        # Hebrew is written without vowels, and Chatterbox guesses them - badly
+        # enough that the words change. Measured, `תהילים 66:8,9` was read as a
+        # non-word followed by "sixty-eight". The vowel points go on here,
+        # *after* the digits are spelled out: diacritize first and the spelled
+        # numbers are left bare, and 66 still comes back as 60. See hebrew.py.
+        from .hebrew import DIACRITIZED_LANGUAGES
+
+        if language in DIACRITIZED_LANGUAGES:
+            text = self._niqqud().add_niqqud(text)
+
         arguments = dict(chunk.params)
         if voice:
             arguments["audio_prompt_path"] = voice
@@ -1029,8 +1040,25 @@ class Speaker:
             )
         return best[1]
 
+    def _niqqud(self):
+        """The Hebrew diacritizer, loaded on first use.
+
+        **On the CPU on purpose.** It is a 1.2 GB BERT, and the card this was
+        built on already holds 5.72 GB of the other three models. Measured on
+        that machine it costs 635 ms a chunk, against speech at roughly two
+        seconds a second - under 7% of a reading, for text that is otherwise
+        wrong.
+        """
+        if self._diacritizer is None:
+            from .hebrew import Diacritizer
+
+            self._diacritizer = Diacritizer(device="cpu")
+        return self._diacritizer
+
     def unload(self) -> None:
         self._model = None
+        if self._diacritizer is not None:
+            self._diacritizer.unload()
 
 
 # ------------------------------------------------------------------ the output

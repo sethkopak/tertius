@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**552 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
+**558 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
 CI. Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
@@ -85,6 +85,92 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+
+## 2026-09-21 — the Hebrew was never being pronounced
+
+Seth translated the Hebrew reading back to English and it was nonsense. It was
+not the translator. **Hebrew had never been spoken correctly at all**, since
+the day the feature was built.
+
+### The chain
+
+The `.he.txt` is correct - he checked it through Google Translate himself, and
+the citations were verified here. What breaks is the audio, and everything
+after it is faithful to the break: transcribing our own Hebrew wav gave
+`מנד היום ידבשים מנה` - "Mand today will swallow a meal" - and the English is a
+faithful translation of *that*.
+
+### Why
+
+Hebrew is written without vowels. A reader supplies them from knowing the word;
+Chatterbox cannot, and expects text already carrying niqqud. It had none, so it
+guessed, and produced fluent Hebrew made of the wrong words:
+
+    text          תהילים 66:8,9
+    spoken as     תאים שישים ושמונה תש      a non-word, then "sixty-eight"
+
+**Whisper detected that audio as Hebrew with probability 0.93.** That is why
+none of the earlier work caught it: it sounds like Hebrew, and every check
+short of a Hebrew speaker passes. `dicta_onnx not available` had been in the
+log the whole time, flagged twice as "unexamined" and set aside twice.
+
+### The A/B that settled it
+
+Same text, three ways, transcribed back:
+
+| | citation heard back |
+| --- | --- |
+| plain (shipping) | `תאים שישים ושמונה תש` - wrong book, sixty-eight |
+| niqqud only | `תהילים 60 ושימונה` - right book, wrong numbers |
+| spell digits, then niqqud | `תהילים 66, 8, 9` - correct |
+
+Order matters and is easy to get backwards: diacritizing first leaves the
+spelled numbers bare and 66 is still read as 60.
+
+### What was built
+
+`hebrew.py`. Not the obvious route, for two reasons found on the way:
+
+**Chatterbox's own hook cannot work.** `tokenizer.py` calls `Dicta()` with no
+arguments; the `dicta_onnx` package requires a model path. Installing it only
+changes the warning from "not available" to "diacritization failed". It also
+carries **no licence of any kind** - no LICENSE file, no `license` field - so
+it was never shippable here.
+
+**The published `predict` cannot work either.** On transformers 5.16
+`AutoTokenizer` returns one `[UNK]` per Hebrew word, where the model is
+character-level. Its decode loop keys on a token being exactly one character
+wide, so nothing matches, the cursor never advances, and the output is the
+input repeated in growing prefixes. Reading `tokenizer.json` with the
+`tokenizers` library directly gives one token per character with correct
+offsets, which is what this uses.
+
+So the model class is **vendored** from the CC-BY-4.0 model repository rather
+than loaded with `trust_remote_code=True` - no Hub code runs here, the same
+reasoning that has translate.py convert its own checkpoints. Changes are listed
+in THIRD-PARTY-NOTICES.md, as CC-BY requires.
+
+It runs on the **CPU**: 1.2 GB against a card already holding 5.72 GB, and at
+635 ms a chunk it is under 7% of a reading.
+
+### Measured
+
+- 558 tests pass. None downloads the model.
+- Round trip on the reported file now tracks the source closely where it was
+  unrecognisable: `אשר מחזיק את נשמתנו בחיים` came back verbatim.
+
+### Still not verified
+
+- **Nobody has listened to it.** Every claim here is a transcription of a
+  transcription. A Hebrew speaker would settle in a minute what has taken two
+  days of waveforms.
+- **Arabic is also an abjad** and may have the same defect. Chatterbox offers
+  no hook for it and nothing has measured it.
+- The `.he.txt` line 2 still reads `מאנה ל-1 בינואר` and is spoken as a
+  cardinal, "to-one in January" - the ordinal-date defect already recorded for
+  Russian, in Hebrew too.
+- m2m100 looped on the garbled input, repeating one clause nine times. Nothing
+  detects that. Unfixed, and not specific to Hebrew.
 
 ## 2026-09-21 — the book-name table, and Read aloud going missing
 

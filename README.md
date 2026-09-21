@@ -956,6 +956,38 @@ shorter on the page than in the mouth. Measured on the same devotional read by
 the same model: 9.78 Hebrew letters per second of speech against 15.02 Spanish.
 Cyrillic came out at 13.38, near enough to Latin to leave alone.
 
+### Hebrew needs its vowels put back first
+
+Hebrew is written without vowels. A reader supplies them from knowing the word;
+a speech model cannot, and Chatterbox does not try — it expects text that
+already carries the vowel points (niqqud), and guesses when it does not.
+
+Guessing produces fluent Hebrew made of the wrong words. The same line read
+aloud and transcribed back:
+
+| | |
+| --- | --- |
+| text | `תהילים 66:8,9` — "Psalms 66:8,9" |
+| spoken, before | `תאים שישים ושמונה תש` — a non-word, then "sixty-eight" |
+| spoken, after | `תהילים 66, 8, 9` |
+
+That is the trap in it: Whisper still detected the old audio as Hebrew with
+probability 0.93, so nothing downstream reported a problem. It *sounded* like
+Hebrew.
+
+Niqqud is added with
+[dictabert-large-char-menaked](https://huggingface.co/dicta-il/dictabert-large-char-menaked)
+(Dicta, CC-BY-4.0), downloaded on first use like any other model — 1.2 GB, and
+only if you read Hebrew aloud. It runs on the **CPU** on purpose: the card this
+was built on already holds 5.72 GB of the other three models, and at 635 ms a
+chunk it is under 7% of a reading.
+
+**Digits are spelled out before the vowels go on**, not after. Diacritize first
+and the spelled numbers are left bare, and `66` still comes back as `60`.
+
+Arabic is also an abjad and may have the same defect. Chatterbox offers no
+equivalent hook for it and nothing has measured it.
+
 ### Chunks that growl
 
 Chatterbox watches its own output for a repeating token and forces an end when
