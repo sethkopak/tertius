@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 ## Where it stands
 
@@ -85,6 +85,31 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
   run and heard only by someone who does not speak it.
+- **Speaks a translation, not just a text file** (2026-09-19). The stages are a
+  pipeline - transcribe, then translate, then speak - so asking for Hebrew
+  audio from an English recording is one job. The voice is sampled from the
+  recording itself unless you name a clip.
+- **Several languages in one run** (2026-09-20), with a separate, narrower list
+  for what gets read aloud: the translator knows a hundred languages and the
+  voice model twenty-three, and the two lists are kept in step in both
+  directions. A second translation costs ~17s; a second *reading* costs another
+  full pass, and speech dominates the bill.
+- **Digits are spelled out before they are spoken** (2026-09-20). Chatterbox
+  reads an Arabic numeral in English or not at all, so `66` becomes
+  `שישים ושש` on the way to the model while the cues keep the digits.
+  Working in 18 of the 23 speakable languages, tested by trying rather than by
+  reading a table of what is advertised.
+- **Scripture references are held back whole** (2026-09-20) and named from a
+  table (2026-09-21) rather than translated. A model rewrites both halves of a
+  citation: measured, 25 of 66 Russian book names came back as a different book
+  - Job as "Work", Lamentations as "Please". The names come from Wikidata
+  (CC0), shipped as data; a book the table cannot name stays in English rather
+  than being guessed.
+- **Hebrew gets its vowel points back before it is spoken** (2026-09-21).
+  Hebrew is written without vowels and Chatterbox guesses them, badly enough
+  that the words change - `תהילים 66:8,9` was read as a non-word followed by
+  "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
+  than loaded with `trust_remote_code`, and runs on the CPU.
 
 ## 2026-09-21 — the Hebrew was never being pronounced
 
@@ -2199,8 +2224,11 @@ did not.
 - The 1.2B has now been run through the queue on a whole file (`V1_01.mp3`,
   38:12). Compared closely on three sentences; the other 203 have not been
   read.
-- Translation has only been run on the CPU. It has never been loaded onto
-  the GPU, and whether it fits in 6 GB beside Whisper is still unknown.
+- ~~Translation has only been run on the CPU.~~ **Answered.** It has been run
+  on CUDA many times since, and the three models together measure 5.72 GB -
+  whisper large-v3-turbo 2.23 + m2m100-418M 0.27 + chatterbox 3.22 - which does
+  not leave room on a 6 GB card for anything else, so earlier stages are
+  unloaded before speaking rather than held.
 - The translated `.txt` is measurably less readable than the transcript, and
   the cause is structural rather than a bug. See *the fragment problem* below.
 - Long-batch behaviour (17 files back to back) has not been run start to finish.
@@ -2209,6 +2237,24 @@ did not.
 - The UI's narrow-window behaviour (below 1180px, and the collapsed rail below
   1000px) is written but unseen — the browser could not be given a small enough
   viewport to check it.
+- **No reading in any language but Russian has been heard by someone who speaks
+  it.** Russian was confirmed by a native speaker. Chinese was heard by someone
+  who does not speak it. Hebrew, Spanish and the other nineteen have nobody
+  behind them at all - and Hebrew is the cautionary case: it was being
+  mispronounced badly enough to change the words, for three days, while every
+  automated check passed. Whisper even detected the bad audio as Hebrew at
+  p=0.93.
+- **Arabic is an abjad like Hebrew** and may have the same missing-vowels
+  defect. Chatterbox offers no diacritization hook for it, and nothing has
+  measured it.
+- **Ordinal dates are wrong in every language.** "January 1st" is spoken as the
+  cardinal - `1 января`, `מאנה ל-אחת בינואר`. Known since the digits work and
+  still unfixed.
+- **A translation model can loop.** Fed the garbled transcript of a bad Hebrew
+  reading, m2m100 repeated one clause nine times. Nothing detects or stops it,
+  and it is not specific to Hebrew.
+- The book-name table is used but unjudged: nobody has said whether
+  `Книга Иова 3:16` reads naturally to a Russian speaker or merely correctly.
 
 ## Next steps
 
@@ -2222,16 +2268,19 @@ did not.
 3. Try `madlad400-3b-mt`. It is the whole of the T5 adapter — a different
    tokenizer and a different way of naming the target language — and not one
    line of it has met a real model. 400+ languages is the reason to care.
-4. Run a translation on the GPU. Everything so far has been CPU, which is why
-   the translation comparison table has no "on this machine" column: there is
-   nothing honest to put in it yet.
+4. ~~Run a translation on the GPU.~~ Done. What is still missing from the
+   comparison table is a per-model throughput column; only m2m100-418M has been
+   timed.
 5. Decided (2026-08-03): this ships, as open source under MIT. The legal
    groundwork is in, and the translation models were chosen to keep it that way
    — see the 2026-09-01 entry on NLLB.
 6. Packaging is still untouched — run-from-source only, no wheel, no installer.
    Strangers on macOS and Linux will arrive before either platform has been run
    by hand, which is the risk to weigh before publishing.
-7. **Find a Chinese speaker.** Russian has been confirmed by one; Chinese has
+7. **Find a Hebrew speaker, then a Chinese one.** Hebrew is now the urgent
+   one: it was mispronounced for three days and only a round trip caught it,
+   and the fix is confirmed by waveform alone. Russian has been confirmed by
+   one; Chinese has
    been run and sounds fine to someone who does not speak it, which is not the
    same claim and should not be written down as if it were. The other twenty-one
    languages the model claims have nobody behind them at all. The model has been run

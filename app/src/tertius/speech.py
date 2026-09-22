@@ -87,7 +87,7 @@ SPEECH_REQUIREMENTS = {"torch": "torch", "chatterbox": "chatterbox-tts"}
 # 3. **`gradio==6.8.0` is never imported by the library.** It is there for the
 #    publisher's demo apps. Accepting it pulls a web framework, FastAPI and
 #    uvicorn into an app that already has Flask and is documented as making
-#    exactly four kinds of network request.
+#    exactly five kinds of network request.
 #
 # What is listed here is what `chatterbox/mtl_tts.py`, `tts_turbo.py` and
 # `models/tokenizers/tokenizer.py` actually import. Re-read those when the

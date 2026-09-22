@@ -9,8 +9,9 @@ machine.
 Runs entirely on your machine: no API calls, no cloud services, no telemetry. Its
 only network access is fetching models the first time you use them — Whisper from
 Hugging Face (see [Models](#models)), and, if you translate, a translation model
-plus the libraries needed to convert it (see [Translating](#translating)). Once
-they are on disk you can run air-gapped.
+plus the libraries needed to convert it (see [Translating](#translating)); if you
+read aloud, a voice model, and for Hebrew a diacritization model as well. Once
+they are on disk you can run air-gapped. `SECURITY.md` lists every request.
 
 ## Launch
 

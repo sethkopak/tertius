@@ -32,7 +32,7 @@ code as your user can already do everything Tertius can do.
 - Code execution triggered by the *content* of a media or text file you
   transcribe.
 - Secrets or transcript content leaving the machine. Tertius makes network
-  requests on purpose in exactly three places, all of them fetches and none of
+  requests on purpose in exactly five places, all of them fetches and none of
   them carrying your content:
   1. downloading a Whisper model from Hugging Face the first time it is used;
   2. downloading a translation model from Hugging Face, if you translate;
@@ -40,7 +40,18 @@ code as your user can already do everything Tertius can do.
      PyTorch CPU index, if you translate and they are missing;
   4. downloading a voice model from Hugging Face, and installing
      `chatterbox-tts` and `torch` from PyPI and a PyTorch index, if you read
-     text aloud.
+     text aloud;
+  5. downloading the Hebrew diacritization model from Hugging Face, the first
+     time you read Hebrew aloud.
+
+  This list said "three" while listing four, for some weeks. It is five now
+  and the count is worth checking against the list whenever either changes.
+
+  A sixth exists and is **not** run by the app: `app/tools/fetch_book_names.py`
+  queries Wikidata to regenerate the bundled table of Bible book names. It is a
+  build step, run deliberately by whoever is working on the code, and the table
+  ships as a file. Transcribing, translating and reading aloud never contact
+  Wikidata.
 
   Anything else — anything that *sends* rather than fetches — is a bug worth
   reporting. In particular, **no audio you supply as a voice clip ever leaves
