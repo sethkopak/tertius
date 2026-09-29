@@ -385,6 +385,41 @@ def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     return "".join(pieces), taken
 
 
+# Hebrew writes its one-letter prepositions and conjunctions as part of the next
+# word - `בתהילים`, "in Psalms" - and the model, handed `in @0@`, writes `ב @0@`
+# with a space, which put back reads `ב תהילים`: visibly wrong to a Hebrew
+# reader (seen on the hosted m2m100, 2026-09-29).
+#
+# A standalone prefix is one of בכלמשה, or ו on its own or in front of one of
+# them (`וב`, "and in"). Standalone, because nothing Hebrew may come before it:
+# `של` ("of") and `מה` ("what") are words that happen to start with those
+# letters, and the lookbehind is what leaves them alone. Hebrew has no
+# one-letter words for this to mistake.
+_HEBREW_LETTER = "א-ת"
+_HE_DETACHED_PREFIX = re.compile(
+    rf"(?<![{_HEBREW_LETTER}])(ו?[בכלמשה]|ו)\s+(?=@\d+@)"
+)
+# ב, כ and ל absorb the definite article: "in the Epistle" is `באיגרת`, not
+# `בהאיגרת`. Named rather than inferred from a leading ה, because a leading ה is
+# not always the article - `הושע`, Hosea, begins with one as part of the name,
+# and dropping it would write `בושע`. These two are every label in the table
+# whose first word carries the article (checked 2026-09-29).
+_HE_ARTICLE_WORDS = ("הבשורה", "האיגרת")
+
+
+def _after_hebrew_prefix(before: str, rendered: str) -> str:
+    """Fit a restored reference to a Hebrew prefix written straight before it."""
+    if not before or not re.match(rf"[{_HEBREW_LETTER}]", before[-1]):
+        return rendered
+    if rendered and not re.match(rf"[{_HEBREW_LETTER}]", rendered[0]):
+        # A name the table could not give in Hebrew stays in English, and a
+        # Hebrew prefix on a foreign word takes a hyphen: `ב-Psalm 66:8`.
+        return "-" + rendered
+    if before[-1] in "בכלה" and rendered.split(" ", 1)[0] in _HE_ARTICLE_WORDS:
+        return rendered[1:]
+    return rendered
+
+
 def restore(
     text: str,
     references: Sequence[str],
@@ -406,13 +441,22 @@ def restore(
     def render(reference: str) -> str:
         return (localize(reference, language) or reference) if language else reference
 
+    hebrew = (language or "").lower() == "he"
+    if hebrew:
+        # `ב @0@` -> `ב@0@`: the prefix is joined before anything is put back,
+        # so `put_back` can see it and fit the name to it.
+        text = _HE_DETACHED_PREFIX.sub(r"\1", text)
+
     seen: set[int] = set()
 
     def put_back(match: "re.Match") -> str:
         index = int(match.group(1)) - offset
         if 0 <= index < len(references):
             seen.add(index)
-            return render(references[index])
+            rendered = render(references[index])
+            if hebrew:
+                rendered = _after_hebrew_prefix(match.string[: match.start()], rendered)
+            return rendered
         return match.group(0)
 
     out = _PLACEHOLDER_RE.sub(put_back, text)

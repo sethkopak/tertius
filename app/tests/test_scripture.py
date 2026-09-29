@@ -204,6 +204,63 @@ def test_a_closing_quote_after_the_stop_does_not_stop_the_repair():
     assert keep_final_stop(source, "Il a dit : « Lisez @0@", "fr") == "Il a dit : « Lisez @0@."
 
 
+# ------------------------------------------------- Hebrew's attached prefixes
+#
+# Seen on the hosted m2m100 on 2026-09-29: `in @0@` came back `ב @0@`, which put
+# back read `ב תהילים` where Hebrew writes `בתהילים`.
+
+
+def _he(sentence: str, masked_translation: str) -> str:
+    _masked, refs = mask(sentence)
+    return restore(masked_translation, refs, language="he")
+
+
+def test_a_detached_hebrew_prefix_is_joined_to_the_book():
+    # The model's own output, word for word.
+    out = _he(
+        "As we read in Psalm 66:8, 9, the Lord holds our soul in life.",
+        "כפי שאנחנו קוראים ב @0@, האדון שומר על הנשמה שלנו בחיים.",
+    )
+    assert "קוראים בתהילים 66:8,9," in out
+
+
+def test_and_is_joined_too_and_so_is_and_in():
+    out = _he("Compare Job 3:16 with Lamentations 3:22.", "השוואת @0@ עם @1@ ו @0@.")
+    assert "ו" + "ספר איוב" in out
+    out = _he("Read Romans 8:28.", "קרא וב @0@.")
+    assert "ובאיגרת אל הרומאים 8:28" in out
+
+
+def test_in_to_and_as_absorb_the_article():
+    # "in the Epistle to the Romans" - the ה goes.
+    assert "באיגרת אל הרומאים" in _he("See Romans 8:28.", "ראה ב @0@.")
+    assert "לבשורה על-פי מתי" in _he("Turn to Matthew 5:3.", "פנה ל @0@.")
+    # "from" does not absorb it.
+    assert "מהאיגרת אל הרומאים" in _he("From Romans 8:28.", "מ @0@.")
+
+
+def test_hosea_keeps_the_he_that_is_part_of_its_name():
+    """A leading ה is not always the article. Dropping it here writes `בושע`."""
+    assert "בהושע 6:6" in _he("As in Hosea 6:6.", "כמו ב @0@.")
+
+
+def test_words_that_begin_with_prefix_letters_are_left_alone():
+    # `של` is "of" and `מה` is "what"; neither is a prefix to be joined.
+    out = _he("The words of Psalm 23:1.", "המילים של @0@.")
+    assert "של תהילים 23:1" in out
+
+
+def test_a_prefix_on_a_name_left_in_english_takes_a_hyphen():
+    from tertius.scripture import _after_hebrew_prefix
+
+    assert _after_hebrew_prefix("קוראים ב", "Psalm 66:8") == "-Psalm 66:8"
+
+
+def test_other_languages_are_not_touched_by_the_hebrew_rule():
+    _masked, refs = mask("See Romans 8:28.")
+    assert restore("Mira b @0@.", refs, language="es").startswith("Mira b ")
+
+
 def test_without_sources_unprotect_behaves_exactly_as_before():
     masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
     [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru")
