@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**558 tests, all passing** on Windows locally. In CI one of them skips.
+**615 tests, all passing** on Windows locally (one skips, a librosa path), and
+green in CI again since 2026-09-29, where one more skips.
 
 > Corrected 2026-09-29. This said all 558 passed on ubuntu/macOS/Windows in CI
 > too. CI had been **red on every platform since `5ef33ea` (2026-09-21)**, all
@@ -116,12 +117,118 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   citation: measured, 25 of 66 Russian book names came back as a different book
   - Job as "Work", Lamentations as "Please". The names come from Wikidata
   (CC0), shipped as data; a book the table cannot name stays in English rather
-  than being guessed.
+  than being guessed. **Fitted to the sentence** (2026-09-29): a full stop the
+  model drops after a closing citation is put back, a Hebrew prefix is joined
+  to the name (`בתהילים`), and a Russian name takes the case its preposition
+  or verb governs (`в Псалтири`, `Сравнить Книгу Иова`).
 - **Hebrew gets its vowel points back before it is spoken** (2026-09-21).
   Hebrew is written without vowels and Chatterbox guesses them, badly enough
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-09-29 — what the first hosted translations showed
+
+Found by Tertius Online, which vendors this package: its translate stage ran in
+production for the first time today, and reading the output turned up four
+things wrong with how a scripture reference is put back after translation, and
+one thing wrong with this repository's CI. All five are fixed here, in this
+package, so both apps have the fixes.
+
+**The measurements were made on the hosted model**, `@cf/meta/m2m100-1.2b` on
+Workers AI - the same published checkpoint as this app's `m2m100-1.2B`, run by
+a different runtime. Whether the CTranslate2 conversion here makes the same
+slips has not been checked. Every repair below is narrow and does nothing to
+output that is already right, so it costs nothing if the local model behaves.
+
+### CI had been red for eight days (`1f3d6b9`)
+
+All seven jobs, every push since `5ef33ea` on 2026-09-21, on one test that
+compared the book-name fetcher's languages against a *converted* model's
+vocabulary - which no runner has. It passed here and nowhere else, while this
+file said everything was green. The test now skips when there is no vocabulary,
+and still checks the 66 books. See the correction under *Where it stands*.
+
+### The full stop after a closing citation (`2b19176`)
+
+`Compare Job 3:16 with Lamentations 3:22.` masks to `Compare @0@ with @1@.`,
+and the hosted model returned `Сравнить @0@ с @1@` - every time, in Russian,
+Spanish and Hebrew. A line with no ending, in a `.txt` that is one sentence
+per line. `keep_final_stop` runs on the masked text before `restore`: when the
+source ends citation-then-stop and the translation ends on the bare
+placeholder, the stop goes back, in the target's own form where it has one
+(`。` zh/ja, `।` hi/mr/ne/bn, `؟` `۔` ar/fa/ur, `։` hy - the scripts
+`alignment` already splits on). A translation that rephrased and ended another
+way is left alone. `unprotect` takes the masked sources as an optional
+argument, and `Translator.translate` passes them.
+
+### Hebrew's one-letter prefixes (`ab6e032`)
+
+Hebrew writes ב ל כ מ ש ה ו as part of the next word. Handed `in @0@` the
+model wrote `ב @0@`, which put back read `ב תהילים` for `בתהילים`. `restore`
+now joins a standalone prefix to the placeholder after it, for Hebrew only,
+and fits the name to it:
+
+- ב, כ and ל absorb the article: `באיגרת`, not `בהאיגרת`. The two article
+  words are **named** - `האיגרת`, `הבשורה` - rather than inferred from a
+  leading ה, because `הושע` (Hosea) begins with a ה that is part of the name
+  and dropping it writes `בושע`.
+- A name the table could not give in Hebrew takes a hyphen: `ב-Psalm`.
+- `של` and `מה` are words, not prefixes, and are left alone; the lookbehind is
+  what tells them apart.
+
+### Russian cases (`366a297`, `5956e19`, `44722f7`)
+
+The table gives each book in the nominative, so `в @0@` put back read
+`в Псалтирь` for `в Псалтири`. Only a label's leading words ever decline - the
+head noun and an ordinal before it (`Книга | пророка Исаии`, `Первая книга |
+Царств`) - so a table of twelve words and the numbered ordinals (`1-е`, `1-я`)
+covers all 66 labels, with no morphology library. The case comes from the
+word before the placeholder, in three passes over the same day:
+
+- **Prepositions with one case:** в/о/при prepositional, из/от/до/у/для/без/
+  после genitive, к/по dative, с/над/перед/между instrumental, про/через
+  accusative.
+- **Verbs that take an object** go to the accusative: `Сравнить Книгу Иова`.
+  The stems are the ones the hosted model actually wrote before a citation
+  when probed (сравнить, читайте, рассмотрим, цитирует, помните, изучать) plus
+  open and mention, in verb forms only - `изучение`, a verbal noun that wants
+  the genitive, and reflexives like `сравнивается` are excluded.
+- **на, за, под**, which take two cases each, are read with the three words
+  before them for the verb: на accusative by default ("look at", "rely on")
+  and prepositional after основан/сосредоточ/откр ("based on", "focus on",
+  open *at*); за instrumental after следует/стоит, accusative after
+  благодар/слава; под accusative after подпадает, instrumental after стоим.
+
+A name after anything unrecognised stays nominative - right whenever the book
+is the subject, and no worse than before otherwise. For за and под after an
+unknown verb there is no safe default, so they stay too.
+
+**Checked on real model output**, not just in tests: `в Псалтири 66:8,9`,
+`от Евангелия от Матфея`, `к Посланию к Римлянам`, `с Плачем Иеремии`,
+`в Третьей книге Царств`, `Сравнить Книгу Иова`, `основан на Евангелии от
+Матфея`, `Откройте свою Библию на Псалтири`, `стоим под Псалтирью`; and in
+Hebrew `בתהילים`, `מהבשורה על-פי מתי`, `בהושע`.
+
+**Tests:** 558 → 615. Each rule was switched off in turn to see its tests
+notice: the stop 8 failures, the Hebrew join 4, the article 2, the Russian
+prepositions 17, the verbs 5, на/за/под 11. Three existing tests had pinned
+the ungrammatical forms (`в Псалтирь`, `с Плач Иеремии`, `Сравнить Книга
+Иова`) as the expected answer, and were changed to expect the corrected ones.
+
+**Still wants a reader:** the grammar is rules applied by someone who does not
+speak Hebrew or Russian. See *Not verified*.
+
+### Speaking on the CPU, measured
+
+Tertius Online considered running Chatterbox in a CPU-only container, and so
+timed it here: `ChatterboxMultilingualTTS`, CUDA hidden, torch capped at **4
+threads** on this machine's i7-8750H. **0.116x realtime** across Russian,
+English and Hebrew - 21.6 s of audio in 186 s - against 0.51x on the RTX 2060.
+That is **4.4x slower, not the "twenty times"** this file's *Gotchas*, the
+`speak` extra's comment in `pyproject.toml`, and comments in `speech.py` and
+`jobs.py` all repeat. None of those was ever measured; this was, on four of
+the twelve threads available, so the full CPU is likely closer still.
 
 ## 2026-09-21 — the Hebrew was never being pronounced
 
@@ -2267,6 +2374,11 @@ did not.
   and it is not specific to Hebrew.
 - The book-name table is used but unjudged: nobody has said whether
   `Книга Иова 3:16` reads naturally to a Russian speaker or merely correctly.
+  Since 2026-09-29 the names are also declined and the Hebrew prefixes joined,
+  by rules written by someone who speaks neither language - `в Псалтири`,
+  `Сравнить Книгу Иова`, `בתהילים`, `באיגרת אל הרומאים` are each checked
+  against a grammar, not against a reader. A wrong rule would be wrong on
+  every reference, consistently.
 
 ## Next steps
 
@@ -2304,8 +2416,14 @@ did not.
    and nothing here has tested that, or what a bad clip does.
 9. Decide what to do about 0.51x realtime. A 40-minute reading is 80 minutes
    of GPU. `chatterbox-nano` claims 3x realtime on 8 CPU cores and has never
-   been tried; if that holds on a GPU it changes the feature's economics.
+   been tried; if that holds on a GPU it changes the feature's economics. For
+   scale, the multilingual model on four CPU threads measured 0.116x
+   (2026-09-29) - a 40-minute reading in about 5.7 hours.
 10. Read something through the **UI**, not just through `speak_text_file`.
+11. Have a Hebrew reader (item 7) and the Russian speaker read the **scripture
+   references** in a translation too, not just the prose: the prefixes and
+   cases fitted to them on 2026-09-29 are rules, and nobody who speaks either
+   language has seen the result.
 
 ## Ideas not built
 
@@ -2323,7 +2441,10 @@ did not.
 - **One venv holds one torch, and the two features want different builds.**
   Translating installs the CPU-only wheel on purpose (it only ever converts).
   Speaking runs the model and wants CUDA. Whichever installs first wins, and
-  nothing fails - synthesis is simply twenty times slower with no explanation.
+  nothing fails - synthesis is simply several times slower with no
+  explanation. (This said "twenty times", never measured; on four CPU threads
+  it measured 0.116x realtime against the GPU's 0.51x, 2026-09-29 - about
+  4.4x.)
   `speech.torch_install_problem()` exists to say so; this machine is already in
   that state with `2.14.0+cpu`.
 - **A PyTorch CUDA index without a wheel for your Python says "No matching
