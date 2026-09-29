@@ -160,7 +160,7 @@ def test_a_stop_dropped_after_the_last_citation_is_put_back():
     assert masked == "Compare @0@ with @1@."
     # What the model actually returned, word for word.
     [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru", sources=[masked])
-    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22."
+    assert out == "Сравнить Книгу Иова 3:16 с Плачем Иеремии 3:22."
 
 
 def test_a_stop_the_model_kept_is_not_doubled():
@@ -304,12 +304,45 @@ def test_the_book_takes_the_case_its_preposition_governs(sentence, masked, expec
     assert _ru(sentence, masked) == expected
 
 
-def test_without_a_preposition_the_name_is_left_in_the_nominative():
-    """`Сравнить Книга Иова` wants the accusative, but that depends on the verb,
-    not a preposition, and guessing a verb's case is not something a table can
-    do. Left as the table gives it."""
-    out = _ru("Compare Job 3:16 with Lamentations 3:22.", "Сравнить @0@ с @1@.")
-    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22."
+@pytest.mark.parametrize(
+    "sentence, masked, expected",
+    [
+        # What the hosted model wrote before a citation, word for word
+        # (probed 2026-09-29). All take the accusative.
+        ("Compare Job 3:16 with Lamentations 3:22.", "Сравнить @0@ с @1@.",
+         "Сравнить Книгу Иова 3:16 с Плачем Иеремии 3:22."),
+        ("Read Romans 8:28 carefully.", "Читайте @0@ внимательно.",
+         "Читайте Послание к Римлянам 8:28 внимательно."),
+        ("Consider Hebrews 11:1.", "Рассмотрим @0@ на мгновение.",
+         "Рассмотрим Послание к Евреям 11:1 на мгновение."),
+        ("Paul quotes Psalm 16:10.", "Пол цитирует @0@ здесь.",
+         "Пол цитирует Псалтирь 16:10 здесь."),
+        ("Remember Job 19:25.", "Помните @0@.", "Помните Книгу Иова 19:25."),
+        ("Study 1 Kings 3:5.", "Мы будем изучать @0@.",
+         "Мы будем изучать Третью книгу Царств 3:5."),
+    ],
+)
+def test_a_verb_that_takes_an_object_puts_the_book_in_the_accusative(sentence, masked, expected):
+    assert _ru(sentence, masked) == expected
+
+
+@pytest.mark.parametrize(
+    "masked",
+    [
+        # The book as subject: nominative is right.
+        "@0@ говорит нам почему.",
+        "Это @0@.",
+        # A verbal noun from the same stem wants the genitive, not the
+        # accusative; left alone rather than put in the wrong case.
+        "Изучение @0@ полезно.",
+        # Reflexive: no object at all.
+        "Это сравнивается @0@.",
+        # `равно` is not "compare".
+        "Равно @0@.",
+    ],
+)
+def test_a_name_after_anything_else_stays_nominative(masked):
+    assert "Книга Иова 3:16" in _ru("Job 3:16.", masked)
 
 
 def test_an_ambiguous_preposition_is_left_alone():
@@ -325,7 +358,7 @@ def test_other_languages_are_not_declined():
 def test_without_sources_unprotect_behaves_exactly_as_before():
     masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
     [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru")
-    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22"
+    assert out == "Сравнить Книгу Иова 3:16 с Плачем Иеремии 3:22"
 
 
 # ------------------------------------------------------- the bare-citation case

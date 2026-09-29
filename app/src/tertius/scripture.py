@@ -465,6 +465,40 @@ _RU_PREPOSITION_CASE = {
 }
 _RU_WORD_BEFORE = re.compile(r"(?:^|[^а-яёА-ЯЁ-])([а-яёА-ЯЁ-]+)\s+$")
 
+# A book straight after a verb that takes it as a direct object wants the
+# accusative: `Сравнить Книга Иова` is `Сравнить Книгу Иова`. The case comes
+# from the verb, so only verbs known to govern the accusative are recognized,
+# and a name after anything else stays in the nominative - which is right when
+# it is the subject (`Это Книга Иова`, a sentence that opens with the book).
+#
+# The stems are the verbs the hosted model actually wrote before a citation,
+# probed 2026-09-29 (сравнить, читайте, рассмотрим, цитирует, помните,
+# изучать), and their plain equivalents (open, mention). A stem alone would also
+# catch nouns built on it - `изучение`, "study", wants the genitive - so the
+# word must not end like a verbal noun, and must not be reflexive
+# (`сравнивается` takes no object at all).
+_RU_ACCUSATIVE_VERB = re.compile(
+    r"^(?:сравн|чит|прочит|прочт|перечит|рассмотр|рассматрив|"
+    r"цитир|процитир|помн|вспомн|вспомина|запомн|изуч|откр|упомина|упомян)"
+)
+_RU_VERBAL_NOUN = re.compile(r"(?:ени|ани|ти)(?:е|я|ю|ем|и|й|ям|ями|ях)$")
+_RU_REFLEXIVE = re.compile(r"(?:ся|сь)$")
+
+
+def _russian_case_before(word: str) -> str | None:
+    """The case a book takes after `word`, or None to leave it nominative."""
+    word = word.lower()
+    case = _RU_PREPOSITION_CASE.get(word)
+    if case:
+        return case
+    if (
+        _RU_ACCUSATIVE_VERB.match(word)
+        and not _RU_VERBAL_NOUN.search(word)
+        and not _RU_REFLEXIVE.search(word)
+    ):
+        return "acc"
+    return None
+
 
 def _decline_ru_word(word: str, case: str) -> str | None:
     """One word in `case`, keeping its capital; None if the table does not know it."""
@@ -480,9 +514,9 @@ def _decline_ru_word(word: str, case: str) -> str | None:
 
 
 def _after_russian_preposition(before: str, rendered: str) -> str:
-    """Put a restored book name in the case the preposition before it governs."""
+    """Put a restored book name in the case the word before it governs."""
     found = _RU_WORD_BEFORE.search(before)
-    case = _RU_PREPOSITION_CASE.get(found.group(1).lower()) if found else None
+    case = _russian_case_before(found.group(1)) if found else None
     if not case:
         return rendered
     words = rendered.split(" ")
