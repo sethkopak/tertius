@@ -345,9 +345,51 @@ def test_a_name_after_anything_else_stays_nominative(masked):
     assert "Книга Иова 3:16" in _ru("Job 3:16.", masked)
 
 
-def test_an_ambiguous_preposition_is_left_alone():
-    # `на` is location or direction; a wrong case is no better than none.
-    assert "на Послание к Римлянам" in _ru("Look at Romans 8:28.", "Посмотрите на @0@.")
+@pytest.mark.parametrize(
+    "sentence, masked, expected",
+    [
+        # на -> accusative: a direction or an object. The model's own wording,
+        # probed 2026-09-29.
+        ("Look at Job 3:16.", "Посмотрите на @0@.", "Посмотрите на Книгу Иова 3:16."),
+        ("Pay attention to Job 3:16.", "Обратите внимание на @0@.",
+         "Обратите внимание на Книгу Иова 3:16."),
+        ("Jesus points to Isaiah 61:1.", "Иисус указывает на @0@ в синагоге.",
+         "Иисус указывает на Книгу пророка Исаии 61:1 в синагоге."),
+        ("The apostle relies on Genesis 15:6.", "Апостол полагается на @0@.",
+         "Апостол полагается на Книгу Бытия 15:6."),
+        # на -> prepositional: "based on", "focus on", open *at* a place - and
+        # the verb can be two words back.
+        ("Based on Matthew 5:3.", "Этот урок основан на @0@.",
+         "Этот урок основан на Евангелии от Матфея 5:3."),
+        ("Focus on Job 3:16.", "Сосредоточьтесь на @0@.",
+         "Сосредоточьтесь на Книге Иова 3:16."),
+        ("Open your Bible to Psalm 23:1.", "Откройте свою Библию на @0@.",
+         "Откройте свою Библию на Псалтири 23:1."),
+        # за: "follows" and "stands behind" are instrumental, "thanks for"
+        # accusative.
+        ("Leviticus follows Exodus 40:38.", "Левит следует за @0@.",
+         "Левит следует за Книгой Исход 40:38."),
+        ("This stands behind Job 3:16.", "Это обещание стоит за @0@.",
+         "Это обещание стоит за Книгой Иова 3:16."),
+        ("Thank God for Job 3:16.", "Слава Богу за @0@.",
+         "Слава Богу за Книгу Иова 3:16."),
+        # под: "falls under" accusative, "stand under" instrumental.
+        ("Everything falls under Romans 13:1.", "Все подпадает под @0@.",
+         "Все подпадает под Послание к Римлянам 13:1."),
+        ("We stand under Psalm 91:1.", "Мы стоим под @0@ для защиты.",
+         "Мы стоим под Псалтирью 91:1 для защиты."),
+    ],
+)
+def test_na_za_and_pod_take_the_case_their_verb_gives_them(sentence, masked, expected):
+    assert _ru(sentence, masked) == expected
+
+
+def test_za_and_pod_after_an_unknown_verb_stay_nominative():
+    """Both have two cases and no safe default. `Закон был принят под @0@` is
+    what the model wrote for "given under" - a garbled line with no case to
+    infer - so the table's own form stands."""
+    assert "под Книга Исход 20:1" in _ru("Given under Exodus 20:1.", "Закон был принят под @0@.")
+    assert "за Книга Иова 3:16" in _ru("Job 3:16.", "Он пришёл за @0@.")
 
 
 def test_other_languages_are_not_declined():

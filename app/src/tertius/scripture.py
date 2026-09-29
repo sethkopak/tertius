@@ -451,11 +451,10 @@ _RU_NUMBERED = {
     "е": ("го", "му", "е", "м", "м"),  # neuter: 1-е послание
     "я": ("й", "й", "ю", "й", "й"),  # feminine: 1-я (книга) Паралипоменон
 }
-# The case each preposition takes before a book. Only the unambiguous ones: `на`
-# is location (prepositional) or direction (accusative), `за` and `под` the
-# same, and a wrong case is no better than the nominative, so those are left.
-# `с` is taken as "with" (instrumental) rather than "from" (genitive): with a
-# book it is nearly always "compare with", "agrees with".
+# The case each preposition takes before a book - the ones whose case does not
+# depend on the verb. `на`, `за` and `под` do, and are read with the verb in
+# `_RU_TWO_CASE` below. `с` is taken as "with" (instrumental) rather than "from"
+# (genitive): with a book it is nearly always "compare with", "agrees with".
 _RU_PREPOSITION_CASE = {
     **dict.fromkeys(("в", "во", "о", "об", "обо", "при"), "prep"),
     **dict.fromkeys(("из", "от", "до", "у", "для", "без", "после", "около", "из-за", "среди"), "gen"),
@@ -485,9 +484,54 @@ _RU_VERBAL_NOUN = re.compile(r"(?:ени|ани|ти)(?:е|я|ю|ем|и|й|ям
 _RU_REFLEXIVE = re.compile(r"(?:ся|сь)$")
 
 
-def _russian_case_before(word: str) -> str | None:
-    """The case a book takes after `word`, or None to leave it nominative."""
+# на, за and под each take two cases, and the verb decides which - so for these
+# three the words before the preposition are read too. Every stem here is one
+# the hosted model actually wrote in front of the preposition when probed on
+# 2026-09-29, with the case Russian gives it:
+#
+#   на   посмотрите/обратите внимание/указывает/полагается/рассчитывать на
+#        -> accusative (a direction or an object: "look at", "rely on"), which
+#        is also the default; основан/сосредоточьтесь/откройте Библию на
+#        -> prepositional ("based on", "focus on", open *at* a place).
+#   за   следует/стоит за -> instrumental ("follows", "stands behind");
+#        слава Богу за -> accusative ("thanks for"). No default.
+#   под  подпадает под -> accusative ("falls under"); стоим под ->
+#        instrumental ("stand under"). No default.
+#
+# A за or под whose verb is not recognized is left in the nominative: a wrong
+# case is no better than the table's own form.
+_RU_TWO_CASE = {
+    "на": (("prep", ("основан", "основыва", "базир", "построен", "сосредоточ", "откр", "останов")), "acc"),
+    "за": (("acc", ("благодар", "спасибо", "слава", "хвал")), ("ins", ("след", "стои", "стоя", "скрыва"))),
+    "под": (("acc", ("подпада", "попада", "подпаст", "попаст")), ("ins", ("стои", "стоя", "наход", "жив"))),
+}
+# How far back to look for the verb: `Откройте свою Библию на` puts two words
+# between the verb and the preposition.
+_RU_VERB_WINDOW = 3
+
+
+def _russian_two_case(preposition: str, earlier: Sequence[str]) -> str | None:
+    """The case after на/за/под, read from the words before it."""
+    first, second = _RU_TWO_CASE[preposition]
+    stems_by_case = [first] + ([second] if isinstance(second, tuple) else [])
+    for word in reversed(earlier[-_RU_VERB_WINDOW:]):
+        word = word.lower()
+        for case, stems in stems_by_case:
+            if word.startswith(stems):
+                return case
+    # Only на has a default; see the table above.
+    return second if isinstance(second, str) else None
+
+
+def _russian_case_before(word: str, earlier: Sequence[str] = ()) -> str | None:
+    """The case a book takes after `word`, or None to leave it nominative.
+
+    `earlier` are the words before `word`, for the prepositions whose case
+    depends on the verb.
+    """
     word = word.lower()
+    if word in _RU_TWO_CASE:
+        return _russian_two_case(word, earlier)
     case = _RU_PREPOSITION_CASE.get(word)
     if case:
         return case
@@ -516,7 +560,8 @@ def _decline_ru_word(word: str, case: str) -> str | None:
 def _after_russian_preposition(before: str, rendered: str) -> str:
     """Put a restored book name in the case the word before it governs."""
     found = _RU_WORD_BEFORE.search(before)
-    case = _russian_case_before(found.group(1)) if found else None
+    earlier = re.findall(r"[а-яёА-ЯЁ-]+", before[: found.start(1)]) if found else []
+    case = _russian_case_before(found.group(1), earlier) if found else None
     if not case:
         return rendered
     words = rendered.split(" ")
