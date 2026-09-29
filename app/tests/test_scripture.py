@@ -348,7 +348,13 @@ def test_the_fetcher_asks_for_the_languages_the_translator_supports():
 
     from tertius.translate import supported_target_languages
 
-    assert set(fetch_book_names.LANGUAGES) == set(
-        supported_target_languages("m2m100-418M")
-    )
     assert len(fetch_book_names.BOOKS) == 66
+
+    # The translator's list is read from the converted model's vocabulary, and
+    # is empty until a model has been converted - which it never has been on a
+    # CI runner. Compared against that empty set this failed on every platform
+    # from 2026-09-21 while passing on the one machine with a model on it.
+    supported = supported_target_languages("m2m100-418M")
+    if not supported:
+        pytest.skip("m2m100-418M is not converted here, so it has no language list")
+    assert set(fetch_book_names.LANGUAGES) == set(supported)

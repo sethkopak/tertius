@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-09-22
+Last updated: 2026-09-29
 
 ## Where it stands
 
@@ -10,8 +10,20 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**558 tests, all passing**, on Windows locally and on ubuntu/macOS/Windows in
-CI. Whisper is mocked throughout, and so are the translator and the speech
+**558 tests, all passing** on Windows locally. In CI one of them skips.
+
+> Corrected 2026-09-29. This said all 558 passed on ubuntu/macOS/Windows in CI
+> too. CI had been **red on every platform since `5ef33ea` (2026-09-21)**, all
+> seven jobs, on one test:
+> `test_the_fetcher_asks_for_the_languages_the_translator_supports`. It
+> compared the book-name fetcher's languages against the translator's, and the
+> translator reads its list from a *converted* model's vocabulary - empty on a
+> runner that has never converted one. It passed here because this machine
+> has. It now skips when there is no vocabulary to compare with, and still
+> checks the book count either way. Found when Tertius Online vendored the
+> package and its CI went red with it.
+
+Whisper is mocked throughout, and so are the translator and the speech
 model — the suite downloads nothing, decodes no audio, generates no audio and
 converts no checkpoints, which is what makes it safe to run on a hosted
 runner.
