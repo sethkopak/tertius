@@ -861,8 +861,10 @@ for a transcript of something somebody actually said.
 
 ### The torch problem, and it is a real one
 
-Speaking needs `torch` as its **runtime**, and on a GPU it is perhaps twenty
-times faster than on a CPU. Translating needs `torch` too, but only to *convert*
+Speaking needs `torch` as its **runtime**, and on a GPU it is several times
+faster than on a CPU - on the one machine measured, an RTX 2060 read at 0.51x
+realtime and four threads of its i7-8750H at 0.116x, about 4.4 times slower.
+Your hardware will give a different ratio. Translating needs `torch` too, but only to *convert*
 a model once, so it deliberately installs the **CPU-only** build — a 126 MB
 download instead of 2.5 GB.
 

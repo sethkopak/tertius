@@ -117,7 +117,9 @@ CHATTERBOX_DEPENDENCIES = (
 #
 # This is the opposite of the translation installer, which always takes the CPU
 # build because conversion never runs a model. Here the model runs, and on the
-# CPU it runs perhaps twenty times slower. The two share one virtual
+# CPU it runs several times slower - measured on 2026-09-29 at 0.116x realtime
+# on four threads of an i7-8750H, against 0.51x on an RTX 2060, so about 4.4x.
+# The two share one virtual
 # environment and therefore one torch, so whichever installs first decides -
 # which is why `torch_install_problem` exists to say so out loud rather than
 # let someone sit through a CPU synthesis wondering why their GPU is idle.
@@ -678,8 +680,9 @@ def torch_install_problem() -> str | None:
     CPU-only build deliberately - conversion never runs a model, and the CUDA
     build is ten times the download. Whichever feature installs first wins. A
     machine that translated before it ever spoke therefore has a CPU torch and
-    a perfectly good GPU, and synthesis will run perhaps twenty times slower
-    with nothing anywhere saying why. This is that thing saying why.
+    a perfectly good GPU, and synthesis will run several times slower - about
+    4.4x, measured on four CPU threads against an RTX 2060 - with nothing
+    anywhere saying why. This is that thing saying why.
     """
     try:
         import torch

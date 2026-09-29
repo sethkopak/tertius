@@ -46,8 +46,9 @@ translate = [
 # The two extras therefore want *different builds of the same package*, and one
 # virtual environment holds one torch. `translate` deliberately takes the
 # CPU-only wheel, because conversion never runs a model and the CUDA build is
-# ten times the download; speaking on that wheel works and is perhaps twenty
-# times slower. Whichever is installed first wins, so `tertius.speech`
+# ten times the download; speaking on that wheel works and is several times
+# slower (about 4.4x, measured on four CPU threads against an RTX 2060 on
+# 2026-09-29). Whichever is installed first wins, so `tertius.speech`
 # checks for exactly that case and says so rather than letting someone sit
 # through a CPU synthesis wondering why the GPU is idle. Installing this extra
 # through pip does not choose an index; the Download and prepare button does.

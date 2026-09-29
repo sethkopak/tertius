@@ -430,7 +430,7 @@ class JobManager:
             # Both, not one or the other. The model really is ready, and the
             # GPU really will not be used; saying only the second reads as a
             # failure, and saying only the first hides the reason a reading is
-            # about to take twenty times as long as it should.
+            # about to take several times as long as it should.
             self._notice = "\n\n".join([ready, problem]) if problem else ready
 
     # ---------------------------------------------------------- job lifecycle
