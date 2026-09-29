@@ -465,13 +465,68 @@ def protect(texts: Sequence[str]) -> tuple[list[str], list[list[str]]]:
     return masked, taken
 
 
+# A masked source that ends on a citation and then its sentence's stop:
+# `Compare @0@ with @1@.` The stop is captured; anything after it (a closing
+# quote or bracket) is allowed but not carried over.
+_ENDS_ON_CITATION = re.compile(r"@\d+@([.!?…]+)[\"'”’)\]]*\s*$")
+# A translation that ends on a bare placeholder, with nothing after it.
+_ENDS_ON_PLACEHOLDER = re.compile(r"@\d+@\s*$")
+
+# Where a language writes its sentence stop differently. The same scripts
+# `alignment._SENTENCE_END` splits on - anything not here gets the source's own
+# stop, which is what the model writes for the rest.
+_STOPS = {
+    "zh": {".": "。", "!": "！", "?": "？"},
+    "ja": {".": "。", "!": "！", "?": "？"},
+    "ar": {"?": "؟"},
+    "fa": {"?": "؟"},
+    "ur": {".": "۔", "?": "؟"},
+    "hi": {".": "।"},
+    "mr": {".": "।"},
+    "ne": {".": "।"},
+    "bn": {".": "।"},
+    "hy": {".": "։"},
+}
+
+
+def keep_final_stop(source: str, translated: str, language: str | None = None) -> str:
+    """Put back a sentence's full stop when the model dropped it after a citation.
+
+    Measured on the hosted m2m100 on 2026-09-29: `Compare @0@ with @1@.` came
+    back as `Сравнить @0@ с @1@`, and the same in Spanish and Hebrew - the stop
+    straight after the last placeholder is dropped, and a `.txt` meant to be one
+    sentence per line gets a line with no ending. Both arguments are *masked*
+    text: this runs before `restore`, while the placeholder still marks where
+    the citation sits.
+
+    Deliberately narrow. Only when the source ends citation-then-stop and the
+    translation ends on the bare placeholder: a model that rephrased and ended
+    the sentence another way has made its own choice, and is left alone.
+    """
+    wanted = _ENDS_ON_CITATION.search(source or "")
+    if not wanted or not _ENDS_ON_PLACEHOLDER.search(translated or ""):
+        return translated
+    stop = wanted.group(1)
+    table = _STOPS.get((language or "").lower(), {})
+    stop = "".join(table.get(ch, ch) for ch in stop)
+    return translated.rstrip() + stop
+
+
 def unprotect(
     texts: Sequence[str],
     taken: Sequence[Sequence[str]],
     language: str | None = None,
+    sources: Sequence[str] | None = None,
 ) -> list[str]:
-    """Undo `protect`, text by text, naming the books in `language`."""
-    return [
-        restore(text, refs, language=language) if refs else text
-        for text, refs in zip(texts, taken)
-    ]
+    """Undo `protect`, text by text, naming the books in `language`.
+
+    `sources` are the masked texts that were translated, one per text. Given,
+    a stop the model dropped after a closing citation is put back first - see
+    `keep_final_stop`.
+    """
+    out = []
+    for i, (text, refs) in enumerate(zip(texts, taken)):
+        if refs and sources is not None and i < len(sources):
+            text = keep_final_stop(sources[i], text, language)
+        out.append(restore(text, refs, language=language) if refs else text)
+    return out

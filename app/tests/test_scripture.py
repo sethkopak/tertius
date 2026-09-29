@@ -18,6 +18,7 @@ from tertius.scripture import (
     PLACEHOLDER,
     find_references,
     is_only_reference,
+    keep_final_stop,
     mask,
     protect,
     restore,
@@ -146,6 +147,67 @@ def test_a_batch_is_masked_and_restored_text_by_text():
     assert PLACEHOLDER.format(0) in masked[0]
     assert PLACEHOLDER.format(0) in masked[2]
     assert unprotect(masked, taken) == texts
+
+
+# ------------------------------------------------ the stop after a last citation
+#
+# Seen on the hosted m2m100 on 2026-09-29, in Russian, Spanish and Hebrew: a
+# sentence ending on a citation came back with its full stop gone.
+
+
+def test_a_stop_dropped_after_the_last_citation_is_put_back():
+    masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
+    assert masked == "Compare @0@ with @1@."
+    # What the model actually returned, word for word.
+    [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru", sources=[masked])
+    assert out == "Сравнить Книга Иова 3:16 с Плач Иеремии 3:22."
+
+
+def test_a_stop_the_model_kept_is_not_doubled():
+    masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
+    [out] = unprotect(["Compare @0@ con @1@."], [refs], "es", sources=[masked])
+    assert out.endswith("3:22.") and not out.endswith("..")
+
+
+@pytest.mark.parametrize(
+    "language, source_end, expected_end",
+    [
+        ("zh", ".", "。"),
+        ("ja", "?", "？"),
+        ("hi", ".", "।"),
+        ("ar", "?", "؟"),
+        ("ru", "!", "!"),
+        ("es", "?", "?"),
+    ],
+)
+def test_the_stop_put_back_is_the_target_languages_own(language, source_end, expected_end):
+    source = f"Compare @0@ with @1@{source_end}"
+    assert keep_final_stop(source, "X @0@ Y @1@", language).endswith(expected_end)
+
+
+def test_a_rephrased_ending_is_left_alone():
+    """The model moved the citation and ended the sentence its own way.
+
+    That is a choice, not a dropped stop, and guessing a stop onto it could put
+    a period in the middle of a sentence that merely lacks one at the end."""
+    source = "Compare @0@ with @1@."
+    assert keep_final_stop(source, "Compare @1@ and @0@ closely", "en") == "Compare @1@ and @0@ closely"
+
+
+def test_a_source_that_does_not_end_on_a_citation_is_left_alone():
+    source = "See @0@ for this."
+    assert keep_final_stop(source, "Voir @0@", "fr") == "Voir @0@"
+
+
+def test_a_closing_quote_after_the_stop_does_not_stop_the_repair():
+    source = "He said, “Read @0@.”"
+    assert keep_final_stop(source, "Il a dit : « Lisez @0@", "fr") == "Il a dit : « Lisez @0@."
+
+
+def test_without_sources_unprotect_behaves_exactly_as_before():
+    masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
+    [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru")
+    assert out == "Сравнить Книга Иова 3:16 с Плач Иеремии 3:22"
 
 
 # ------------------------------------------------------- the bare-citation case

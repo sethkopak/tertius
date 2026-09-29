@@ -640,7 +640,10 @@ class Translator:
                 rendered = adapter.decode(result.hypotheses[0]).strip()
                 if references is not None:
                     rendered = unprotect(
-                        [rendered], [references[start + offset]], target_language
+                        [rendered],
+                        [references[start + offset]],
+                        target_language,
+                        sources=[prepared[start + offset]],
                     )[0]
                 out[index] = rendered
             done += len(chunk)
