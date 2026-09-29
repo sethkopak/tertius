@@ -420,6 +420,88 @@ def _after_hebrew_prefix(before: str, rendered: str) -> str:
     return rendered
 
 
+# Russian declines the book's name after a preposition, and the table gives the
+# nominative: the model writes `в @0@` ("in") and put back that read
+# `в Псалтирь` where Russian needs `в Псалтири` (seen 2026-09-29).
+#
+# Only the leading words of a label ever change - the head noun, and an ordinal
+# in front of it; everything after (`пророка Исаии`, `к Римлянам`) is already a
+# fixed genitive or phrase. So this is a table of those words rather than a
+# morphology library: twelve of them cover all 66 labels (checked 2026-09-29).
+# Forms in the order genitive, dative, accusative, instrumental, prepositional.
+_RU_CASES = ("gen", "dat", "acc", "ins", "prep")
+_RU_FORMS = {
+    "книга": ("книги", "книге", "книгу", "книгой", "книге"),
+    "послание": ("послания", "посланию", "послание", "посланием", "послании"),
+    "евангелие": ("евангелия", "евангелию", "евангелие", "евангелием", "евангелии"),
+    "второзаконие": ("второзакония", "второзаконию", "второзаконие", "второзаконием", "второзаконии"),
+    "откровение": ("откровения", "откровению", "откровение", "откровением", "откровении"),
+    "псалтирь": ("псалтири", "псалтири", "псалтирь", "псалтирью", "псалтири"),
+    "песнь": ("песни", "песни", "песнь", "песнью", "песни"),
+    "плач": ("плача", "плачу", "плач", "плачем", "плаче"),
+    "деяния": ("деяний", "деяниям", "деяния", "деяниями", "деяниях"),
+    "первая": ("первой", "первой", "первую", "первой", "первой"),
+    "вторая": ("второй", "второй", "вторую", "второй", "второй"),
+    "третья": ("третьей", "третьей", "третью", "третьей", "третьей"),
+    "четвёртая": ("четвёртой", "четвёртой", "четвёртую", "четвёртой", "четвёртой"),
+}
+# `1-е послание`, `1-я Паралипоменон`: the ordinal is a digit with its ending,
+# and it is the ending that declines.
+_RU_NUMBERED = {
+    "е": ("го", "му", "е", "м", "м"),  # neuter: 1-е послание
+    "я": ("й", "й", "ю", "й", "й"),  # feminine: 1-я (книга) Паралипоменон
+}
+# The case each preposition takes before a book. Only the unambiguous ones: `на`
+# is location (prepositional) or direction (accusative), `за` and `под` the
+# same, and a wrong case is no better than the nominative, so those are left.
+# `с` is taken as "with" (instrumental) rather than "from" (genitive): with a
+# book it is nearly always "compare with", "agrees with".
+_RU_PREPOSITION_CASE = {
+    **dict.fromkeys(("в", "во", "о", "об", "обо", "при"), "prep"),
+    **dict.fromkeys(("из", "от", "до", "у", "для", "без", "после", "около", "из-за", "среди"), "gen"),
+    **dict.fromkeys(("к", "ко", "по"), "dat"),
+    **dict.fromkeys(("с", "со", "над", "перед", "между"), "ins"),
+    **dict.fromkeys(("про", "через"), "acc"),
+}
+_RU_WORD_BEFORE = re.compile(r"(?:^|[^а-яёА-ЯЁ-])([а-яёА-ЯЁ-]+)\s+$")
+
+
+def _decline_ru_word(word: str, case: str) -> str | None:
+    """One word in `case`, keeping its capital; None if the table does not know it."""
+    i = _RU_CASES.index(case)
+    numbered = re.fullmatch(r"(\d+)-([ея])", word)
+    if numbered:
+        return f"{numbered.group(1)}-{_RU_NUMBERED[numbered.group(2)][i]}"
+    forms = _RU_FORMS.get(word.lower())
+    if not forms:
+        return None
+    form = forms[i]
+    return form[:1].upper() + form[1:] if word[:1].isupper() else form
+
+
+def _after_russian_preposition(before: str, rendered: str) -> str:
+    """Put a restored book name in the case the preposition before it governs."""
+    found = _RU_WORD_BEFORE.search(before)
+    case = _RU_PREPOSITION_CASE.get(found.group(1).lower()) if found else None
+    if not case:
+        return rendered
+    words = rendered.split(" ")
+    first = _decline_ru_word(words[0], case)
+    if first is None:
+        # Not a name from the table - an English one it could not give, say.
+        return rendered
+    words[0] = first
+    # An ordinal carries its noun with it: `Первой книге`, `1-м послании`.
+    ordinal = words[0][:1].isdigit() or words[0].lower() in {
+        _RU_FORMS[k][_RU_CASES.index(case)] for k in ("первая", "вторая", "третья", "четвёртая")
+    }
+    if ordinal and len(words) > 1:
+        second = _decline_ru_word(words[1], case)
+        if second is not None:
+            words[1] = second
+    return " ".join(words)
+
+
 def restore(
     text: str,
     references: Sequence[str],
@@ -442,6 +524,7 @@ def restore(
         return (localize(reference, language) or reference) if language else reference
 
     hebrew = (language or "").lower() == "he"
+    russian = (language or "").lower() == "ru"
     if hebrew:
         # `ב @0@` -> `ב@0@`: the prefix is joined before anything is put back,
         # so `put_back` can see it and fit the name to it.
@@ -456,6 +539,8 @@ def restore(
             rendered = render(references[index])
             if hebrew:
                 rendered = _after_hebrew_prefix(match.string[: match.start()], rendered)
+            elif russian:
+                rendered = _after_russian_preposition(match.string[: match.start()], rendered)
             return rendered
         return match.group(0)
 

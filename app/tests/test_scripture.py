@@ -160,7 +160,7 @@ def test_a_stop_dropped_after_the_last_citation_is_put_back():
     assert masked == "Compare @0@ with @1@."
     # What the model actually returned, word for word.
     [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru", sources=[masked])
-    assert out == "Сравнить Книга Иова 3:16 с Плач Иеремии 3:22."
+    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22."
 
 
 def test_a_stop_the_model_kept_is_not_doubled():
@@ -261,10 +261,71 @@ def test_other_languages_are_not_touched_by_the_hebrew_rule():
     assert restore("Mira b @0@.", refs, language="es").startswith("Mira b ")
 
 
+# ------------------------------------------------ Russian cases after prepositions
+#
+# Seen on the hosted m2m100 on 2026-09-29: `in @0@` came back `в @0@`, which put
+# back read `в Псалтирь` - the table's nominative where Russian needs `в Псалтири`.
+
+
+def _ru(sentence: str, masked_translation: str) -> str:
+    _masked, refs = mask(sentence)
+    return restore(masked_translation, refs, language="ru")
+
+
+def test_in_takes_the_prepositional():
+    # The model's own output, word for word.
+    out = _ru(
+        "As we read in Psalm 66:8, 9, the Lord holds our soul in life.",
+        "Как мы читаем в @0@, Господь держит нашу душу в живых.",
+    )
+    assert "читаем в Псалтири 66:8,9," in out
+
+
+@pytest.mark.parametrize(
+    "sentence, masked, expected",
+    [
+        # Only the head noun declines; the fixed part after it does not.
+        ("In Job 3:16.", "В @0@.", "В Книге Иова 3:16."),
+        ("In Romans 8:28.", "В @0@.", "В Послании к Римлянам 8:28."),
+        ("From Matthew 5:3.", "Из @0@.", "Из Евангелия от Матфея 5:3."),
+        ("To Romans 8:28.", "К @0@.", "К Посланию к Римлянам 8:28."),
+        ("With Lamentations 3:22.", "С @0@.", "С Плачем Иеремии 3:22."),
+        ("In Revelation 1:1.", "В @0@.", "В Откровении Иоанна Богослова 1:1."),
+        ("In Acts 2:4.", "В @0@.", "В Деяниях святых апостолов 2:4."),
+        ("In Ruth 1:16.", "В @0@.", "В Книге Руфь 1:16."),
+        # An ordinal declines with its noun.
+        ("In 1 Kings 3:5.", "В @0@.", "В Третьей книге Царств 3:5."),
+        ("In 1 Corinthians 13:4.", "В @0@.", "В 1-м послании к Коринфянам 13:4."),
+        ("From 1 Corinthians 13:4.", "Из @0@.", "Из 1-го послания к Коринфянам 13:4."),
+        ("In 1 Chronicles 16:34.", "В @0@.", "В 1-й Паралипоменон 16:34."),
+    ],
+)
+def test_the_book_takes_the_case_its_preposition_governs(sentence, masked, expected):
+    assert _ru(sentence, masked) == expected
+
+
+def test_without_a_preposition_the_name_is_left_in_the_nominative():
+    """`Сравнить Книга Иова` wants the accusative, but that depends on the verb,
+    not a preposition, and guessing a verb's case is not something a table can
+    do. Left as the table gives it."""
+    out = _ru("Compare Job 3:16 with Lamentations 3:22.", "Сравнить @0@ с @1@.")
+    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22."
+
+
+def test_an_ambiguous_preposition_is_left_alone():
+    # `на` is location or direction; a wrong case is no better than none.
+    assert "на Послание к Римлянам" in _ru("Look at Romans 8:28.", "Посмотрите на @0@.")
+
+
+def test_other_languages_are_not_declined():
+    _masked, refs = mask("In Psalm 23:1.")
+    assert "Salmos" in restore("En @0@.", refs, language="es")
+
+
 def test_without_sources_unprotect_behaves_exactly_as_before():
     masked, refs = mask("Compare Job 3:16 with Lamentations 3:22.")
     [out] = unprotect(["Сравнить @0@ с @1@"], [refs], "ru")
-    assert out == "Сравнить Книга Иова 3:16 с Плач Иеремии 3:22"
+    assert out == "Сравнить Книга Иова 3:16 с Плачем Иеремии 3:22"
 
 
 # ------------------------------------------------------- the bare-citation case
@@ -388,8 +449,10 @@ def test_english_is_left_alone_and_an_unknown_language_falls_back():
 
 def test_restoring_names_the_book_when_a_language_is_given():
     _masked, refs = mask("We read in Psa. 46:10 that it is so.")
+    # `в Псалтири`, prepositional after `в` - this said `в Псалтирь` until the
+    # case was fixed on 2026-09-29, pinning the bug as the expected answer.
     assert restore("Мы читаем в @0@, что это так.", refs, language="ru") == (
-        "Мы читаем в Псалтирь 46:10, что это так."
+        "Мы читаем в Псалтири 46:10, что это так."
     )
     # Without a language, exactly as before.
     assert "Psa. 46:10" in restore("... @0@ ...", refs)
