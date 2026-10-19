@@ -102,6 +102,15 @@ CONVERTER_WRITES = frozenset(
 # names no `tokenizer_class` for it to fall back on.
 TOKENIZER_CLASSES = {"m2m100": "M2M100Tokenizer", "t5": "T5Tokenizer"}
 
+# Written beside `model.bin` once a conversion completes, saying which recipe
+# made it. A T5 conversion made before recipe 2 is garbage - see
+# `_load_t5_faithfully` - and `is_converted` refuses it, so the next run
+# converts again instead of loading it. M2M-100 conversions never needed the
+# fix and are accepted without a marker.
+CONVERSION_MARKER = "tertius-conversion.json"
+CONVERSION_RECIPE = 2
+MIN_RECIPE = {"m2m100": 0, "t5": 2}
+
 
 class TranslationUnavailableError(RuntimeError):
     """Translation was asked for but the machine cannot do it yet.
@@ -135,10 +144,21 @@ def is_converted(model_key: str) -> bool:
     directory = converted_dir(model_key)
     if not (directory / "model.bin").is_file():
         return False
+    if conversion_recipe(directory) < MIN_RECIPE[TRANSLATION_MODELS[model_key]["family"]]:
+        return False
     return any(
         (directory / name).is_file()
         for name in ("tokenizer.json", "sentencepiece.bpe.model", "spiece.model")
     )
+
+
+def conversion_recipe(directory: Path) -> int:
+    """Which recipe converted the model in `directory`; 0 if it does not say."""
+    try:
+        with open(directory / CONVERSION_MARKER, encoding="utf-8") as handle:
+            return int(json.load(handle).get("recipe", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
 
 
 # Answers are cached because the vocabulary is a few megabytes of JSON and the
@@ -305,6 +325,66 @@ def _require(module: str, extra: str) -> None:
         ) from exc
 
 
+def _load_t5_faithfully(model_class, path, **kwargs):
+    """Load a T5 checkpoint the way it was saved, for conversion.
+
+    transformers 5 gets `google/madlad400-3b-mt` wrong twice, silently, and
+    CTranslate2's converter inherits both because it loads through it:
+
+    1. It reports `tie_word_embeddings=True` although the checkpoint's own
+       `config.json` says false. CTranslate2 then scales the decoder output by
+       d_model^-0.5 before an output layer that was never trained for it.
+    2. T5 has one input embedding shared by encoder and decoder. MADLAD stores
+       it once, as `decoder.embed_tokens.weight`, and transformers 5 leaves
+       `shared` - which the encoder reads - randomly initialised.
+
+    The converted model loaded, ran and wrote fluent-looking nonsense in the
+    right script (`niet meer nee nee`, `♪♪♪`, rows of dates), with no error
+    anywhere. Measured 2026-10-19: with both put right the plain PyTorch model
+    translates correctly into Russian, Hebrew and Chinese, and with either one
+    alone it does not.
+    """
+    import torch
+
+    stated = json.loads((Path(path) / "config.json").read_text(encoding="utf-8"))
+    tie = bool(stated.get("tie_word_embeddings", True))
+    # The converter hands over a config it has already loaded; with one
+    # present, a keyword would be passed on to the model's constructor instead.
+    if kwargs.get("config") is not None:
+        kwargs["config"].tie_word_embeddings = tie
+    else:
+        kwargs["tie_word_embeddings"] = tie
+    model = model_class.from_pretrained(path, **kwargs)
+    if model.config.tie_word_embeddings != tie:
+        raise RuntimeError(
+            f"could not load {path} with tie_word_embeddings={tie}; converting "
+            "it anyway would produce a model that writes nonsense"
+        )
+
+    saved = _checkpoint_keys(Path(path))
+    names = ("shared.weight", "encoder.embed_tokens.weight", "decoder.embed_tokens.weight")
+    found = next((name for name in names if name in saved), None)
+    if found is not None:
+        params = dict(model.named_parameters(remove_duplicate=False))
+        with torch.no_grad():
+            for name in names:
+                if name != found and name in params:
+                    params[name].copy_(params[found])
+        log.info("T5 input embedding taken from %s for every copy of it", found)
+    return model
+
+
+def _checkpoint_keys(directory: Path) -> set[str]:
+    """Tensor names actually present in a safetensors checkpoint."""
+    from safetensors import safe_open
+
+    keys: set[str] = set()
+    for file in sorted(directory.glob("*.safetensors")):
+        with safe_open(str(file), "pt") as handle:
+            keys.update(handle.keys())
+    return keys
+
+
 def ensure_translation_model(
     model_key: str,
     on_progress: Callable[[int, int], None] | None = None,
@@ -357,13 +437,27 @@ def ensure_translation_model(
         and (Path(source) / name).is_file()
     ]
     log.info("converting %s to CTranslate2 (%s)", model_key, QUANTIZATION)
+    converter_class = TransformersConverter
+    if entry["family"] == "t5":
+
+        class _FaithfulT5Converter(TransformersConverter):
+            def load_model(self, model_class, model_name_or_path, **kwargs):
+                return _load_t5_faithfully(model_class, model_name_or_path, **kwargs)
+
+        converter_class = _FaithfulT5Converter
     try:
-        converter = TransformersConverter(source, copy_files=copy_files)
+        converter = converter_class(source, copy_files=copy_files)
         converter.convert(str(scratch), quantization=QUANTIZATION, force=True)
+        (scratch / CONVERSION_MARKER).write_text(
+            json.dumps({"recipe": CONVERSION_RECIPE}), encoding="utf-8"
+        )
     except Exception:
         shutil.rmtree(scratch, ignore_errors=True)
         raise
 
+    # A refused conversion from an older recipe is still sitting in the way.
+    if target.exists():
+        shutil.rmtree(target)
     scratch.replace(target)
     forget_cached_languages()
     log.info("translation model ready: %s", target)

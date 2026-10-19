@@ -1292,3 +1292,71 @@ def test_the_page_has_an_info_button_for_the_translators(api):
     assert "btn-translation-info" in page
     assert "panel-translation-info" in page
     assert "translation-table" in page
+
+
+def test_a_madlad_conversion_from_before_the_fix_is_converted_again(monkeypatch, tmp_path):
+    """A T5 conversion made before recipe 2 loads, runs, and writes nonsense.
+
+    So it must not count as converted: the next run converts it again rather
+    than going on loading it. M2M-100 never needed the fix and keeps working
+    without a marker - see the test above.
+    """
+    from tertius.translate import CONVERSION_MARKER
+
+    monkeypatch.setattr("tertius.translate.cache_root", lambda: tmp_path)
+    directory = tmp_path / "madlad400-3B"
+    directory.mkdir(parents=True)
+    (directory / "model.bin").write_bytes(b"weights")
+    (directory / "spiece.model").write_bytes(b"tokenizer")
+    assert is_converted("madlad400-3B") is False
+    (directory / CONVERSION_MARKER).write_text('{"recipe": 1}', encoding="utf-8")
+    assert is_converted("madlad400-3B") is False
+    (directory / CONVERSION_MARKER).write_text('{"recipe": 2}', encoding="utf-8")
+    assert is_converted("madlad400-3B") is True
+
+
+@pytest.mark.parametrize("converter_passes_config", [True, False])
+def test_t5_is_loaded_for_conversion_the_way_it_was_saved(tmp_path, converter_passes_config):
+    """MADLAD's shape in miniature: untied output layer, embedding saved once.
+
+    transformers 5 reported `tie_word_embeddings=True` against the config file
+    and left the encoder's embedding random, and CTranslate2 converted exactly
+    that. Real madlad400-3B wrote `niet meer nee nee` until both were fixed.
+    """
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    from tertius.translate import _load_t5_faithfully
+
+    config = transformers.T5Config(
+        vocab_size=32, d_model=8, d_ff=16, d_kv=4, num_layers=1,
+        num_decoder_layers=1, num_heads=2, decoder_start_token_id=0,
+    )
+    model = transformers.T5ForConditionalGeneration(config)
+    state = {k: v.clone().contiguous() for k, v in model.state_dict().items()}
+    embedding = torch.randn(32, 8)
+    state["decoder.embed_tokens.weight"] = embedding
+    # As MADLAD ships: the shared embedding stored once, under the decoder.
+    state.pop("shared.weight", None)
+    state.pop("encoder.embed_tokens.weight", None)
+    config.save_pretrained(tmp_path)
+    # Written by hand: transformers 5's T5Config drops tie_word_embeddings=False
+    # given to its constructor, which is the first of the two bugs.
+    written = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    written["tie_word_embeddings"] = False
+    (tmp_path / "config.json").write_text(json.dumps(written), encoding="utf-8")
+    safetensors_torch.save_file(state, str(tmp_path / "model.safetensors"))
+
+    kwargs = (
+        {"config": transformers.AutoConfig.from_pretrained(tmp_path)}
+        if converter_passes_config
+        else {}
+    )
+    loaded = _load_t5_faithfully(
+        transformers.T5ForConditionalGeneration, str(tmp_path), **kwargs
+    )
+
+    assert loaded.config.tie_word_embeddings is False
+    assert torch.equal(loaded.encoder.embed_tokens.weight, embedding)
+    assert torch.equal(loaded.shared.weight, embedding)
+    assert torch.equal(loaded.decoder.embed_tokens.weight, embedding)
