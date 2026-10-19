@@ -583,34 +583,40 @@ class JobManager:
             )
 
     @staticmethod
-    def _free_gpu_for_speech(*models) -> None:
-        """Take the earlier stages off the GPU before the reading starts.
+    def _free_gpu(*models, purpose: str) -> None:
+        """Take models the next stage does not need off the GPU.
 
-        Measured on the 6 GB card this was built on:
+        On CUDA only the current stage's model is resident. Measured on the
+        6 GB card this was built on, each loaded alone:
 
         | model                   | VRAM    |
-        | whisper large-v3-turbo  | 2.23 GB |
+        | whisper large-v3-turbo  | 2.2 GB  |
         | m2m100-418M             | 0.27 GB |
-        | chatterbox-multilingual | 3.22 GB |
+        | madlad400-3B            | 3.5 GB  |
+        | chatterbox-multilingual | 3.2 GB  |
 
-        5.72 GB of models for a 6.44 GB card - of which a browser was already
-        holding a gigabyte. Reported as "CUDA out of memory. Tried to allocate
-        204.00 MiB" *after* the transcript and the translation had been written,
-        which is the worst moment for it: the expensive work was done and the
-        only thing missing was the thing the run was for.
+        Any two of the large ones overflow it once a browser holds its share.
+        Overflow first showed up as "CUDA out of memory" after the transcript
+        and translation were written. Since then the NVIDIA driver has also
+        learned to spill into system RAM instead of failing, which is worse:
+        on 2026-10-19 a job with all three loaded held 5.8 GB on the card and
+        5.4 GB in shared memory, and spoke at about a fifth of its usual speed
+        with nothing saying why.
 
-        Holding all three at once was never necessary. Nothing transcribes while
-        it reads aloud, and both Whisper and the translator reload themselves
-        when the next file needs them - `WhisperTranscriber.model` and
-        `Translator.translate` are both lazy. So this costs a model load per
-        file on a queue, and buys a feature that otherwise cannot run at all on
-        a small card.
+        Every model reloads itself when it is next used -
+        `WhisperTranscriber.model`, `Translator.translate` and `Speaker.speak`
+        are all lazy - so this costs a model load per stage per file (about 10,
+        17 and 23 s), and buys running at the speed the card can actually do.
+        On the CPU there is nothing to reclaim and a reload would cost real
+        time for nothing, so it does nothing there.
         """
         freed = []
         for model in models:
             if model is None:
                 continue
             if getattr(model, "active_device", None) != "cuda":
+                continue
+            if not getattr(model, "loaded", True):
                 continue
             unload = getattr(model, "unload", None)
             if callable(unload):
@@ -619,7 +625,7 @@ class JobManager:
         if not freed:
             return
         JobManager._empty_cuda_cache()
-        log.info("freed the GPU for the reading: %s", ", ".join(freed))
+        log.info("freed the GPU %s: %s", purpose, ", ".join(freed))
 
     @staticmethod
     def _empty_cuda_cache() -> None:
@@ -809,6 +815,12 @@ class JobManager:
 
                 entry = TRANSLATION_MODELS.get(options.translation_model) or {}
                 self._download["expected_bytes"] = entry.get("download_bytes")
+            # Each start-up load gets the card to itself. Memory the driver
+            # spills while two models overlap stays spilled after one of them
+            # is freed - measured: 5.4 GB still in system RAM after "freed the
+            # GPU for the reading" - so a brief overlap here would slow the
+            # whole run, not just the load.
+            self._free_gpu(transcriber, purpose="to load the translation model")
             try:
                 translator = self._translator_factory(
                     options.translation_model,
@@ -844,6 +856,7 @@ class JobManager:
 
                 entry = SPEECH_MODELS.get(options.speech_model) or {}
                 self._download["expected_bytes"] = entry.get("download_bytes")
+            self._free_gpu(transcriber, translator, purpose="to load the voice model")
             try:
                 speaker = self._speaker_factory(
                     options.speech_model,
@@ -865,6 +878,11 @@ class JobManager:
                 # out-of-memory failure actually takes.
                 self._empty_cuda_cache()
                 return
+
+        # They were loaded to prove they can be, not to sit on the card through
+        # a transcription that does not use them. Whisper reloads itself.
+        if needs_whisper:
+            self._free_gpu(translator, speaker, purpose="for the transcription")
 
         with self._lock:
             self._phase = TRANSCRIBING
@@ -1030,6 +1048,7 @@ class JobManager:
                         # continuation of the first.
                         self._active["progress"] = 0.0
                     try:
+                        self._free_gpu(transcriber, purpose="for the translation")
                         # One pass per language. The translator stays loaded
                         # across all of them, so the second language costs a
                         # translation rather than a model load.
@@ -1124,10 +1143,9 @@ class JobManager:
                         self._phase = SPEAKING
                         self._active["progress"] = 0.0
                     try:
-                        # Three models do not fit on a small card. Nothing
-                        # transcribes while it reads aloud, so the earlier
-                        # stages give their VRAM back first.
-                        self._free_gpu_for_speech(transcriber, translator)
+                        self._free_gpu(
+                            transcriber, translator, purpose="for the reading"
+                        )
                         spoken = []
                         for language in (
                             options.speech_languages

@@ -1058,6 +1058,11 @@ class Speaker:
             self._diacritizer = Diacritizer(device="cpu")
         return self._diacritizer
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the model is in memory now, rather than due to load on use."""
+        return self._model is not None
+
     def unload(self) -> None:
         self._model = None
         if self._diacritizer is not None:

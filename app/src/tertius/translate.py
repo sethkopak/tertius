@@ -749,6 +749,11 @@ class Translator:
                     log.debug("translation progress callback failed", exc_info=True)
         return out
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the model is in memory now, rather than due to load on use."""
+        return self._translator is not None
+
     def unload(self) -> None:
         self._translator = None
         self._adapter = None

@@ -443,26 +443,64 @@ def test_the_translator_s_own_line_breaks_are_the_sentences(tmp_path):
 # ------------------------------------------------------------- fitting on a card
 
 
-def test_the_earlier_stages_give_back_the_gpu_before_speaking(api, tmp_path):
-    """Three models do not fit on a 6 GB card, and the reading is the biggest.
+def test_only_the_working_stage_is_on_the_gpu(api, tmp_path, monkeypatch):
+    """No two of the big models are ever resident together on CUDA.
 
-    Measured: whisper large-v3-turbo 2.23 GB + m2m100-418M 0.27 GB +
-    chatterbox-multilingual 3.22 GB = 5.72 GB, on a 6.44 GB card with a browser
-    already holding a gigabyte. It failed with "CUDA out of memory" *after*
-    writing the transcript and the translation.
+    Measured, each alone: whisper large-v3-turbo 2.2 GB, madlad400-3B 3.5 GB,
+    chatterbox-multilingual 3.2 GB - any two overflow a 6 GB card. All three
+    used to be loaded before the first file and stay there through
+    transcription and translation; the driver spilled 5.4 GB into system RAM
+    and the reading ran at about a fifth of its speed, saying nothing.
     """
-    audio = _queue_audio(api, tmp_path)
+    from tests.fakes import FakeSpeaker, FakeTranscriber, FakeTranslator
 
+    seen = []
+
+    def resident():
+        return {
+            name
+            for name, model in (
+                ("whisper", api.tertius),
+                ("translator", api.translator),
+                ("speaker", api.speaker),
+            )
+            if model is not None and model.loaded
+        }
+
+    def watching(cls, method, name):
+        original = getattr(cls, method)
+
+        def wrapper(self, *args, **kwargs):
+            value = original(self, *args, **kwargs)
+            seen.append((name, resident()))
+            return value
+
+        monkeypatch.setattr(cls, method, wrapper)
+
+    # The start-up loads too: memory spilled while two models overlap stays
+    # spilled after one is freed, so a brief overlap there slows the run.
+    watching(FakeTranscriber, "warmup", "whisper")
+    watching(FakeTranscriber, "transcribe", "whisper")
+    watching(FakeTranslator, "load", "translator")
+    watching(FakeTranslator, "translate", "translator")
+    watching(FakeSpeaker, "load", "speaker")
+    watching(FakeSpeaker, "speak", "speaker")
+
+    _queue_audio(api, tmp_path)
     api.manager.start(
         output_dir=api.output_dir,
-        options={"translate": True, "target_languages": ["es"], "speak": True, "speech_languages": ["es"]},
+        options={
+            "translate": True,
+            "target_languages": ["es", "ru"],
+            "speak": True,
+            "speech_languages": ["es", "ru"],
+        },
     )
     api.wait_done()
 
-    # Twice each: once to make room for the reading, once when the batch ends.
-    # They reload themselves when the next file needs them.
-    assert api.tertius is not None and api.tertius.unloads == 2
-    assert api.translator is not None and api.translator.unloads == 2
+    assert {name for name, _ in seen} == {"whisper", "translator", "speaker"}
+    for name, loaded in seen:
+        assert loaded == {name}, (name, loaded)
 
 
 def test_the_card_is_released_when_the_batch_ends(api, tmp_path, monkeypatch):
@@ -488,8 +526,11 @@ def test_the_card_is_released_when_the_batch_ends(api, tmp_path, monkeypatch):
     )
     api.wait_done()
 
-    # Twice: once to make room for the reading, once when the batch ends.
-    assert len(calls) == 2, calls
+    # Whisper off before the translator's start-up load, the translator off
+    # before the voice model's, the voice model off before transcribing,
+    # Whisper off before translating, the translator off before reading, and
+    # once when the batch ends.
+    assert len(calls) == 6, calls
 
 
 def test_the_card_is_released_when_a_model_will_not_load(api, tmp_path, monkeypatch):

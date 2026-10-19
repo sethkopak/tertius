@@ -25,6 +25,9 @@ class FakeTranscriber:
         # ends, so a boolean cannot tell "freed for the reading" from
         # ordinary cleanup. Two unloads means it gave its VRAM back mid-run.
         self.unloads = 0
+        # Whether the model would be on the device now. The real one loads
+        # lazily on first use after an unload, and so does this.
+        self.loaded = False
         # Per-path behaviour hooks, set by tests.
         self.fail_paths: set[str] = set()
         self.block_paths: dict[str, threading.Event] = {}
@@ -34,9 +37,11 @@ class FakeTranscriber:
         if self.warmup_error:
             raise self.warmup_error
         self.warmed_up = True
+        self.loaded = True
 
     def transcribe(self, path) -> TranscriptionResult:
         path = str(path)
+        self.loaded = True
         self.calls.append(path)
         gate = self.block_paths.get(path)
         if gate is not None:
@@ -54,6 +59,7 @@ class FakeTranscriber:
         )
 
     def unload(self) -> None:
+        self.loaded = False
         self.unloads += 1
 
 
@@ -109,6 +115,7 @@ class FakeTranslator:
     def translate(self, texts, target_language, source_language=None, on_progress=None):
         if self.fail_always:
             raise RuntimeError("simulated translation failure")
+        self.loaded = True
         self.calls.append((target_language, source_language))
         self.batches.append(list(texts))
         if on_progress is not None:
@@ -146,6 +153,7 @@ class FakeSpeaker:
         self.model_key = model_key
         self.device = device
         self.on_download_progress = on_download_progress
+        self.active_device = "cpu" if device == "cpu" else "cuda"
         self.loaded = False
         self.prepared = False
         self.calls: list[tuple[str, str, str, str | None]] = []
