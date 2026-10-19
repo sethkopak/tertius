@@ -278,3 +278,16 @@ def test_a_missing_icon_file_is_not_an_error(tmp_path, monkeypatch):
     said: list[str] = []
     assert launcher.apply_windows_folder_icon(say=said.append) is False
     assert not (tmp_path / "desktop.ini").exists()
+
+
+def test_the_dependency_check_finds_packages_without_importing_them(monkeypatch):
+    """Importing faster_whisper just to see that it is there cost 8.3 s a launch."""
+    from pathlib import Path
+
+    from tertius import launcher
+
+    python = Path(sys.executable)
+    monkeypatch.setattr(launcher, "REQUIRED_IMPORTS", ("json", "pytest"))
+    assert launcher.has_requirements(python) is True
+    monkeypatch.setattr(launcher, "REQUIRED_IMPORTS", ("json", "no_such_package_tertius"))
+    assert launcher.has_requirements(python) is False

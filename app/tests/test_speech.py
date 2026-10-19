@@ -1001,3 +1001,34 @@ def test_a_chunk_that_never_comes_out_clean_keeps_the_best_take():
     )
     assert len(calls) == 1 + SPEECH_TRUNCATION_RETRIES
     assert wav is not None and len(wav) > 0
+
+
+def test_the_speakable_languages_are_read_without_importing_chatterbox(
+    tmp_path, monkeypatch
+):
+    """Importing chatterbox to read one constant cost 17-23 s at every startup.
+
+    The stand-in package refuses to be imported at all, so the list can only
+    have come from reading its source.
+    """
+    import sys
+
+    import tertius.speech as speech
+
+    package = tmp_path / "chatterbox"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "raise RuntimeError('imported chatterbox to read a constant')\n",
+        encoding="utf-8",
+    )
+    (package / "mtl_tts.py").write_text(
+        "import torch\nSUPPORTED_LANGUAGES = {'zz': 'Test', 'aa': 'Afar'}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for name in [m for m in sys.modules if m == "chatterbox" or m.startswith("chatterbox.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(speech, "_PACKAGED_LANGUAGES", ())
+
+    assert speech.speech_language_choices("chatterbox-multilingual") == ("aa", "zz")
+    assert "chatterbox" not in sys.modules

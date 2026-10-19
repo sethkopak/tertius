@@ -89,8 +89,19 @@ def venv_python(venv: Path | None = None) -> Path:
 # --------------------------------------------------------------------------
 
 def has_requirements(python: Path) -> bool:
-    """Can `python` import everything the app needs?"""
-    code = "import " + ", ".join(REQUIRED_IMPORTS)
+    """Is everything the app needs installed in `python`'s environment?
+
+    Located, not imported. Importing faster_whisper drags in ctranslate2, av
+    and onnxruntime and took 8.3 s warm, on every launch, in a process thrown
+    away straight after - measured 2026-10-19. `find_spec` answers the same
+    question from the filesystem, and still says no for a package that was
+    never installed or was removed, which is the case this check exists for.
+    """
+    code = (
+        "import importlib.util, sys; "
+        f"sys.exit(0 if all(importlib.util.find_spec(m) for m in {REQUIRED_IMPORTS!r}) "
+        "else 1)"
+    )
     try:
         done = subprocess.run(
             [str(python), "-c", code],

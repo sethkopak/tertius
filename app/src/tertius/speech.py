@@ -822,12 +822,47 @@ def speech_language_choices(model_key: str = DEFAULT_SPEECH_MODEL) -> tuple[str,
         raise ValueError(f"unknown speech model: {model_key!r}")
     if entry["family"] != "chatterbox-mtl":
         return ("en",)
-    try:
-        from chatterbox.mtl_tts import SUPPORTED_LANGUAGES
+    return _packaged_speech_languages() or FALLBACK_SPEECH_LANGUAGES
 
-        return tuple(sorted(SUPPORTED_LANGUAGES))
+
+_PACKAGED_LANGUAGES: tuple[str, ...] = ()
+
+
+def _packaged_speech_languages() -> tuple[str, ...]:
+    """`chatterbox.mtl_tts.SUPPORTED_LANGUAGES`, read without importing it.
+
+    Importing it took 17-23 s: `chatterbox/__init__.py` pulls in torch,
+    transformers and the whole TTS stack, and this runs at startup whenever the
+    saved options have reading aloud switched on - most of a 30 s pause before
+    the server answered, measured 2026-10-19. The constant is a dict literal,
+    so it is read from the installed source instead. An empty answer is not
+    remembered, so installing the package mid-session is still noticed.
+    """
+    global _PACKAGED_LANGUAGES
+    if _PACKAGED_LANGUAGES:
+        return _PACKAGED_LANGUAGES
+    import ast
+    import importlib.util
+
+    try:
+        # find_spec on the top-level package locates it without running it.
+        spec = importlib.util.find_spec("chatterbox")
+        locations = list(spec.submodule_search_locations or ()) if spec else []
+        for location in locations:
+            source = Path(location) / "mtl_tts.py"
+            if not source.is_file():
+                continue
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in tree.body:
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == "SUPPORTED_LANGUAGES"
+                    for target in node.targets
+                ):
+                    _PACKAGED_LANGUAGES = tuple(sorted(ast.literal_eval(node.value)))
+                    return _PACKAGED_LANGUAGES
     except Exception:
-        return FALLBACK_SPEECH_LANGUAGES
+        log.debug("could not read chatterbox's language list", exc_info=True)
+    return ()
 
 
 class Speaker:
