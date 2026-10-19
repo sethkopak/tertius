@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-09-29
+Last updated: 2026-10-19
 
 ## Where it stands
 
@@ -10,8 +10,9 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**615 tests, all passing** on Windows locally (one skips, a librosa path), and
-green in CI again since 2026-09-29, where one more skips.
+**620 tests, all passing** on Windows locally (one skips, a librosa path).
+CI was green on 2026-09-29 and has not seen the 2026-10-19 changes yet; the
+two new T5 tests skip there unless torch and transformers are installed.
 
 > Corrected 2026-09-29. This said all 558 passed on ubuntu/macOS/Windows in CI
 > too. CI had been **red on every platform since `5ef33ea` (2026-09-21)**, all
@@ -126,6 +127,110 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-19 — madlad wrote nonsense, and every job ran at a fifth of its speed
+
+Reported: Tertius slow to start, and a ru/he/zh translate-and-read job "stuck
+on Reading aloud" with the file row at "Transcribing 25%". It was not stuck.
+It was the first real run of `madlad400-3B`, and three separate things were
+wrong.
+
+### madlad400-3B translated into garbage (`translate.py`)
+
+Every translation it had ever written was nonsense: `niet meer nee nee`,
+`♪♪♪`, rows of dates, the right script but no meaning. Chatterbox's
+"repetition, forcing EOS" warnings were it trying to read that aloud.
+
+The tokenizer was fine, matching SentencePiece token for token. The *original*
+checkpoint run in plain PyTorch wrote the same nonsense, which put it in
+**transformers 5.16**, which CTranslate2's converter loads through:
+
+1. `T5Config(tie_word_embeddings=False)` comes back `True`; the constructor
+   drops it. CTranslate2 reads that flag and scales the decoder output by
+   d_model^-0.5 in front of an output layer that was never trained for it.
+2. T5 has one input embedding shared by encoder and decoder. MADLAD stores it
+   once, as `decoder.embed_tokens.weight`, and transformers 5 leaves `shared`
+   (which the encoder reads) **randomly initialised**.
+
+Each alone still gives nonsense; with both put right PyTorch translates
+correctly. Conversion now goes through `_load_t5_faithfully`, which sets the
+flag from the checkpoint's own `config.json` (and refuses to convert if it
+will not stick) and copies the saved embedding into every copy of it.
+
+**A broken conversion already on disk is converted again on its own:**
+conversions now write `tertius-conversion.json` with a recipe number, and
+`is_converted` refuses a T5 model below recipe 2. M2M-100 was checked under
+transformers 5 too (real Russian out) and needs neither the fix nor the marker.
+madlad was reconverted here in 114 s.
+
+### All three models were on the card at once (`jobs.py`)
+
+Each model is loaded before the first file so that a failed download shows up
+before any work is done. Nothing took them off again, so Whisper, madlad and
+Chatterbox sat on the GPU together through transcription and translation.
+Measured, each loaded alone:
+
+| model | VRAM |
+| --- | --- |
+| whisper large-v3-turbo | 2.2 GB |
+| madlad400-3B | 3.5 GB |
+| chatterbox-multilingual | 3.2 GB |
+
+On a 6 GB card the NVIDIA driver no longer fails with out-of-memory; it
+**spills into system RAM** without saying so. The Tertius process held 5.8 GB on
+the card and 5.4 GB in shared memory, read from the Windows `GPU Process Memory`
+counters, and speech ran at about 0.09x realtime against 0.51x measured
+before. **Spilled memory stays spilled**: the 5.4 GB was still there after
+"freed the GPU for the reading". Each unload was checked separately and does
+give its memory back (whisper 2201 -> 89 MB, madlad 3531 -> 87, chatterbox
+3191 -> 97), so freeing was never the problem. Overlapping was.
+
+On CUDA only the working stage's model is resident now, start-up loads
+included: Whisper off before the translator's start-up load, the translator off
+before the voice model's, the voice model off before transcribing, Whisper off
+before translating, the translator off before reading. Each reloads itself
+lazily. `test_only_the_working_stage_is_on_the_gpu` checks what is loaded at
+every model call, and fails if either new free is disabled.
+
+**Same job, rerun after the fix:** 7.5 minutes start to finish. The two runs
+before it never finished: yesterday's was abandoned partway through Russian,
+and today's had run 18 minutes and was still on its first language. Shared
+memory stayed at about 80 MB throughout. Three translations together took 29 s
+(previously ~5.5 minutes). The readings came in at 69.8 s of audio in about 2.3
+minutes (ru), 70.6 s (he) and 55.4 s (zh), back to roughly 0.5x realtime.
+That rerun still had both of the start-up models briefly resident together;
+loading each start-up model alone came after it and was checked by the tests
+only.
+
+### Startup: ~79 s to ~10 s
+
+- `speech_language_choices` imported `chatterbox.mtl_tts` to read one dict,
+  which pulls in torch, transformers and the whole TTS stack: 17-23 s, at every
+  startup once reading aloud is in the saved options. It is now read from the
+  installed source with `ast`, without importing anything (0.15 s, same 23 languages).
+- The launcher imported `faster_whisper` in a throwaway process to see whether
+  it was installed: 8.3 s warm. It uses `importlib.util.find_spec` now (0.05 s).
+- Measured from double-click to "serving on": 13:19:51 -> 13:21:10 before,
+  14:13:53 -> 14:14:03 after. A 4.6 s step between "output directory" and the
+  CUDA check is left; it was not looked into.
+
+### The file row said "Transcribing" while reading aloud
+
+`static/app.js` knew "Translating" and fell back to "Transcribing" for
+everything else; the 25% was reading progress. It says "Reading aloud" now.
+
+### Still wrong: madlad's Hebrew for scripture
+
+With the conversion fixed, madlad's Russian and Chinese read as real
+translations. Its Hebrew prose is fine, but **both Psalm 66 lines come back as
+invented Biblical-sounding Hebrew** (`וַיֹּאמֶר ה' אֱלֹהֵינוּ: הִנֵּה ה' אֱלֹהֵינוּ ...`
+repeated). `no_repeat_ngram_size=3` and `repetition_penalty=1.2` stop the loop
+but not the invention, so they were not applied. Not fixed. For Hebrew,
+m2m100-1.2B is the one that has been run, and it has not been compared with
+madlad on this file.
+
+**Tests:** 615 -> 620. The T5 loader test fails against a plain
+`from_pretrained`, and the residency test fails with either new free removed.
 
 ## 2026-09-29 — what the first hosted translations showed
 
@@ -2337,9 +2442,10 @@ did not.
   whether `Tertius.app` double-clicks, whether the generated `.desktop` entry
   works, whether `tertius.icns` even looks right, and any Mac throughput figure.
   The ~22x realtime number below is from an RTX 2060 and does not transfer.
-- `madlad400-3b-mt` is still untried, and it is the whole of the T5 adapter -
-  a different tokenizer, a different way of naming the target, and not one line
-  of it has met a real model. Both M2M-100 sizes have now been run.
+- `madlad400-3b-mt` has now run on one file (2026-10-19), after the
+  conversion fix. Russian and Chinese read as real translations, but no
+  speaker has read them; its Hebrew invents scripture text. Its first-ever
+  conversion was garbage and nothing noticed: see the 2026-10-19 entry. Both M2M-100 sizes have now been run.
 - The 1.2B has now been run through the queue on a whole file (`V1_01.mp3`,
   38:12). Compared closely on three sentences; the other 203 have not been
   read.
@@ -2389,9 +2495,9 @@ did not.
    *Not verified* about those two stays open until someone does. Translation
    adds to what is riding on that: the installer shells out to pip, and the
    `.txt`-source scan has only run on Windows.
-3. Try `madlad400-3b-mt`. It is the whole of the T5 adapter — a different
-   tokenizer and a different way of naming the target language — and not one
-   line of it has met a real model. 400+ languages is the reason to care.
+3. ~~Try `madlad400-3b-mt`.~~ Tried 2026-10-19; every translation was
+   garbage until the conversion was fixed. Still open: have a speaker read its
+   output, and compare its Hebrew against m2m100-1.2B on scripture.
 4. ~~Run a translation on the GPU.~~ Done. What is still missing from the
    comparison table is a per-model throughput column; only m2m100-418M has been
    timed.
@@ -2437,6 +2543,21 @@ did not.
 - No live microphone input; file/batch only, as the original spec required.
 
 ## Gotchas worth remembering
+
+- **An overfull GPU slows down instead of failing.** The NVIDIA driver on this
+  machine spills VRAM into system RAM, so loading too much shows up as a job
+  running several times slower, not as "CUDA out of memory". `nvidia-smi`
+  only shows the card filling up. The `\GPU Process Memory(*)\Shared Usage`
+  counter is what shows the spill. Spilled memory stays spilled after the
+  model that caused it is freed.
+- **transformers 5 loads `madlad400-3b-mt` wrong, silently** - see the
+  2026-10-19 entry. Anything that loads a T5 checkpoint through transformers,
+  including CTranslate2's converter, needs `_load_t5_faithfully`. If a
+  converted model writes fluent-looking nonsense, run the original checkpoint
+  in PyTorch before blaming the conversion or the runtime.
+- **Profiling `create_app` against a real folder repoints the app.**
+  `attach` records the folder as "where I was last". Set
+  `TERTIUS_SESSION_FILE` to a scratch path first, the way the test suite does.
 
 - **One venv holds one torch, and the two features want different builds.**
   Translating installs the CPU-only wheel on purpose (it only ever converts).
