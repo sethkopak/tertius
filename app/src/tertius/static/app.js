@@ -1442,10 +1442,12 @@ function stateCell(file, status) {
     const pct = file.path === active.path && active.progress != null
       ? ` ${Math.round(active.progress * 100)}%`
       : '';
-    // Which of the two it is doing. This said "Transcribing" throughout, so a
-    // file that was really being translated sat at "Transcribing 100%" for
-    // however many minutes the translation took.
-    const what = status.phase === 'translating' ? 'Translating' : 'Transcribing';
+    // Which stage it is in. This said "Transcribing" throughout, so a file
+    // that was really being translated sat at "Transcribing 100%" for however
+    // many minutes the translation took - and later, one being read aloud sat
+    // at "Transcribing 25%" while the band above said "Reading aloud".
+    const what = {translating: 'Translating', speaking: 'Reading aloud'}[status.phase]
+      || 'Transcribing';
     return `<span class="state-running">${what}${pct}</span>`;
   }
   if (file.status === 'done') {
