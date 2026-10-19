@@ -11,8 +11,10 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **620 tests, all passing** on Windows locally (one skips, a librosa path).
-CI was green on 2026-09-29 and has not seen the 2026-10-19 changes yet; the
-two new T5 tests skip there unless torch and transformers are installed.
+Green in CI on all eight jobs for the 2026-10-19 changes: 615-616 passed with
+5-6 skipped. That is two more skips than before, and they are the two new T5
+loader tests, which need torch and transformers, neither installed on the
+runners. So the madlad fix is tested only on this machine.
 
 > Corrected 2026-09-29. This said all 558 passed on ubuntu/macOS/Windows in CI
 > too. CI had been **red on every platform since `5ef33ea` (2026-09-21)**, all
