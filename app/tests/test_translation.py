@@ -224,9 +224,15 @@ def test_an_unknown_source_language_falls_back_to_english(monkeypatch, tmp_path,
     assert _source_code_for(translator, "es") == "es"
 
 
-def test_madlad_is_never_told_the_source_language():
+def test_madlad_is_handed_the_detected_language_for_the_clause_check():
+    """MADLAD's encoding ignores it; the dropped-clause check needs it.
+
+    This returned "" for madlad, so in the app the check never ran on the one
+    model it was written for. Tests that passed "zh" by hand did not notice.
+    """
     translator = FakeTranslator("madlad400-3B")
-    assert _source_code_for(translator, "es") == ""
+    assert _source_code_for(translator, "zh") == "zh"
+    assert _source_code_for(translator, None) == ""
 
 
 # -------------------------------------------------------------------- results
@@ -1360,3 +1366,102 @@ def test_t5_is_loaded_for_conversion_the_way_it_was_saved(tmp_path, converter_pa
     assert torch.equal(loaded.encoder.embed_tokens.weight, embedding)
     assert torch.equal(loaded.shared.weight, embedding)
     assert torch.equal(loaded.decoder.embed_tokens.weight, embedding)
+
+
+# ------------------------------------------------------ dropped-clause check
+
+
+def _canned_translator(answers):
+    """A Translator whose model looks each source text up in `answers`."""
+    from types import SimpleNamespace
+
+    from tertius.translate import Translator
+
+    asked: list[str] = []
+
+    class _Adapter:
+        family = "m2m100"
+
+        def encode(self, text, source_language):
+            return [text]
+
+        def target_prefix(self, target_language):
+            return []
+
+        def decode(self, tokens):
+            return tokens[0]
+
+    class _Model:
+        def translate_batch(self, batch, **kwargs):
+            asked.extend(tokens[0] for tokens in batch)
+            return [SimpleNamespace(hypotheses=[[answers[t[0]]]]) for t in batch]
+
+    translator = Translator("m2m100-418M", device="cpu", protect_references=False)
+    translator._translator = _Model()
+    translator._adapter = _Adapter()
+    translator.load = lambda: None
+    return translator, asked
+
+
+DROPPED = "他通过这些任命使我们不至于跌倒,"
+REST = "又有经文说众民要称颂我们的神。"
+
+
+def test_a_dropped_clause_is_translated_back_in():
+    """madlad began this sentence at its second clause and lost the first.
+
+    Every beam size and length penalty tried dropped it too; alone, the clause
+    translated whole. So the sentence is re-translated in two parts.
+    """
+    translator, asked = _canned_translator(
+        {
+            DROPPED + REST: "Again the scripture says, praise our God, O peoples.",
+            DROPPED: "He keeps us from stumbling through these appointments,",
+            REST: "Again the scripture says, praise our God, O peoples.",
+        }
+    )
+    [english] = translator.translate([DROPPED + REST], "en", source_language="zh")
+
+    assert english == (
+        "He keeps us from stumbling through these appointments, "
+        "Again the scripture says, praise our God, O peoples."
+    )
+
+
+def test_a_synonym_is_not_mistaken_for_a_dropped_clause():
+    """"gives life" for "quicken" scored 1 of 3 and is not an omission.
+
+    A looser threshold re-translated such sentences, and a misheard clause
+    alone came back as "Thank you for your kind words."
+    """
+    first = "祂使我们的灵魂存活,"
+    second = "不容我们的脚摇动。"
+    translator, asked = _canned_translator(
+        {
+            first + second: "He quickens our souls, and lets not our feet slip.",
+            first: "He gives life to our souls,",
+            second: "Don't let our feet shake.",
+        }
+    )
+    [english] = translator.translate([first + second], "en", source_language="zh")
+
+    assert english == "He quickens our souls, and lets not our feet slip."
+    assert asked == [first + second, first, second]   # no third translation
+
+
+@pytest.mark.parametrize("source, target", [("en", "es"), ("zh", "ja")])
+def test_only_unspaced_sources_into_spaced_targets_are_checked(source, target):
+    text = "Thanks be to God, that his grace has preserved us."
+    translator, asked = _canned_translator({text: "Gracias a Dios."})
+    translator.translate([text], target, source_language=source)
+
+    assert asked == [text]
+
+
+def test_a_reference_is_not_split_at_its_comma():
+    from tertius.translate import _source_clauses
+
+    assert _source_clauses("贴萨罗尼加后书2,12又有经文说,众民啊,你们要称颂我们的神。") == [
+        "贴萨罗尼加后书2,12又有经文说,",
+        "众民啊,你们要称颂我们的神。",
+    ]

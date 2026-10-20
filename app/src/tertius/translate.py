@@ -518,6 +518,73 @@ class _T5Adapter:
         )
 
 
+# Sources whose sentences are checked clause by clause after translating. See
+# `Translator._restore_dropped_clauses`. Chinese and Japanese, because Whisper
+# writes a comma where a reading paused for a full stop, so their "sentences"
+# run long, and long is where madlad drops a clause.
+CLAUSE_CHECKED_SOURCES = frozenset({"zh", "ja"})
+# The check compares words, so it needs a target written with spaces.
+UNSPACED_TARGETS = frozenset({"zh", "ja", "th", "lo", "km", "my"})
+# Not after a digit: `2,12` is one reference, not two clauses.
+_CLAUSE_END = re.compile(r"(?<=\D[,，;；])")
+# A clause shorter than this is joined to the next: `感谢上帝,` is not worth a
+# translation of its own, and too short to say anything about coverage.
+MIN_CLAUSE_CHARS = 6
+_STOPWORDS = frozenset(
+    "that this these those with from have been were will would shall them they "
+    "their there which what when where while into unto upon through about also "
+    "only very such than then your yours ours because every other some more "
+    "most being does doing made make again said says".split()
+)
+
+
+def _source_clauses(text: str) -> list[str]:
+    """Split at commas and semicolons, joining clauses too short to stand alone."""
+    clauses: list[str] = []
+    pending = ""
+    for piece in _CLAUSE_END.split(text.strip()):
+        pending += piece
+        if len(pending.strip(" ,，;；")) >= MIN_CLAUSE_CHARS:
+            clauses.append(pending)
+            pending = ""
+    if pending:
+        if clauses:
+            clauses[-1] += pending
+        else:
+            clauses.append(pending)
+    return clauses
+
+
+def _content_stems(text: str) -> set[str]:
+    """Words of four letters or more, minus function words, cut to five letters.
+
+    Five letters so that "stumbling" and "stumbles" count as the same word. A
+    crude match on purpose: it only has to notice a clause that is wholly
+    absent, not grade a translation.
+    """
+    words = re.findall(r"[^\W\d_]{4,}", text.lower())
+    return {word[:5] for word in words if word not in _STOPWORDS}
+
+
+def _first_missing_clause(whole: str, alone: Sequence[str]) -> int | None:
+    """The first clause whose own translation is entirely absent from the whole's.
+
+    Entirely, and only for a clause with three content words or more. Measured
+    on 2026-10-20 over 33 clauses of two Chinese transcripts: the one dropped
+    clause scored 0 of 3. Everything else that scored low was a synonym, not
+    an omission - "gives life" for "quicken", "filter" for "sift" - at 1 of 3
+    and 2 of 6. A looser threshold re-translated those, and one came back
+    worse: a clause Whisper had misheard, translated on its own, became
+    "Thank you for your kind words."
+    """
+    present = _content_stems(whole)
+    for k, rendered in enumerate(alone):
+        stems = _content_stems(rendered or "")
+        if len(stems) >= 3 and not stems & present:
+            return k
+    return None
+
+
 class Translator:
     """A loaded translation model, reused across a batch.
 
@@ -644,6 +711,7 @@ class Translator:
         target_language: str,
         source_language: str | None = None,
         on_progress: Callable[[int, int], None] | None = None,
+        _check_clauses: bool = True,
     ) -> list[str]:
         """Translate a list of texts, preserving order and length.
 
@@ -747,7 +815,76 @@ class Translator:
                     on_progress(done, total)
                 except Exception:  # pragma: no cover - defensive
                     log.debug("translation progress callback failed", exc_info=True)
+        if (
+            _check_clauses
+            and source_language in CLAUSE_CHECKED_SOURCES
+            and target_language not in UNSPACED_TARGETS
+        ):
+            self._restore_dropped_clauses(
+                texts, out, wanted, target_language, source_language
+            )
         return out
+
+    def _restore_dropped_clauses(
+        self,
+        texts: Sequence[str],
+        out: list[str],
+        indices: Sequence[int],
+        target_language: str,
+        source_language: str,
+    ) -> None:
+        """Re-translate, in two parts, any sentence whose translation lost a clause.
+
+        madlad drops whole clauses from long Chinese sentences, silently. Met
+        on 2026-10-19: Whisper heard
+        `他通过这些任命使我们不至于跌倒,贴萨罗尼加后书2,12又有经文说,众民啊,...`
+        as one sentence - in the reading it was two, with a reference between
+        them - and the English began at the reference. "He keeps us from
+        stumbling through these appointments" was simply gone. Beam sizes 1, 4
+        and 8 and length penalties up to 2.0 all dropped it; translated alone,
+        the clause came back whole.
+
+        So each clause is also translated alone, and when one's content words
+        are missing from the whole sentence's translation, the sentence is cut
+        after that clause and the two parts translated separately. Only
+        sentences that fail the check pay for a third translation.
+        """
+        candidates = [
+            (index, clauses)
+            for index in indices
+            if len(clauses := _source_clauses(texts[index])) >= 2
+        ]
+        if not candidates:
+            return
+        flat = [clause for _, clauses in candidates for clause in clauses]
+        rendered = self.translate(
+            flat, target_language, source_language=source_language,
+            _check_clauses=False,
+        )
+        redo: list[tuple[int, str, str]] = []
+        position = 0
+        for index, clauses in candidates:
+            alone = rendered[position : position + len(clauses)]
+            position += len(clauses)
+            missing = _first_missing_clause(out[index], alone)
+            if missing is None:
+                continue
+            cut = missing + 1 if missing + 1 < len(clauses) else missing
+            redo.append((index, "".join(clauses[:cut]), "".join(clauses[cut:])))
+        if not redo:
+            return
+        parts = self.translate(
+            [part for _, first, rest in redo for part in (first, rest)],
+            target_language,
+            source_language=source_language,
+            _check_clauses=False,
+        )
+        for n, (index, first, _rest) in enumerate(redo):
+            log.info(
+                "translation dropped a clause; translated in two parts: %s",
+                first[:40],
+            )
+            out[index] = f"{parts[2 * n].strip()} {parts[2 * n + 1].strip()}".strip()
 
     @property
     def loaded(self) -> bool:
@@ -769,7 +906,10 @@ def _source_code_for(translator: "Translator", detected: str | None) -> str:
     the code actually used is recorded on the result either way.
     """
     if translator.family == "t5":
-        return ""
+        # MADLAD ignores it, but the dropped-clause check needs it: returning
+        # "" here meant the check never ran on madlad, the one model it was
+        # written for.
+        return detected or ""
     known = supported_target_languages(translator.model_key)
     if detected and (not known or detected in known):
         return detected
