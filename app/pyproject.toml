@@ -74,6 +74,9 @@ speak = [
     "omegaconf",
     "pyloudnorm",
     "pykakasi",
+    # Chinese word segmentation for the voice model, standing in for
+    # spacy-pkuseg, which has no Python 3.14 wheel. See speech._segment_chinese.
+    "jieba",
     "transformers>=4.40",
     "safetensors",
 ]

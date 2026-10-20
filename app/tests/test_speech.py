@@ -1032,3 +1032,58 @@ def test_the_speakable_languages_are_read_without_importing_chatterbox(
 
     assert speech.speech_language_choices("chatterbox-multilingual") == ("aa", "zz")
     assert "chatterbox" not in sys.modules
+
+
+# ------------------------------------------------------- Chinese segmentation
+
+
+def _model_with_converter(segmenter):
+    from types import SimpleNamespace
+
+    converter = SimpleNamespace(segmenter=segmenter)
+    return SimpleNamespace(tokenizer=SimpleNamespace(cangjie_converter=converter))
+
+
+def test_chinese_gets_a_segmenter_when_pkuseg_is_missing(monkeypatch):
+    """Unsegmented, more of the Chinese reading was misheard (11.9% vs 10.4%)."""
+    import sys
+    import types
+
+    from tertius.speech import _segment_chinese
+
+    fake = types.ModuleType("jieba")
+    fake.setLogLevel = lambda level: None
+    fake.cut = lambda text: iter(["感谢", "上帝"])
+    monkeypatch.setitem(sys.modules, "jieba", fake)
+
+    model = _model_with_converter(None)
+    assert _segment_chinese(model) is True
+    assert model.tokenizer.cangjie_converter.segmenter.cut("感谢上帝") == ["感谢", "上帝"]
+
+
+def test_a_real_pkuseg_is_left_alone(monkeypatch):
+    from tertius.speech import _segment_chinese
+
+    pkuseg = object()
+    model = _model_with_converter(pkuseg)
+    assert _segment_chinese(model) is False
+    assert model.tokenizer.cangjie_converter.segmenter is pkuseg
+
+
+def test_no_segmenter_installed_reads_unsegmented(monkeypatch):
+    import sys
+
+    from tertius.speech import _segment_chinese
+
+    monkeypatch.setitem(sys.modules, "jieba", None)  # import raises ImportError
+    model = _model_with_converter(None)
+    assert _segment_chinese(model) is False
+    assert model.tokenizer.cangjie_converter.segmenter is None
+
+
+def test_a_model_without_a_chinese_tokenizer_is_ignored():
+    from types import SimpleNamespace
+
+    from tertius.speech import _segment_chinese
+
+    assert _segment_chinese(SimpleNamespace()) is False

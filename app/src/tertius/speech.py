@@ -77,7 +77,8 @@ SPEECH_REQUIREMENTS = {"torch": "torch", "chatterbox": "chatterbox-tts"}
 #    the whole install dies with "Microsoft Visual C++ 14.0 or greater is
 #    required" - having installed nothing. It is a *hard* requirement in the
 #    metadata and an *optional* one in the code: `tokenizer.py` imports it
-#    inside a try/except and degrades to no Chinese word segmentation.
+#    inside a try/except and degrades to no Chinese word segmentation, which
+#    costs intelligibility - jieba is put in its place, `_segment_chinese`.
 #    `pykakasi` is the same shape, for Japanese, and does have wheels, so it
 #    is kept.
 # 2. **`transformers==5.2.0` is a hard pin, and translation runs on 5.16.1.**
@@ -107,6 +108,9 @@ CHATTERBOX_DEPENDENCIES = (
     "omegaconf",
     "pyloudnorm",
     "pykakasi",
+    # Not chatterbox's either: stands in for `spacy-pkuseg` (see 1. above and
+    # `_segment_chinese`). Pure Python, MIT.
+    "jieba",
     "transformers",
     "safetensors",
     "numpy",
@@ -865,6 +869,44 @@ def _packaged_speech_languages() -> tuple[str, ...]:
     return ()
 
 
+class _JiebaSegmenter:
+    """The one method Chatterbox calls on its segmenter, answered by jieba."""
+
+    def __init__(self, jieba):
+        self._jieba = jieba
+
+    def cut(self, text: str) -> list[str]:
+        return list(self._jieba.cut(text))
+
+
+def _segment_chinese(model) -> bool:
+    """Give Chatterbox's Chinese tokenizer word boundaries when it has none.
+
+    Chatterbox splits Chinese into words with `spacy-pkuseg` before reading
+    it, and without that package it reads the characters unsegmented. pkuseg
+    cannot be installed on Python 3.14 (no wheel; see CHATTERBOX_DEPENDENCIES),
+    so jieba stands in. Measured on 2026-10-19, one Manna read in Chinese with
+    six seeds and transcribed back by Whisper: 11.9% of characters (outside
+    numbers) heard wrong unsegmented, 10.4% with jieba, better in five seeds
+    of six. In the sixth, one short line ran on into 40 characters of
+    babble - the only such take in 48 - so that may be chance or may not.
+
+    Leaves a real pkuseg alone if one ever loads. Returns whether it acted.
+    """
+    converter = getattr(getattr(model, "tokenizer", None), "cangjie_converter", None)
+    if converter is None or getattr(converter, "segmenter", None) is not None:
+        return False
+    try:
+        import jieba
+    except ImportError:
+        log.info("no Chinese word segmenter available; reading unsegmented")
+        return False
+    jieba.setLogLevel(logging.WARNING)
+    converter.segmenter = _JiebaSegmenter(jieba)
+    log.info("Chinese is segmented with jieba (pkuseg is not installed)")
+    return True
+
+
 class Speaker:
     """A loaded speech model, reused across a batch.
 
@@ -1005,6 +1047,8 @@ class Speaker:
                     f"the speech model could not be loaded on the GPU: {exc}"
                 ) from exc
             raise
+        if self.family == "chatterbox-mtl":
+            _segment_chinese(model)
         self._model = model
         self.active_device = device
 
