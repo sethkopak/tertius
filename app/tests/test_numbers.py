@@ -50,16 +50,48 @@ def test_a_reference_is_spoken_part_by_part():
     assert spell("2 Cor. 4:17", "en") == "two Cor. four:seventeen"
 
 
-@pytest.mark.parametrize("language", ["el", "hi", "ms", "sw", "zh"])
+@pytest.mark.parametrize("language", ["el", "hi", "ms", "sw"])
 def test_unsupported_languages_keep_their_digits(language):
     """No worse off than before, which is the point of failing this way.
 
-    num2words covers 18 of the 23 Chatterbox speaks. Chinese is the notable
-    absence and the notable non-problem: it writes numerals in running text and
-    handles digits itself.
+    num2words covers 18 of the 23 Chatterbox speaks.
     """
     text = "Psalm 66, verses 8 and 9."
     assert spell(text, language) == text
+
+
+def test_chinese_digits_become_chinese_numerals():
+    """madlad writes digits into Chinese, and Chatterbox reads them as noise.
+
+    `詩篇 66:8,9.` was heard back as `诗篇6498点通` and `诗篇六小憋酒`;
+    spelled out, as `诗篇6689` both times. num2words has no Chinese, so this
+    is spelled by Tertius itself.
+    """
+    assert spell("詩篇 66:8,9.", "zh") == "詩篇 六十六:八,九."
+    assert spell("1月1日的吗哪", "zh") == "一月一日的吗哪"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (0, "零"),
+        (7, "七"),
+        (10, "十"),
+        (12, "十二"),
+        (20, "二十"),
+        (66, "六十六"),
+        (100, "一百"),
+        (101, "一百零一"),
+        (110, "一百一十"),
+        (1005, "一千零五"),
+        (1010, "一千零一十"),
+        (1914, "一千九百一十四"),
+        (9999, "九千九百九十九"),
+    ],
+)
+def test_chinese_numerals_follow_the_reading_rules(value, expected):
+    """A leading 一十 is said 十, and one 零 covers any run of empty places."""
+    assert spell(str(value), "zh") == expected
 
 
 def test_text_without_digits_is_returned_untouched():
@@ -98,7 +130,7 @@ def test_no_language_at_all_means_english():
 
 def test_would_change_only_reports_a_real_difference():
     assert would_change("Psalm 66.", "en") is True
-    assert would_change("Psalm 66.", "zh") is False      # unsupported
+    assert would_change("Psalm 66.", "sw") is False      # unsupported
     assert would_change("O bless our God.", "en") is False
 
 

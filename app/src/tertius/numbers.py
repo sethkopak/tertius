@@ -21,9 +21,18 @@ the model sees the text, and nowhere else. **The cues keep the digits**: an
 
 `num2words` does the work. It covers 18 of the 23 languages Chatterbox speaks;
 `el`, `hi`, `ms`, `sw` and `zh` raise `NotImplementedError` and their digits
-are left alone, which is no worse than before. Chinese is the notable absence
-and the notable non-problem: it writes numerals as 六十六 in running text and
-handles digits itself.
+are left alone, which is no worse than before.
+
+Chinese is spelled here instead, by `_chinese`. It was once thought not to need
+it, on the grounds that Chinese writes 六十六 in running text. The translator
+does not: madlad writes `詩篇 66:8,9.` and `1月1日`, and Chatterbox read those
+as noise. Measured on 2026-10-19, the Chinese reading of one Manna transcribed
+back by Whisper, two takes each:
+
+| text           | heard, as written              | heard, spelled out             |
+| -------------- | ------------------------------ | ------------------------------ |
+| `1月1日的吗哪`  | `一月七折玛娜娜`, `乐曲的曼娜`   | `1月1日的曼娜那`, `一月一日的猫娜妈` |
+| `詩篇 66:8,9.`  | `诗篇6498点通`, `诗篇六小憋酒`   | `诗篇6689`, `诗篇6689`          |
 """
 
 from __future__ import annotations
@@ -45,6 +54,35 @@ _NUMBER = re.compile(r"\d+")
 # fourteen", which `num2words` does not produce, and "one thousand nine hundred
 # and fourteen" is not what anybody says.
 MAX_SPELLED = 9999
+
+_CHINESE_DIGITS = "零一二三四五六七八九"
+_CHINESE_PLACES = ((1000, "千"), (100, "百"), (10, "十"))
+
+
+def _chinese(value: int) -> str:
+    """0-9999 in Chinese numerals: 66 -> 六十六, 101 -> 一百零一, 10 -> 十.
+
+    One 零 stands for any run of empty places inside the number, and a leading
+    一十 is said as 十 - the two rules a reader would trip over.
+    """
+    if value < 10:
+        return _CHINESE_DIGITS[value]
+    out = ""
+    rest = value
+    for place, unit in _CHINESE_PLACES:
+        count, rest = divmod(rest, place)
+        if count:
+            leading_ten = unit == "十" and not out and count == 1
+            out += ("" if leading_ten else _CHINESE_DIGITS[count]) + unit
+        elif out and rest and not out.endswith("零"):
+            out += "零"
+    if rest:
+        out += _CHINESE_DIGITS[rest]
+    return out
+
+
+# Languages `num2words` cannot do, spelled here instead.
+_OWN_SPELLERS = {"zh": _chinese}
 
 
 @functools.lru_cache(maxsize=32)
@@ -76,16 +114,19 @@ def spell(text: str, language: str) -> str:
         return text
 
     language = (language or "en").strip().lower()
-    if not _supported(language):
+    own = _OWN_SPELLERS.get(language)
+    if own is None and not _supported(language):
         return text
-
-    from num2words import num2words
 
     def say(match: "re.Match") -> str:
         value = int(match.group(0))
         if value > MAX_SPELLED:
             return match.group(0)
         try:
+            if own is not None:
+                return own(value)
+            from num2words import num2words
+
             return num2words(value, lang=language)
         except Exception:  # pragma: no cover - defensive
             log.debug("could not spell %s in %s", value, language, exc_info=True)
