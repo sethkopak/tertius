@@ -251,3 +251,72 @@ def test_previous_text_conditioning_can_be_turned_back_on():
     transcriber.transcribe("talk.mp3")
 
     assert model.kwargs["condition_on_previous_text"] is True
+
+
+class DetectingModel:
+    """Records every call, and "detects" a fixed language when not given one."""
+
+    def __init__(self, detects):
+        self.detects = detects
+        self.calls = []
+
+    def transcribe(self, audio, **kwargs):
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        language = kwargs["language"] or self.detects
+        return iter(()), SimpleNamespace(language=language, duration=1.0)
+
+
+def _transcriber_detecting(options, detects):
+    from tertius.transcribe import WhisperTranscriber
+
+    transcriber = WhisperTranscriber(options)
+    model = DetectingModel(detects)
+    transcriber._model = model
+    return transcriber, model
+
+
+def test_chinese_is_shown_punctuation_in_every_window():
+    """Unhinted, Whisper wrote 56 s of Chinese with no 。 or , at all.
+
+    The hint goes in as `hotwords`, not `initial_prompt`: with previous-text
+    conditioning off, faster-whisper drops the prompt after the first window,
+    and punctuation stopped at 25 s. Hotwords are in every window's prompt.
+    """
+    from tertius.transcribe import PUNCTUATION_HINTS
+
+    transcriber, model = _transcriber_detecting(
+        TranscriptionOptions(language="zh"), detects="zh"
+    )
+    transcriber.transcribe("manna.wav")
+
+    assert len(model.calls) == 1
+    assert model.calls[0]["hotwords"] == PUNCTUATION_HINTS["zh"]
+    assert "initial_prompt" not in model.calls[0]
+
+
+def test_detected_chinese_is_asked_again_with_the_hint():
+    """The hint has to be in the language, which auto-detect only knows after."""
+    from tertius.transcribe import PUNCTUATION_HINTS
+
+    transcriber, model = _transcriber_detecting(
+        TranscriptionOptions(language=None), detects="zh"
+    )
+    result = transcriber.transcribe("manna.wav")
+
+    assert [call["language"] for call in model.calls] == [None, "zh"]
+    assert "hotwords" not in model.calls[0]
+    assert model.calls[1]["hotwords"] == PUNCTUATION_HINTS["zh"]
+    assert result.language == "zh"
+
+
+@pytest.mark.parametrize("options_language", [None, "en"])
+def test_other_languages_get_no_hint_and_one_pass(options_language):
+    transcriber, model = _transcriber_detecting(
+        TranscriptionOptions(language=options_language), detects="en"
+    )
+    transcriber.transcribe("talk.mp3")
+
+    assert len(model.calls) == 1
+    assert "hotwords" not in model.calls[0]

@@ -505,6 +505,25 @@ def register_cuda_dll_directories() -> list[str]:
     return []
 
 
+# Languages Whisper writes without punctuation unless shown some, and a line
+# that shows it. Without one, Chinese came back as a run of short phrases with
+# no 。 or , in it at all, so the whole transcript was a single "sentence" to
+# everything downstream - the translator got 450 characters with no stops in
+# them. Measured on 2026-10-19 with large-v3-turbo, 56 s of Chinese:
+#
+# - no hint: 35 segments, not one mark of punctuation.
+# - `initial_prompt`: punctuated, but only in the first 30 s window. With
+#   `condition_on_previous_text` off, which it is here for a reason (see
+#   `TranscriptionOptions`), the prompt is dropped after the first window.
+# - `hotwords`: punctuated in every window. faster-whisper puts hotwords into
+#   every window's prompt whatever the conditioning setting is.
+#
+# The unhinted run also invented a line after the audio ended (a TV channel's
+# credit); the hinted one did not. That is one run, so it is a note, not a
+# claim.
+PUNCTUATION_HINTS = {"zh": "以下是普通话的句子。"}
+
+
 class WhisperTranscriber:
     """Lazily loads a faster-whisper model and reuses it across the batch."""
 
@@ -624,14 +643,26 @@ class WhisperTranscriber:
         a caller can report progress through a long file. `audio_seconds` is the
         length faster-whisper measured, and is known before the first segment.
         """
-        segments_iter, info = self.model.transcribe(
-            str(path),
-            language=self.options.language,
-            beam_size=self.options.beam_size,
-            vad_filter=self.options.vad_filter,
-            condition_on_previous_text=self.options.condition_on_previous_text,
-            word_timestamps=word_timestamps,
-        )
+        def run(language: str | None):
+            hint = PUNCTUATION_HINTS.get(language or "")
+            return self.model.transcribe(
+                str(path),
+                language=language,
+                beam_size=self.options.beam_size,
+                vad_filter=self.options.vad_filter,
+                condition_on_previous_text=self.options.condition_on_previous_text,
+                word_timestamps=word_timestamps,
+                **({"hotwords": hint} if hint else {}),
+            )
+
+        segments_iter, info = run(self.options.language)
+        detected = getattr(info, "language", None)
+        if self.options.language is None and detected in PUNCTUATION_HINTS:
+            # The language is only known once faster-whisper has detected it,
+            # and the hint has to be in the language. Detection happens inside
+            # `transcribe`, before any decoding - the segments are a lazy
+            # generator - so asking again costs the detection, not a pass.
+            segments_iter, info = run(detected)
         audio_seconds = getattr(info, "duration", None)
         # faster-whisper returns a generator; consuming it is what does the work.
         segments = []
