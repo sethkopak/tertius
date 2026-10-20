@@ -11,7 +11,7 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **641 tests, all passing** on Windows locally (one skips, a librosa path).
-The Chinese round-trip changes (second 2026-10-19 entry) have not been to CI.
+The Chinese round-trip changes (second 2026-10-19 entry) passed CI on all eight jobs.
 Green in CI on all eight jobs for the first 2026-10-19 changes: 615-616 passed with
 5-6 skipped. That is two more skips than before, and they are the two new T5
 loader tests, which need torch and transformers, neither installed on the
