@@ -67,8 +67,31 @@ def test_chinese_digits_become_chinese_numerals():
     spelled out, as `诗篇6689` both times. num2words has no Chinese, so this
     is spelled by Tertius itself.
     """
-    assert spell("詩篇 66:8,9.", "zh") == "詩篇 六十六:八,九."
     assert spell("1月1日的吗哪", "zh") == "一月一日的吗哪"
+
+
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        # Psalms count in 篇, every other book in 章.
+        ("詩篇 66:8,9.", "詩篇 第六十六篇第八和第九节."),
+        ("帖撒羅尼迦後書 2:10-12", "帖撒羅尼迦後書 第二章第十至十二节"),
+        ("約翰福音 3:16", "約翰福音 第三章第十六节"),
+        ("詩篇 23:1-3, 5", "詩篇 第二十三篇第一至三和第五节"),
+    ],
+)
+def test_a_chinese_reference_is_read_as_chapter_and_verse(text, spoken):
+    """`六十六:八,九` was heard back as `6689`: the colon has no word.
+
+    Read as 第六十六篇第八和第九节, it came back as "Psalm 66 verses 8 and 9"
+    three times in four.
+    """
+    assert spell(text, "zh") == spoken
+
+
+def test_a_clock_time_is_not_read_as_a_reference():
+    """Only numbers after a book name are a chapter and verse."""
+    assert spell("我们在 10:30 见面", "zh") == "我们在 十:三十 见面"
 
 
 @pytest.mark.parametrize(

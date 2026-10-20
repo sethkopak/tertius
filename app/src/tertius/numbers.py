@@ -84,6 +84,60 @@ def _chinese(value: int) -> str:
 # Languages `num2words` cannot do, spelled here instead.
 _OWN_SPELLERS = {"zh": _chinese}
 
+# `66:8,9`, `2:10-12`: chapter, colon, then verses joined by commas and dashes.
+_CHAPTER_VERSE = re.compile(
+    r"(?P<chapter>\d+)\s*[:：]\s*(?P<verses>\d+(?:\s*[-–—~～,，、]\s*\d+)*)"
+)
+_VERSE_JOINER = re.compile(r"\s*([-–—~～,，、])\s*")
+_PSALMS = ("詩篇", "诗篇")
+
+
+@functools.lru_cache(maxsize=1)
+def _chinese_book_names() -> tuple[str, ...]:
+    """The Chinese names of the 66 books, from the table scripture.py uses.
+
+    That table is also where the names in a translation come from - references
+    are localized from it - so a reference in translated Chinese ends in one.
+    """
+    from .scripture import _table
+
+    names = {
+        entry.get("labels", {}).get("zh") for entry in _table().values()
+    }
+    return tuple(sorted((n for n in names if n), key=len, reverse=True))
+
+
+def _chinese_references(text: str) -> str:
+    """Say `詩篇 66:8,9` the way a Chinese reader does: 詩篇第六十六篇第八、九节.
+
+    Spelling the numbers alone was not enough. `六十六:八,九` has no word for
+    the colon, Chatterbox runs the numbers together, and Whisper heard it back
+    as `6689`, which madlad rendered "Chapters 66,89". Chapters of the Psalms
+    are 篇 rather than 章; a range is 至 and a list is 和.
+
+    和 and not 、 for a list, measured over four takes each: `第八、九节` was
+    read without a pause and heard back as `第八九节` three times - "Psalm 66
+    Chapter 89" - and `第八和第九节` was heard right all four times.
+
+    Only after a book name, so a clock time (`10:30`) is not read as chapter
+    ten, verse thirty.
+    """
+    books = _chinese_book_names()
+
+    def say(match: "re.Match") -> str:
+        before = text[: match.start()].rstrip()
+        if not before.endswith(books):
+            return match.group(0)
+        unit = "篇" if before.endswith(_PSALMS) else "章"
+        parts = _VERSE_JOINER.split(match.group("verses"))
+        verses = "".join(
+            _chinese(int(part)) if part.isdigit() else ("至" if part in "-–—~～" else "和第")
+            for part in parts
+        )
+        return f"第{_chinese(int(match.group('chapter')))}{unit}第{verses}节"
+
+    return _CHAPTER_VERSE.sub(say, text)
+
 
 @functools.lru_cache(maxsize=32)
 def _supported(language: str) -> bool:
@@ -117,6 +171,8 @@ def spell(text: str, language: str) -> str:
     own = _OWN_SPELLERS.get(language)
     if own is None and not _supported(language):
         return text
+    if language == "zh":
+        text = _chinese_references(text)
 
     def say(match: "re.Match") -> str:
         value = int(match.group(0))
