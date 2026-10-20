@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
 
 ## Where it stands
 
@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**641 tests, all passing** on Windows locally (one skips, a librosa path).
+**651 tests, all passing** on Windows locally (one skips, a librosa path).
+The 2026-10-20 verse-number and dropped-clause changes have not been to CI.
 The Chinese round-trip changes (second 2026-10-19 entry) passed CI on all eight jobs.
 Green in CI on all eight jobs for the first 2026-10-19 changes: 615-616 passed with
 5-6 skipped. That is two more skips than before, and they are the two new T5
@@ -130,6 +131,62 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-20 — verse numbers, and a clause madlad dropped
+
+The 2026-10-19 fixes, run through the app on `0101.mp3`, still gave
+"Chapters 66,89" for Psalm 66:8,9, and lost "He has kept us from falling
+through these appointments" altogether.
+
+**Verse numbers** (`numbers._chinese_references`). `六十六:八,九` has no word
+for the colon, so Chatterbox ran the numbers together and Whisper heard
+`6689`. A reference after a Chinese book name is now read the way a Chinese
+reader says it: `詩篇 66:8,9` -> 詩篇第六十六篇第八和第九节, `2:10-12` ->
+第二章第十至十二节. Psalms count in 篇, other books in 章. The book names come
+from `book_names.json`, which is also where the names in a translation come
+from, so a clock time like `10:30` is left alone. A list is 和, not 、:
+over four takes each, `第八、九节` was heard as `第八九节` three times ("Psalm
+66 Chapter 89"), and `第八和第九节` was heard right four times out of four.
+
+**The dropped clause** (`Translator._restore_dropped_clauses`). Whisper heard
+`他通过这些任命使我们不至于跌倒,贴萨罗尼加后书2,12又有经文说,...` as one
+sentence, and madlad began its English at the reference. Beam sizes 1, 4 and 8
+and length penalties up to 2.0 all dropped the clause, and so did reference
+protection on or off. Alone, it translated whole. Now, for Chinese and
+Japanese sources, each comma clause is also translated alone. If a clause
+has three or more content words and **none** of them appear in the
+sentence's translation, the sentence is cut after it and translated in two
+parts. That threshold is measured: across 33 clauses of two transcripts, the
+dropped one scored 0 of 3. Everything else that scored low was a synonym
+("gives life" for "quicken"). A looser rule re-translated those too, and one
+came back as "Thank you for your kind words."
+
+**Found on the way: the check never ran in the app.** `_source_code_for`
+returned "" for madlad, because madlad works out the source language itself,
+so the check was skipped for the one model it was written for. The tests had
+passed "zh" by hand. It now returns the detected language, which madlad's
+encoding ignores. With that fixed, the check also caught a different failure
+in a real transcript: madlad had replaced a whole garbled first sentence with
+invented scripture ("10:11 And he said unto them, Behold..."). Re-translated
+in two parts, it came back as the right content.
+
+**Through the app afterwards** (restart, upload `0101.mp3`, Chinese with
+reading, then the reading back to English):
+
+> Every day, mother of heaven, mother of the first day of the month, call upon
+> our God, and let the voice of his praise be heard: for he hath given life to
+> our souls, that our feet may not be moved, Psalm 66:8-9.
+> ...
+> He has kept us from falling through these appointments.
+> In 2 Thessalonians 2:10-12 there is another passage that says, "Minna, you
+> must be faithful to our God, ..."
+> Psalm 66, verses 8 and 9.
+
+All three references are right, and nothing is missing. **Still wrong:** 吗哪
+is still "mother", and 众民哪 / 称颂 were misheard (众敏娜, 承误) as "Minna"
+and "faithful". madlad still has its own failures: in the four test takes it
+once said "chapters eight and nine", and on 2026-10-20 twice gave
+"2 Thessalonians 10-12" without the chapter.
 
 ## 2026-10-19 — Chinese back to English was wrong, and madlad was not why
 
