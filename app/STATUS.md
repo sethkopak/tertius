@@ -10,8 +10,9 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**620 tests, all passing** on Windows locally (one skips, a librosa path).
-Green in CI on all eight jobs for the 2026-10-19 changes: 615-616 passed with
+**641 tests, all passing** on Windows locally (one skips, a librosa path).
+The Chinese round-trip changes (second 2026-10-19 entry) have not been to CI.
+Green in CI on all eight jobs for the first 2026-10-19 changes: 615-616 passed with
 5-6 skipped. That is two more skips than before, and they are the two new T5
 loader tests, which need torch and transformers, neither installed on the
 runners. So the madlad fix is tested only on this machine.
@@ -129,6 +130,69 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-19 — Chinese back to English was wrong, and madlad was not why
+
+Reported: the English -> Chinese translation of a Manna read correctly, but
+reading that Chinese aloud, transcribing it and translating it back gave
+nonsense English ("January ladder", "eat the six diamonds"). Google did better.
+
+**madlad was not the problem.** Given `0101.zh.txt` itself, it gave back
+English close to the original. It translated faithfully what Whisper heard,
+and Whisper heard 吗哪 as 妈哪 ("mother"), 1月1日 as 一月梯子 ("ladder") and
+`詩篇 66:8,9` as 吃偏六霄钻对业. Three causes, in the reading and the
+transcription:
+
+1. **Chinese digits went to the voice model unspelled** (`numbers.py`).
+   `num2words` has no Chinese, and the module said Chinese "handles digits
+   itself". Never measured, and wrong: madlad writes digits, and Chatterbox
+   read `66:8,9` as noise. Tertius now spells 0-9999 in Chinese numerals
+   itself. Heard back, `詩篇 66:8,9.` went from `诗篇6498点通` / `诗篇六小憋酒`
+   to `诗篇6689` in both takes; `1月1日` started coming back as `1月1日`.
+2. **No Chinese word segmentation** (`speech._segment_chinese`). Chatterbox
+   segments Chinese with `spacy-pkuseg`, which has no Python 3.14 wheel, and
+   there is no C++ compiler on this machine to build it. jieba (pure Python,
+   MIT, verified on PyPI and GitHub) stands in when pkuseg is absent. Six
+   seeds, one Manna, characters outside numbers heard wrong: **11.9%
+   unsegmented, 10.4% with jieba**, better in 5 of 6. In the sixth, one short
+   line ran on into 40 characters of babble, the only such take in 48, so
+   that may be chance or may not. jieba is in the speak extra and
+   `CHATTERBOX_DEPENDENCIES`. Existing installs only get it through
+   `pip install jieba`; without it the reading is unsegmented, as before.
+3. **Whisper wrote Chinese without punctuation** (`transcribe.PUNCTUATION_HINTS`).
+   35 phrases, no 。 or , at all, so the "sentence" pass handed madlad 450
+   characters as one sentence. A punctuated Chinese line given as `hotwords`
+   fixes it in every 30 s window. `initial_prompt` was tried first, and is
+   dropped after the first window because `condition_on_previous_text` is
+   off. When auto-detecting, Whisper is asked again once it has detected
+   Chinese, because the hint has to be in the language. Chinese segments
+   are now sentence-length, about 3-12 s, where they were 1-3 s phrases,
+   so a Chinese `.srt` has longer cues.
+
+**After all three, end to end** (read `0101.zh.txt`, transcribe with
+auto-detect, translate back with madlad, three takes):
+
+> Bless our God, O daily mother of heaven, O mother of the first day of the
+> month, O all people, and let the voice of His praise be heard; for He gives
+> life to our souls, and does not let our feet slip.
+> ...
+> He has kept us from falling through these appointments.
+
+Before: "Everyday Mother of Heaven January ladder O name of all you call Ask
+our God ...".
+
+**Still wrong:**
+- 吗哪 (manna) is heard as 妈那/妈哪 in every take, so it comes back as
+  "mother". It is a rare word, and Whisper picks the common characters.
+- Verse colons are lost: `66:8,9` is heard as `66,89` and comes back as
+  "Psalms 66, 89". `2:10-12` came back as `2,12` or `2,12-12`.
+- In one take of three, Chatterbox **left out a whole clause**
+  (当我们记得…幻想). Whisper, with VAD on and off, did not hear it. That take's
+  garbled first sentence then sent **madlad into a loop** ("the God of our
+  fathers" ×7, with an invented "10:10"). m2m100-1.2B looped on the same
+  input too ("Mother of the day" ×31). Neither is fixed.
+
+The round trip stacks three lossy steps. It is a stress test, not a use.
 
 ## 2026-10-19 — madlad wrote nonsense, and every job ran at a fifth of its speed
 
