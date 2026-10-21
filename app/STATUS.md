@@ -227,8 +227,18 @@ one call per file, 17-20 s each):
 Between madlad and Google, and it makes things up: that is the second time
 today Qwen added content the input does not have.
 
-**Still to come:** the ten-file listening score for Qwen sentence mode
-(running).
+**Qwen sentence, ten files, listened to: 4.7% misheard (114/2424), nothing
+lost.** Per file: 0120 4.7%, 0226 5.9%, 0403 7.8%, 0510 8.3%, 0616 6.0%,
+0723 2.2%, 0829 3.3%, 1005 5.1%, 1111 1.4%, 1218 3.4%. It beat madlad on
+three files (0829, 1111, 1218). 祂 is in this text 7 times and was never
+heard as 怨, so that cause is weaker than it looked.
+
+**Result: as tried, Qwen3-4B does not beat madlad for a listener.** madlad
+3.4% / nothing lost; Qwen sentence 4.7% / nothing lost; Qwen passage 5.1% /
+one reference lost. Both Qwen modes also added content the English did not
+have (0829), which madlad did not. What has *not* been tried: a different
+prompt, sampling settings, Qwen's own reference rendering instead of the
+table's, or any other model.
 
 ## 2026-10-21 — what Chinese listeners hear, measured on ten files
 
