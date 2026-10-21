@@ -1,0 +1,137 @@
+"""Listening to each generated chunk, to catch text the voice model left out.
+
+Chatterbox sometimes ends a chunk early and cleanly, so nothing sounds wrong
+and the abrupt-ending check (`tail_ratio`) passes: the words are simply not
+there. Measured on 2026-10-20, ten Manna readings in Chinese: the last chunk
+of 1005 ended `...恐怕你们心里疲乏乏力 。 " 希伯來書 第十二章第三节.`, and the
+reading stopped after the closing quote. On 2026-10-19 one take in three of
+0101 left out a whole clause.
+
+So a small Whisper on the CPU transcribes each chunk, and a stretch of the
+chunk's text that it did not hear sends the chunk back for another take.
+`base` was chosen by measurement: on 1005, 0120 and 1111 it found the
+missing reference and nothing else, as `small` did, at 7-18 s per file
+against 19-26 s. On the CPU because the GPU is full of the voice model while
+this runs.
+
+Chinese only for now: it is the only language this was measured on, and the
+threshold below is in Chinese characters.
+"""
+
+from __future__ import annotations
+
+import difflib
+import logging
+import re
+from typing import Sequence
+
+log = logging.getLogger(__name__)
+
+LISTENER_MODEL = "base"
+LANGUAGES = frozenset({"zh"})
+# A stretch of the text this long, unheard, counts as left out. Shorter gaps
+# are what a small model mishears anyway.
+MIN_MISSING_CHARS = 6
+WHISPER_RATE = 16_000
+
+_NOT_TEXT = re.compile(r"[\W_a-zA-Z]+")
+_DIGITS = re.compile(r"\d+")
+
+
+def _normalize(text: str) -> str:
+    from .numbers import _chinese
+
+    text = _DIGITS.sub(
+        lambda m: _chinese(int(m.group())) if int(m.group()) <= 9999 else m.group(),
+        text,
+    )
+    return _NOT_TEXT.sub("", text)
+
+
+def missing_text(spoken: str, heard: str) -> list[str]:
+    """Stretches of `spoken` that are absent from `heard`.
+
+    A replacement counts only when the spoken side is more than twice the
+    heard side: a Traditional character heard back as its Simplified form, or
+    a misheard word, is a one-for-one swap and not an omission.
+    """
+    said, got = _normalize(spoken), _normalize(heard)
+    matcher = difflib.SequenceMatcher(None, said, got, autojunk=False)
+    out = []
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if i2 - i1 < MIN_MISSING_CHARS:
+            continue
+        if op == "delete" or (op == "replace" and i2 - i1 > 2 * (j2 - j1)):
+            out.append(said[i1:i2])
+    return out
+
+
+def _resample(samples: Sequence[float], rate: int):
+    import numpy
+
+    audio = numpy.asarray(samples, dtype=numpy.float32)
+    if rate == WHISPER_RATE or not len(audio):
+        return audio
+    length = int(len(audio) * WHISPER_RATE / rate)
+    positions = numpy.linspace(0, len(audio) - 1, length)
+    return numpy.interp(positions, numpy.arange(len(audio)), audio).astype(numpy.float32)
+
+
+class Listener:
+    """A CPU Whisper, loaded on first use, that never fails a reading."""
+
+    def __init__(self):
+        self._model = None
+        self._unavailable = False
+
+    def _load(self):
+        if self._model is None and not self._unavailable:
+            try:
+                from huggingface_hub import snapshot_download
+                from faster_whisper import WhisperModel
+
+                from .transcribe import MODEL_FILE_PATTERNS, resolve_repo_id
+
+                # Downloaded by `Speaker.load` at job start. Here only what is
+                # already on disk is used, so a reading never stops to fetch it.
+                folder = snapshot_download(
+                    resolve_repo_id(LISTENER_MODEL),
+                    allow_patterns=MODEL_FILE_PATTERNS,
+                    local_files_only=True,
+                )
+                self._model = WhisperModel(folder, device="cpu", compute_type="int8")
+            except Exception as exc:
+                log.info("not listening back to the reading: %s", exc)
+                self._unavailable = True
+        return self._model
+
+    def missing(self, spoken: str, samples: Sequence[float], rate: int, language: str) -> list[str]:
+        """What the chunk left out; empty when nothing did or nothing could tell."""
+        if language not in LANGUAGES:
+            return []
+        model = self._load()
+        if model is None:
+            return []
+        try:
+            segments, _ = model.transcribe(
+                _resample(samples, rate), language=language, beam_size=1,
+                vad_filter=False, condition_on_previous_text=False,
+            )
+            heard = "".join(segment.text for segment in segments)
+        except Exception:
+            log.debug("listening back failed", exc_info=True)
+            return []
+        return missing_text(spoken, heard)
+
+    def unload(self) -> None:
+        self._model = None
+
+
+def ensure_model(on_progress=None) -> None:
+    """Fetch the listener at job start. Not fatal: no listener, no check."""
+    try:
+        from .transcribe import ensure_model_downloaded
+
+        ensure_model_downloaded(LISTENER_MODEL, on_progress)
+    except Exception as exc:
+        log.info("could not fetch the listen-back model: %s", exc)

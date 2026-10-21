@@ -869,6 +869,20 @@ def _packaged_speech_languages() -> tuple[str, ...]:
     return ()
 
 
+# Words the voice model mispronounces, and a spelling it says right. Only what
+# the model reads changes; the transcript and cues keep the written word.
+#
+# 吗哪 (manna) is mǎ nǎ, but 吗 is far more often the question particle "ma",
+# and Chatterbox read it that way: heard back as 妈 ("mother") in two takes of
+# four. Spelled 玛哪, the first syllable was heard as 玛 (mǎ) four of four
+# (2026-10-21).
+SPOKEN_AS = {"zh": {"吗哪": "玛哪"}}
+
+# Languages whose quotation marks are removed before reading; see Speaker.speak.
+QUOTES_STRIPPED = frozenset({"zh"})
+_QUOTE_MARKS = re.compile(r'\s*["“”]\s*')
+
+
 class _JiebaSegmenter:
     """The one method Chatterbox calls on its segmenter, answered by jieba."""
 
@@ -927,6 +941,7 @@ class Speaker:
         self.requested_device = device
         self.on_download_progress = on_download_progress
         self._diacritizer = None
+        self._listener = None
         self._model = None
         self.active_device: str | None = None
         self.gpu_fallback_reason: str | None = None
@@ -1049,6 +1064,10 @@ class Speaker:
             raise
         if self.family == "chatterbox-mtl":
             _segment_chinese(model)
+            # The listen-back model, fetched now so a reading never waits on it.
+            from .listen_back import ensure_model
+
+            ensure_model(self.on_download_progress)
         self._model = model
         self.active_device = device
 
@@ -1071,6 +1090,16 @@ class Speaker:
         from .numbers import spell
 
         text = spell(chunk.text, language)
+
+        # Quotation marks out of Chinese. They are never spoken, and Chatterbox
+        # takes `。 "` as the end of the chunk: 1005's last chunk ended
+        # `...疲乏乏力 。 " 希伯來書 第十二章第三节.` and three takes out of three
+        # stopped at the quote, the reference never read. With the marks
+        # removed, three out of three read it (2026-10-21).
+        if language in QUOTES_STRIPPED:
+            text = _QUOTE_MARKS.sub("", text)
+        for written, said in SPOKEN_AS.get(language, {}).items():
+            text = text.replace(written, said)
 
         # Hebrew is written without vowels, and Chatterbox guesses them - badly
         # enough that the words change. Measured, `תהילים 66:8,9` was read as a
@@ -1095,32 +1124,64 @@ class Speaker:
         #
         # The best take is kept rather than the last, so a chunk that never
         # comes out clean is no worse off than it is today.
+        #
+        # Chinese chunks are also listened to (listen_back.py): a take can end
+        # cleanly and still leave text out. Takes are ranked by how much they
+        # left out first and how abruptly they ended second, so a complete
+        # take beats a tidy incomplete one.
         best = None
         for attempt in range(1 + SPEECH_TRUNCATION_RETRIES):
             wav = self._model.generate(text, **arguments)
             try:
-                ratio = tail_ratio(_as_samples(wav), self.sample_rate)
+                samples = _as_samples(wav)
+                ratio = tail_ratio(samples, self.sample_rate)
             except Exception:  # pragma: no cover - never fail a reading on this
                 log.debug("could not measure the chunk tail", exc_info=True)
                 return wav
-            if best is None or ratio < best[0]:
-                best = (ratio, wav)
-            if ratio <= SPEECH_TRUNCATED_TAIL_RATIO:
+            missing = self._left_out(text, samples, language)
+            lost = sum(len(m) for m in missing)
+            if best is None or (lost, ratio) < best[0]:
+                best = ((lost, ratio), wav)
+            if ratio <= SPEECH_TRUNCATED_TAIL_RATIO and not missing:
                 break
-            log.info(
-                "chunk ended abruptly (tail %.0f%% of full volume); "
-                "attempt %d of %d",
-                ratio * 100,
-                attempt + 1,
-                1 + SPEECH_TRUNCATION_RETRIES,
-            )
+            if missing:
+                log.info(
+                    "chunk left out %s; attempt %d of %d",
+                    " / ".join(missing),
+                    attempt + 1,
+                    1 + SPEECH_TRUNCATION_RETRIES,
+                )
+            else:
+                log.info(
+                    "chunk ended abruptly (tail %.0f%% of full volume); "
+                    "attempt %d of %d",
+                    ratio * 100,
+                    attempt + 1,
+                    1 + SPEECH_TRUNCATION_RETRIES,
+                )
         assert best is not None
-        if best[0] > SPEECH_TRUNCATED_TAIL_RATIO:
+        (lost, ratio), wav = best
+        if lost:
+            log.warning(
+                "a chunk still leaves out %d character(s) after %d attempts; "
+                "keeping the most complete take", lost, 1 + SPEECH_TRUNCATION_RETRIES,
+            )
+        elif ratio > SPEECH_TRUNCATED_TAIL_RATIO:
             log.warning(
                 "a chunk still ends abruptly after %d attempts; keeping the "
                 "least bad take", 1 + SPEECH_TRUNCATION_RETRIES,
             )
-        return best[1]
+        return wav
+
+    def _left_out(self, text: str, samples, language: str) -> list[str]:
+        """What a take left out of `text`, per listen_back.py. Never raises."""
+        from .listen_back import LANGUAGES, Listener
+
+        if language not in LANGUAGES:
+            return []
+        if self._listener is None:
+            self._listener = Listener()
+        return self._listener.missing(text, samples, self.sample_rate, language)
 
     def _niqqud(self):
         """The Hebrew diacritizer, loaded on first use.
@@ -1146,6 +1207,8 @@ class Speaker:
         self._model = None
         if self._diacritizer is not None:
             self._diacritizer.unload()
+        if self._listener is not None:
+            self._listener.unload()
 
 
 # ------------------------------------------------------------------ the output
