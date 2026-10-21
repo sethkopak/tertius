@@ -163,6 +163,25 @@ def test_a_sentence_longer_than_the_budget_is_still_sent_whole():
     assert len(script.chunks[0].text) > 300
 
 
+def test_a_line_ending_in_a_colon_stays_with_what_it_introduces():
+    """0616: `再读一遍经文：` ended a chunk and was left out of seven takes in nine."""
+    from tertius.speech import _pack, spoken_length
+
+    before = "最深的悲伤变成了记忆,那里的白昼之星最明亮。"
+    verse = "现在看来,没有任何惩罚是喜乐的,而是悲痛的。"
+    # A budget where the colon line fits after `before` but its verse does not.
+    budget = spoken_length(before) + 1 + spoken_length("再读一遍经文：") + 2
+    chunks = _pack([before, "再读一遍经文：", verse], budget)
+    assert chunks == [before, f"再读一遍经文： {verse}"]
+
+
+def test_a_colon_line_is_not_joined_past_the_budget():
+    from tertius.speech import _pack
+
+    chunks = _pack(["He said:", "x" * 50], 20)
+    assert chunks[0] == "He said:"
+
+
 def test_empty_text_produces_no_chunks():
     assert script_for("   \n\n  ").chunks == []
 

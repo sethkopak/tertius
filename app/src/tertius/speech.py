@@ -449,11 +449,33 @@ def _units(sentences: Sequence[str], budget: int) -> list[str]:
     return units
 
 
+def _keep_with_next(units: Sequence[str], budget: int) -> list[str]:
+    """Join a unit that ends in a colon to the one it introduces.
+
+    A short last sentence after a long one is where Chatterbox stops early.
+    0616's `再读一遍经文：` fell at the end of a chunk, with its verse opening the
+    next, and was left out of seven takes in nine - ending in `。` instead made
+    no difference, two in three either way (2026-10-21). A colon says the next sentence belongs with this
+    one, so they go into a chunk together whenever the two fit the budget.
+    """
+    out: list[str] = []
+    for unit in units:
+        if (
+            out
+            and out[-1].rstrip().endswith((":", "："))
+            and spoken_length(out[-1]) + 1 + spoken_length(unit) <= budget
+        ):
+            out[-1] = f"{out[-1]} {unit}"
+        else:
+            out.append(unit)
+    return out
+
+
 def _pack(sentences: Sequence[str], budget: int) -> list[str]:
     """Group sentences into chunks of at most `budget` characters of speech."""
     chunks: list[str] = []
     current = ""
-    for sentence in _units(sentences, budget):
+    for sentence in _keep_with_next(_units(sentences, budget), budget):
         if not current:
             current = sentence
         elif spoken_length(current) + 1 + spoken_length(sentence) <= budget:
