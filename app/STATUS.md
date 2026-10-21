@@ -11,7 +11,7 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **673 tests, all passing** on Windows locally (one skips, a librosa path).
-The 2026-10-21 changes have not been to CI.
+The 2026-10-21 changes passed CI on all eight jobs.
 The 2026-10-20 verse-number and dropped-clause changes passed CI on all eight jobs.
 The Chinese round-trip changes (second 2026-10-19 entry) passed CI on all eight jobs.
 Green in CI on all eight jobs for the first 2026-10-19 changes: 615-616 passed with
