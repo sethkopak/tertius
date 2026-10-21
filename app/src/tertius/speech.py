@@ -1126,9 +1126,10 @@ class Speaker:
         # comes out clean is no worse off than it is today.
         #
         # Chinese chunks are also listened to (listen_back.py): a take can end
-        # cleanly and still leave text out. Takes are ranked by how much they
-        # left out first and how abruptly they ended second, so a complete
-        # take beats a tidy incomplete one.
+        # cleanly and still leave text out, or babble text that is not there.
+        # Takes are ranked by how many characters they got wrong that way
+        # first and how abruptly they ended second, so a faithful take beats a
+        # tidy unfaithful one.
         best = None
         for attempt in range(1 + SPEECH_TRUNCATION_RETRIES):
             wav = self._model.generate(text, **arguments)
@@ -1138,16 +1139,17 @@ class Speaker:
             except Exception:  # pragma: no cover - never fail a reading on this
                 log.debug("could not measure the chunk tail", exc_info=True)
                 return wav
-            missing = self._left_out(text, samples, language)
-            lost = sum(len(m) for m in missing)
+            missing, added = self._heard_wrong(text, samples, language)
+            lost = sum(len(m) for m in missing) + sum(len(a) for a in added)
             if best is None or (lost, ratio) < best[0]:
                 best = ((lost, ratio), wav)
-            if ratio <= SPEECH_TRUNCATED_TAIL_RATIO and not missing:
+            if ratio <= SPEECH_TRUNCATED_TAIL_RATIO and not lost:
                 break
-            if missing:
+            if lost:
                 log.info(
-                    "chunk left out %s; attempt %d of %d",
-                    " / ".join(missing),
+                    "chunk left out %s, added %s; attempt %d of %d",
+                    " / ".join(missing) or "nothing",
+                    " / ".join(added) or "nothing",
                     attempt + 1,
                     1 + SPEECH_TRUNCATION_RETRIES,
                 )
@@ -1163,8 +1165,9 @@ class Speaker:
         (lost, ratio), wav = best
         if lost:
             log.warning(
-                "a chunk still leaves out %d character(s) after %d attempts; "
-                "keeping the most complete take", lost, 1 + SPEECH_TRUNCATION_RETRIES,
+                "a chunk still leaves out or adds %d character(s) after %d "
+                "attempts; keeping the most faithful take",
+                lost, 1 + SPEECH_TRUNCATION_RETRIES,
             )
         elif ratio > SPEECH_TRUNCATED_TAIL_RATIO:
             log.warning(
@@ -1173,15 +1176,18 @@ class Speaker:
             )
         return wav
 
-    def _left_out(self, text: str, samples, language: str) -> list[str]:
-        """What a take left out of `text`, per listen_back.py. Never raises."""
+    def _heard_wrong(self, text: str, samples, language: str) -> tuple[list[str], list[str]]:
+        """What a take left out of `text` and added to it, per listen_back.py.
+
+        Never raises.
+        """
         from .listen_back import LANGUAGES, Listener
 
         if language not in LANGUAGES:
-            return []
+            return [], []
         if self._listener is None:
             self._listener = Listener()
-        return self._listener.missing(text, samples, self.sample_rate, language)
+        return self._listener.check(text, samples, self.sample_rate, language)
 
     def _niqqud(self):
         """The Hebrew diacritizer, loaded on first use.

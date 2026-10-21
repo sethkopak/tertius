@@ -66,6 +66,25 @@ def missing_text(spoken: str, heard: str) -> list[str]:
     return out
 
 
+def added_text(spoken: str, heard: str) -> list[str]:
+    """Stretches of `heard` with no counterpart in `spoken`: babble.
+
+    The mirror of `missing_text`. On 2026-10-21 Chatterbox babbled in the
+    middle of 0403 - Whisper heard 这里采万,依台万,台万,采万,采万,采万,采万, none
+    of it in the text - and listening back, which looked only for what was
+    left out, passed it. It was most of that file's 18% misheard.
+    """
+    said, got = _normalize(spoken), _normalize(heard)
+    matcher = difflib.SequenceMatcher(None, said, got, autojunk=False)
+    out = []
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if j2 - j1 < MIN_MISSING_CHARS:
+            continue
+        if op == "insert" or (op == "replace" and j2 - j1 > 2 * (i2 - i1)):
+            out.append(got[j1:j2])
+    return out
+
+
 def _resample(samples: Sequence[float], rate: int):
     import numpy
 
@@ -105,13 +124,15 @@ class Listener:
                 self._unavailable = True
         return self._model
 
-    def missing(self, spoken: str, samples: Sequence[float], rate: int, language: str) -> list[str]:
-        """What the chunk left out; empty when nothing did or nothing could tell."""
+    def check(
+        self, spoken: str, samples: Sequence[float], rate: int, language: str
+    ) -> tuple[list[str], list[str]]:
+        """`(left out, added)` for a chunk; both empty when nothing could tell."""
         if language not in LANGUAGES:
-            return []
+            return [], []
         model = self._load()
         if model is None:
-            return []
+            return [], []
         try:
             segments, _ = model.transcribe(
                 _resample(samples, rate), language=language, beam_size=1,
@@ -120,8 +141,8 @@ class Listener:
             heard = "".join(segment.text for segment in segments)
         except Exception:
             log.debug("listening back failed", exc_info=True)
-            return []
-        return missing_text(spoken, heard)
+            return [], []
+        return missing_text(spoken, heard), added_text(spoken, heard)
 
     def unload(self) -> None:
         self._model = None
