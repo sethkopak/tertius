@@ -184,3 +184,13 @@ def test_the_speaker_spells_but_the_cue_keeps_the_digits():
     assert spoken["text"] == "Psalm sixty-six, verses eight and nine."
     # The chunk itself is untouched, so the cues still carry the digits.
     assert chunk.text == "Psalm 66, verses 8 and 9."
+
+
+@pytest.mark.parametrize("text", ["雅各書 4.3", "雅各书 4.3"])
+def test_a_dotted_reference_in_either_script_is_read_as_one(text):
+    """Whisper writes "James 4.3"; it was read aloud as "four three three"."""
+    assert spell(text, "zh").endswith("第四章第三节")
+
+
+def test_a_decimal_that_follows_no_book_is_not_a_reference():
+    assert spell("价格是 4.5 元", "zh") == "价格是 四.五 元"

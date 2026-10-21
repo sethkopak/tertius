@@ -86,7 +86,9 @@ _OWN_SPELLERS = {"zh": _chinese}
 
 # `66:8,9`, `2:10-12`: chapter, colon, then verses joined by commas and dashes.
 _CHAPTER_VERSE = re.compile(
-    r"(?P<chapter>\d+)\s*[:：]\s*(?P<verses>\d+(?:\s*[-–—~～,，、]\s*\d+)*)"
+    # `.` too, after a book name only: Whisper writes "James 4.3", which was
+    # read aloud as "four three three".
+    r"(?P<chapter>\d+)\s*[:：.．]\s*(?P<verses>\d+(?:\s*[-–—~～,，、]\s*\d+)*)"
 )
 _VERSE_JOINER = re.compile(r"\s*([-–—~～,，、])\s*")
 _PSALMS = ("詩篇", "诗篇")
@@ -104,7 +106,20 @@ def _chinese_book_names() -> tuple[str, ...]:
     names = {
         entry.get("labels", {}).get("zh") for entry in _table().values()
     }
-    return tuple(sorted((n for n in names if n), key=len, reverse=True))
+    names.discard(None)
+    # The table is Traditional; madlad sometimes writes a book name itself,
+    # in Simplified (`雅各书 4.3`). Both forms count.
+    names |= {name.translate(_BOOK_T2S) for name in names}
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+# Traditional -> Simplified for the 23 characters that differ among the 66
+# Chinese book names. Generated once with OpenCC t2s, so Tertius does not need
+# OpenCC to recognize a Simplified book name.
+_BOOK_T2S = str.maketrans(
+    "亞來傳創師彌後數書歷猶瑪紀約結羅記詩該賽門馬鴻",
+    "亚来传创师弥后数书历犹玛纪约结罗记诗该赛门马鸿",
+)
 
 
 def _chinese_references(text: str) -> str:
