@@ -85,7 +85,11 @@ log = logging.getLogger(__name__)
 
 # The placeholder. See the module docstring for why this exact shape.
 PLACEHOLDER = "@{}@"
-_PLACEHOLDER_RE = re.compile(r"@(\d+)@")
+# Read back leniently. madlad, into Chinese, returned `@0@` as `@ 0 @`
+# (2026-10-20, Manna for June 16); matched exactly, the reference was appended
+# at the end and `@ 0 @` was left in the text to be read aloud. Full-width ＠
+# too, which a CJK model can produce the same way.
+_PLACEHOLDER_RE = re.compile(r"[@＠]\s*(\d+)\s*[@＠]")
 
 # Book names, including the abbreviations this corpus actually uses - taken
 # from sampling it rather than from a style guide, which is why "Thes." and
@@ -397,7 +401,7 @@ def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
 # one-letter words for this to mistake.
 _HEBREW_LETTER = "א-ת"
 _HE_DETACHED_PREFIX = re.compile(
-    rf"(?<![{_HEBREW_LETTER}])(ו?[בכלמשה]|ו)\s+(?=@\d+@)"
+    rf"(?<![{_HEBREW_LETTER}])(ו?[בכלמשה]|ו)\s+(?=[@＠]\s*\d+\s*[@＠])"
 )
 # ב, כ and ל absorb the definite article: "in the Epistle" is `באיגרת`, not
 # `בהאיגרת`. Named rather than inferred from a leading ה, because a leading ה is
@@ -676,9 +680,9 @@ def protect(texts: Sequence[str]) -> tuple[list[str], list[list[str]]]:
 # A masked source that ends on a citation and then its sentence's stop:
 # `Compare @0@ with @1@.` The stop is captured; anything after it (a closing
 # quote or bracket) is allowed but not carried over.
-_ENDS_ON_CITATION = re.compile(r"@\d+@([.!?…]+)[\"'”’)\]]*\s*$")
+_ENDS_ON_CITATION = re.compile(r"[@＠]\s*\d+\s*[@＠]([.!?…]+)[\"'”’)\]]*\s*$")
 # A translation that ends on a bare placeholder, with nothing after it.
-_ENDS_ON_PLACEHOLDER = re.compile(r"@\d+@\s*$")
+_ENDS_ON_PLACEHOLDER = re.compile(r"[@＠]\s*\d+\s*[@＠]\s*$")
 
 # Where a language writes its sentence stop differently. The same scripts
 # `alignment._SENTENCE_END` splits on - anything not here gets the source's own

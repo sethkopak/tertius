@@ -615,3 +615,17 @@ def test_the_fetcher_asks_for_the_languages_the_translator_supports():
     if not supported:
         pytest.skip("m2m100-418M is not converted here, so it has no language list")
     assert set(fetch_book_names.LANGUAGES) == set(supported)
+
+
+@pytest.mark.parametrize("placeholder", ["@ 0 @", "@0 @", "＠0＠"])
+def test_a_placeholder_the_model_spaced_out_is_still_put_back(placeholder):
+    """madlad returned `@0@` as `@ 0 @` in Chinese.
+
+    Matched exactly, the reference was appended at the end and `@ 0 @` was
+    left in the text, where the reading said it aloud ("00令").
+    """
+    from tertius.scripture import restore
+
+    out = restore(f"由此行使 {placeholder} 它是", ["Hebrews 12:11"], language="zh")
+    assert "@" not in out and "＠" not in out
+    assert out.count("12:11") == 1
