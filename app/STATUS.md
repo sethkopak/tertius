@@ -2900,8 +2900,10 @@ did not.
    - **Fixed lines from a table, not the model.** Every Manna file opens
      "Manna for <date>" and repeats its verse after "The text again".
      madlad writes 文本再次 and drops or garbles the title; Google wrote
-     再读一遍经文. These lines recur in all 365 files, so they can be named the
-     way references already are, and the model never sees them.
+     再读一遍经文. All ten harness files have both lines (the other
+     recordings are untranscribed, so unchecked); if the rest do too, they
+     can be named the way references already are, and the model never sees
+     them.
    - **Catch babble.** Listening back checks only for missing text; 0403's
      babble was added text and cost 18%. Flag a chunk whose heard characters
      have no counterpart in its text, and retake it.
