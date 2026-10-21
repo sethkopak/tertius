@@ -133,6 +133,70 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-21 (later) — Qwen3-4B-Instruct-2507 as translator: in progress
+
+Nothing in the app has changed. Qwen runs from a scratch script outside the
+repo that mirrors `Translator.translate`'s reference protection (bare
+references named from the table, the rest masked as `@N@` and restored), so
+the comparison with madlad is like for like.
+
+**Running it.** `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f`,
+Apache-2.0, 8.0 GB of bf16 safetensors. Loaded in 4-bit through
+transformers' bitsandbytes support: NF4, float16 compute (Turing has no fast
+bfloat16), greedy decoding. Two new packages, both checked on PyPI first:
+`bitsandbytes==0.50.2` (MIT, a `py3-none-win_amd64` wheel, so no compiler)
+and `accelerate==1.15.0` (Apache-2.0); pip added `psutil` with them. Installed
+in `.venv` only, not yet in `requirements.txt`. **2.85 GiB peak on the GPU**,
+loaded in 20 s, 14-23 s to translate one Manna file. madlad needs a converted
+CTranslate2 model; Qwen needs none.
+
+Download note: `hf.exe` in `.venv` exits 1 with no output from this shell
+(likely the spaces in the path); `snapshot_download` from Python works. Xet
+writes to disk in bursts, so a file sitting at 0 bytes is not a stall.
+
+**madlad rerun as the baseline: 3.4% misheard, nothing lost** (3.2% last
+session). The readings from last session were gone, so all four stages ran
+again; the gap is run-to-run. Qwen is scored on these same ten transcripts.
+
+**Two ways to call Qwen.** *Sentence*: one sentence per call, as madlad gets
+them. *Passage*: the whole transcript in one call, one sentence per line,
+references masked across it.
+
+**English to Chinese, 0120, read side by side** (madlad / Qwen passage /
+Google):
+- The 96-word sentence: madlad keeps it as one; Qwen passage splits it into
+  four; Google into three.
+- "The text again": 文本再次 / 这段经文再次提醒我们 / 再读一遍经文.
+- Qwen's slips: 儿女 for "sons", 责备 rather than 管教 in one line, and
+  "Manna" as 每日灵粮 (Google: 灵粮).
+
+**What the ten files showed before any listening:**
+1. Sentence mode wrote `@0@` into sentences that had no reference, in the
+   first try on 0120: the prompt mentioned placeholders on every call. Fixed
+   in the script (the instruction is given only when the text holds one, and
+   any placeholder left after restoring is removed); none leaked in the ten.
+2. **Passage mode dropped a title line**: 0510 has no "Manna for May 10th".
+   One file in ten; the other nine have it.
+3. **Sentence mode added a clause that is not in the English.** 0829's
+   transcript is already wrong ("Ye ask and receive, not because ye ask,
+   amiss."), and every translator followed it. madlad: 你们求,就得着. Qwen
+   sentence went further: 而是因为你们是凭着信心求, "but because you ask in
+   faith". That is invented content, not a mistranslation.
+
+The listening score cannot see 2 or 3: it compares the reading with the
+translator's own Chinese, not with the English.
+
+**Chinese to English** (input: what Whisper heard from madlad's readings).
+Google, compared in Chrome on 0120 and 0829 (0510 was not run; the page
+stopped updating):
+- 0120: gave the verse in scripture wording, "God deals with you as with
+  sons... (Hebrews 12:7)". madlad lost "Manna" ("20 For if you endure...").
+- 0829: recovered "because you ask amiss (James 4:3)" from garbled Chinese.
+  madlad ended on "Chapter 4 Chapter 4" and lost the reference.
+
+**Still to come:** the ten-file listening scores for Qwen passage and Qwen
+sentence (running), and Qwen Chinese to English on the same three files.
+
 ## 2026-10-21 — what Chinese listeners hear, measured on ten files
 
 Goal set: Chinese listeners understanding the reading comes first; Chinese
@@ -2701,8 +2765,8 @@ did not.
 
 ## Next steps
 
-0. **Next up (decided 2026-10-21): try Qwen3-4B-Instruct-2507 as the
-   translator.** Chinese listeners come first, and on clean input madlad's
+0. **In progress (decided 2026-10-21): try Qwen3-4B-Instruct-2507 as the
+   translator.** Results so far are in the second 2026-10-21 entry. Chinese listeners come first, and on clean input madlad's
    literal Chinese is now what limits them; Google's was plainly better on the
    same English (see the 2026-10-21 entry). Qwen3-4B is Apache-2.0, an 8 GB
    download, and needs 4-bit to fit the 6 GB card. Judge it with the same
