@@ -143,9 +143,13 @@ transcribe, translate to Chinese, read aloud with the speaker's cloned voice,
 then have Whisper listen to the reading. The score is the share of the
 spoken-form Chinese characters Whisper heard wrong, a stand-in for a
 listener, plus every stretch of six or more characters that was lost. The
-script is not in the repository. It lived in the session scratchpad.
+harness is `tools/zh_harness.py`; its docstring says how to run it. The
+readings it produced were in a session scratchpad and are not kept.
 
-**Baseline: 5.3% misheard.** Most files were 0.4-5.8%. The two worst
+**Baseline: 5.3% misheard** as scored that day. The scorer reads the
+reference through `numbers.spell`, so later changes to how references are
+spoken move it: rescored with the 2026-10-21 code, the same baseline readings
+come out at 5.5%. The 3.2% below is on the same footing as the 5.5%. Most files were 0.4-5.8%. The two worst
 (0510 12.4%, 0829 11.4%) were bad Chinese, not bad speech:
 
 1. **Whisper sometimes writes English with no punctuation**
