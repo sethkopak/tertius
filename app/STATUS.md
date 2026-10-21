@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**673 tests, all passing** on Windows locally (one skips, a librosa path).
+**679 tests, all passing** on Windows locally (one skips, a librosa path).
+The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
 The 2026-10-21 changes passed CI on all eight jobs.
 The 2026-10-20 verse-number and dropped-clause changes passed CI on all eight jobs.
 The Chinese round-trip changes (second 2026-10-19 entry) passed CI on all eight jobs.
@@ -236,9 +237,93 @@ heard as 怨, so that cause is weaker than it looked.
 **Result: as tried, Qwen3-4B does not beat madlad for a listener.** madlad
 3.4% / nothing lost; Qwen sentence 4.7% / nothing lost; Qwen passage 5.1% /
 one reference lost. Both Qwen modes also added content the English did not
-have (0829), which madlad did not. What has *not* been tried: a different
-prompt, sampling settings, Qwen's own reference rendering instead of the
-table's, or any other model.
+have (0829), which madlad did not. What has *not* been tried: sampling
+settings, Qwen's own reference rendering instead of the table's, or any other
+model.
+
+**A stricter prompt (sentence mode, nothing else changed): 5.5% misheard
+(131/2366), nothing lost.** The same prompt plus: translate everything, add
+nothing, do not fix a garbled sentence; and 他, never 祂. Per file: 0120
+6.8%, 0226 4.9%, 0403 18.0%, 0510 6.1%, 0616 5.0%, 0723 3.8%, 0829 3.5%,
+1005 4.6%, 1111 2.5%, 1218 2.6%. Before any listening, the Chinese showed:
+- **A fabricated verse.** 0829 ends 4:3 你们求，就不得，是因你们妄求，不是为要
+  得着，乃是为要显出你们的骄傲来; the second half is in neither the English nor
+  和合本. Cause: the line was `James 4.3`, which was not masked (see the fix
+  below), so the model got a bare citation and wrote a verse for it.
+- **A wrong date.** 0510's title came out 10 月的吗哪, "Manna of October"; the
+  English is "Manna for may 10th."
+- **祂 anyway**, 6 times, despite "never 祂".
+- "The text again" as 这段话再次呈现.
+
+Chinese to English with the stricter prompt stopped inventing: 0829 follows
+what is written and ends "because you ask with the wrong intention". The cost
+was 0510's KJV wording ("You anointed my head"). 0120's verse was still
+inverted.
+
+**Chatterbox babbled in 0403, and nothing caught it.** Midway through the
+reading Whisper heard 这里采万,依台万,台万,采万,采万,采万,采万 - nothing like
+it is in the text - which alone is most of 0403's 18.0%. Without 0403 the run
+is about 4.5% (97/2177), still above madlad. This is the "babbles on a short
+chunk" problem from 2026-10-19, on a 51-second, four-chunk reading. Listening
+back did not flag it because it only looks for text that is *missing*;
+text that was *added* passes. Catching it needs the opposite check: heard
+characters with no counterpart in the chunk.
+
+**Fixed: references written with a dot** (`scripture.py`, `e6a4ce2`).
+Whisper writes `James 4.3`; `numbers.py` already read the dot as
+chapter:verse, but `find_references` knew only the colon, so the line went
+to the translator unmasked. The dot now counts when there is no space either
+side (`Hebrews 12. 7 of us did.` stays a sentence end and a number). Six
+tests; 679 pass. Of the ten transcripts only 0829 has one.
+
+**madlad rerun with the fix: 3.4% (84/2493), nothing lost - unchanged.** Same
+transcripts; madlad translated all ten again, and only one line differed:
+0829's closing 雅各书 4.3 (madlad's own) became 雅各書 4:3 (the table's). The
+other nine translations were byte-identical, so their readings were reused;
+0829 was read and heard again, and scored 4.5% as before. A listener heard
+第四章第三节 either way, because `numbers.py` already read the dot. So for
+madlad the fix changes nothing audible; it matters for a translator that,
+like Qwen, does something worse with a bare citation.
+
+**Split: madlad into Chinese, Qwen back to English?** Measured on all ten:
+the Chinese Whisper heard from madlad's readings, translated to English by
+madlad (the app's `Translator`, sentence by sentence), Qwen default and Qwen
+strict (one call per file), and scored by chrF (character n-grams 1-6,
+beta 2, written in the scratch script; checked: 100 identical, 45 a
+paraphrase, 7 unrelated) against the original English transcript.
+
+| chrF | mean | files better than madlad |
+|---|---|---|
+| madlad | 54.5 | |
+| Qwen default | 52.8 | 4 of 10 |
+| Qwen strict | 52.7 | 4 of 10 |
+
+chrF rewards reusing the reference's characters, so a paraphrase ("You must
+be joyful" for "Rejoice") costs Qwen. Read side by side, all thirty:
+- **Qwen recovers scripture madlad mangles.** 0403: "Night is past, and day
+  is at hand... the armor of light" against madlad's "the seventy days have
+  come near" and "the white egg". 1005: "consider Him who... lest your hearts
+  be weary and faint" against "think of the suffering of the sinner against
+  himself". 0723: "If any man will not provide for his own" against "does not
+  feed himself", which reverses it.
+- **Qwen writes references cleanly** (`Hebrews 12:3`, `2 Peter 1:5`); madlad
+  writes "chapter 12, section 3", and once "I'm sorry about 2 Peter 1:5".
+- **Qwen misreads ambiguous Chinese.** 0616's 他们是如此的亲爱他 came out "they
+  love Him so deeply" and the souls "grow affectionate toward their Lord";
+  madlad had the direction right ("dear to their loving Lord"). It also made
+  a name out of a mishearing ("after Nahar").
+- **Qwen strict gets dates wrong**: 1005's 十月五日 became "the tenth day" (and
+  0510 became October going into Chinese).
+- **Invention**: Qwen default invented 0829's opening verse; Qwen strict added
+  nothing in the ten.
+- Some oddities are in the input, not the translators: "Jesus said" (0226) is
+  耶稣说 in what Whisper heard; "loan record" and "Sorry" are mishearings both
+  carried through. Neither recovers the opening verse of 0120 or 0226.
+
+So the split is a modest gain in scripture recovery, one chrF does not show, set
+against misreadings and wrong dates, for a second model and an 8 GB
+download. **Not adopted on this evidence.** The Chinese in this test came
+from Tertius's own readings, not from a Chinese speaker.
 
 ## 2026-10-21 — what Chinese listeners hear, measured on ten files
 
@@ -2808,13 +2893,28 @@ did not.
 
 ## Next steps
 
-0. **In progress (decided 2026-10-21): try Qwen3-4B-Instruct-2507 as the
-   translator.** Results so far are in the second 2026-10-21 entry. Chinese listeners come first, and on clean input madlad's
-   literal Chinese is now what limits them; Google's was plainly better on the
-   same English (see the 2026-10-21 entry). Qwen3-4B is Apache-2.0, an 8 GB
-   download, and needs 4-bit to fit the 6 GB card. Judge it with the same
-   ten-file harness and the Google comparison, English to Chinese first, then
-   Chinese to English. Still open alongside it:
+0. ~~Try Qwen3-4B-Instruct-2507 as the translator.~~ Tried 2026-10-21 (the
+   second entry that day): worse for a listener in every form tried (4.7-5.5%
+   against madlad's 3.4%), and it invents content. **madlad stays.** Improving
+   the Chinese from here, cheapest and most certain first:
+   - **Fixed lines from a table, not the model.** Every Manna file opens
+     "Manna for <date>" and repeats its verse after "The text again".
+     madlad writes 文本再次 and drops or garbles the title; Google wrote
+     再读一遍经文. These lines recur in all 365 files, so they can be named the
+     way references already are, and the model never sees them.
+   - **Catch babble.** Listening back checks only for missing text; 0403's
+     babble was added text and cost 18%. Flag a chunk whose heard characters
+     have no counterpart in its text, and retake it.
+   - **Sort madlad's 84 misheard characters by cause** before fixing any:
+     how many are a mispronunciation (fixable in `speech.SPOKEN_AS`, as 吗哪
+     was), how many a homophone Whisper picks without context (头浇油 heard as
+     投交友 - a person might not), how many the translation itself.
+   - **Split long English sentences before madlad sees them**, at clause
+     breaks. madlad keeps a 96-word sentence as one; Google and Qwen split it.
+     Measure with the harness.
+   - **A Chinese speaker** (item 7). Whisper is a stand-in; every number
+     above is about Whisper, not a person.
+   Still open alongside it:
    - Protect Chinese references from the translator in the Chinese-to-English
      direction. Needs fuzzy book-name matching: Whisper spells them
      differently each time (帖萨罗尼加, 帖撒罗尼迦).
@@ -2823,8 +2923,10 @@ did not.
    - The punctuation restorer covers English, German, French and Italian
      only. Other source languages that Whisper leaves unpunctuated still reach
      the translator as one long sentence.
-   - Chatterbox occasionally babbles on a short chunk (2026-10-19); nothing
-     catches it yet unless listening back notices missing text.
+   - Chatterbox occasionally babbles (2026-10-19; again in 0403 on
+     2026-10-21, inside a four-chunk reading). Listening back cannot catch
+     it: it looks only for missing text, and babble is added text. Needs a
+     check for heard characters that are not in the chunk.
 1. Read a whole translated volume properly. `V1_01` has been checked closely on
    three sentences out of 206, and structurally on all of them; that is not the
    same as having read it.
