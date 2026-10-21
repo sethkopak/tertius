@@ -205,13 +205,18 @@ _WORD_ORDINALS = {
 # Written form: `Psa. 46:10`, `2 Cor. 4:17,18`, `Dan. 2:44; 7:22,27`.
 # The ordinal in front is optional and may be a numeral or a word, because a
 # transcript spells out what a printed page abbreviates.
+#
+# A dot between chapter and verse too, as Whisper writes it: `James 4.3`
+# (2026-10-21, Manna for August 29). Missed, it reached the translator bare,
+# and Qwen wrote out a "verse" half of which is in no Bible. Only with no space
+# either side, so `Hebrews 12. 7 times...` stays a sentence end and a number.
 _ORDINAL = r"(?:[123]|first|second|third|1st|2nd|3rd)"
 _BOOK = r"[A-Z][a-zA-Z]+"
 
 _WRITTEN = re.compile(
     rf"\b(?:{_ORDINAL}\s+)?{_BOOK}\.?\s*"
     r"\d{1,3}"
-    r"(?:\s*:\s*\d{1,3}(?:\s*[-,–]\s*\d{1,3})*)"      # 46:10, 4:17,18
+    r"(?:(?:\s*:\s*|\.)\d{1,3}(?:\s*[-,–]\s*\d{1,3})*)"   # 46:10, 4:17,18, 4.3
     r"(?:\s*;\s*\d{1,3}\s*:\s*\d{1,3}(?:\s*[-,–]\s*\d{1,3})*)*",  # ; 7:22,27
     re.IGNORECASE,
 )

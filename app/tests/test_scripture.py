@@ -37,6 +37,9 @@ from tertius.scripture import (
         ("Matthew 5:11,12 .", "Matthew 5:11,12"),
         ("2 Cor. 4:17,18.", "2 Cor. 4:17,18"),
         ("Dan. 2:44; 7:22,27), and it only", "Dan. 2:44; 7:22,27"),
+        # Whisper's dot for a colon.
+        ("James 4.3", "James 4.3"),
+        ("Psalm 66.8,9.", "Psalm 66.8,9"),
         # Spoken, as a transcript of someone reading aloud has it.
         ("Psalm 66, verses 8 and 9.", "Psalm 66, verses 8 and 9"),
         ("First Thessalonians chapter 5 verse 17.", "First Thessalonians chapter 5 verse 17"),
@@ -59,6 +62,9 @@ def test_references_are_found_whole(text, expected):
         "He read it in 1914 and again in 1918.",
         "Bring the blue notebook and a pen.",
         "Figure 3 shows the tabernacle.",
+        # A dot with a space after it ends a sentence; it is not chapter:verse.
+        "Read Hebrews 12. 7 of us did.",
+        "Section 2.3 covers the offerings.",
     ],
 )
 def test_things_that_are_not_scripture_are_left_alone(text):
@@ -413,6 +419,7 @@ def test_without_sources_unprotect_behaves_exactly_as_before():
         # opens and closes with one, so this is the common case, not an edge.
         ("Psalm 66, verses 8 and 9.", True),
         ("Psa. 46:10.", True),
+        ("James 4.3", True),
         ("We read in 2 Cor. 4:17,18 that it is brief.", False),
         ("Section 2.", False),
         ("Bring a pen.", False),
@@ -488,6 +495,8 @@ def test_a_book_that_cannot_be_identified_is_not_guessed():
         # Already written; kept as it stands rather than re-derived.
         ("2 Cor. 4:17,18", "4:17,18"),
         ("Dan. 2:44; 7:22,27", "2:44;7:22,27"),
+        # Whisper's dot is read as the colon it stands for.
+        ("James 4.3", "4:3"),
     ],
 )
 def test_a_spoken_citation_is_normalised_to_the_written_form(reference, numbers):
