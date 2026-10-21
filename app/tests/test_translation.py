@@ -1465,3 +1465,47 @@ def test_a_reference_is_not_split_at_its_comma():
         "贴萨罗尼加后书2,12又有经文说,",
         "众民啊,你们要称颂我们的神。",
     ]
+
+
+# ------------------------------------------------------------ fixed lines
+
+
+def test_a_fixed_line_alone_never_reaches_the_model():
+    """`Manna for January 20th.` is named from the date, not translated."""
+    translator, asked = _canned_translator({})
+    out = translator.translate(
+        ["Manna for January 20th.", "The text again."], "zh", source_language="en"
+    )
+    assert out == ["1月20日的吗哪。", "再读一遍经文："]
+    assert asked == []
+
+
+def test_only_the_rest_of_a_sentence_reaches_the_model():
+    """Run into the verse, the fixed words go in front of its translation."""
+    rest = "Rejoice in the Lord always, and again I say rejoice."
+    translator, asked = _canned_translator({rest: "你们要靠主常常喜乐，我再说，你们要喜乐。"})
+    [chinese] = translator.translate(
+        ["The text again, " + rest], "zh", source_language="en"
+    )
+    assert asked == [rest]
+    assert chinese == "再读一遍经文：你们要靠主常常喜乐，我再说，你们要喜乐。"
+
+
+def test_a_fixed_line_before_a_bare_reference_keeps_both():
+    """`The text again. Hebrews 12:7.` needs no model at all."""
+    translator, asked = _canned_translator({})
+    translator.protect_references = True
+    [chinese] = translator.translate(
+        ["The text again. Hebrews 12:7."], "zh", source_language="en"
+    )
+    assert asked == []
+    assert chinese.startswith("再读一遍经文：")
+    assert "12:7" in chinese
+
+
+def test_other_languages_still_get_the_model():
+    translator, asked = _canned_translator({"The text again.": "El texto otra vez."})
+    assert translator.translate(["The text again."], "es", source_language="en") == [
+        "El texto otra vez."
+    ]
+    assert asked == ["The text again."]

@@ -737,6 +737,24 @@ class Translator:
 
         # Remember where the blanks were, so they can be put back afterwards.
         wanted = [i for i, text in enumerate(texts) if text and text.strip()]
+        out = list(texts)
+
+        # "Manna for January 20th" and "The text again" are named from a table
+        # (see fixed_lines.py). A sentence that opens with one keeps only its
+        # remainder for the model, and the rendered words go back in front of
+        # the translation; a sentence that is nothing else never reaches it.
+        from .fixed_lines import split as split_fixed_line
+
+        source = list(texts)
+        lead: dict[int, str] = {}
+        for i in list(wanted):
+            found = split_fixed_line(texts[i], target_language, source_language)
+            if found is None:
+                continue
+            lead[i], source[i] = found
+            if not source[i]:
+                out[i] = lead.pop(i)
+                wanted.remove(i)
 
         # A line that is nothing but a citation never reaches the model. There
         # is no prose in a pointer to translate, and handing it `@0@.` - a
@@ -748,15 +766,14 @@ class Translator:
         # in English left English *sentences* in the output, which a listener
         # hears immediately as a foreign voice in the middle of the reading.
         # They are named from the book table instead, which needs no model.
-        out = list(texts)
         if self.protect_references:
             from .scripture import is_only_reference, localize, mask, restore
 
-            bare = [i for i in wanted if is_only_reference(texts[i])]
+            bare = [i for i in wanted if is_only_reference(source[i])]
             wanted = [i for i in wanted if i not in set(bare)]
             for i in bare:
-                masked, refs = mask(texts[i])
-                out[i] = restore(masked, refs, language=target_language)
+                masked, refs = mask(source[i])
+                out[i] = lead.get(i, "") + restore(masked, refs, language=target_language)
 
         if not wanted:
             return out
@@ -766,7 +783,7 @@ class Translator:
         # segments for the `.srt`, sentences for the `.txt`, chunks for a
         # reading - comes through here, and a citation mangled in any of them
         # is mangled for good.
-        prepared = [texts[i].strip() for i in wanted]
+        prepared = [source[i].strip() for i in wanted]
         if self.protect_references:
             from .scripture import protect, unprotect
 
@@ -791,7 +808,7 @@ class Translator:
         # same either way.
         #
         # `out` was seeded above, and must not be re-seeded here: the bare
-        # citations have already been written into it.
+        # citations and fixed lines have already been written into it.
         done = 0
         total = len(wanted)
         for start in range(0, total, BATCH_SIZE):
@@ -813,7 +830,7 @@ class Translator:
                         target_language,
                         sources=[prepared[start + offset]],
                     )[0]
-                out[index] = rendered
+                out[index] = lead.get(index, "") + rendered
             done += len(chunk)
             if on_progress is not None:
                 # A reporting callback must never be able to fail a translation.
