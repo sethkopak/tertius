@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Where it stands
 
@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**651 tests, all passing** on Windows locally (one skips, a librosa path).
+**673 tests, all passing** on Windows locally (one skips, a librosa path).
+The 2026-10-21 changes have not been to CI.
 The 2026-10-20 verse-number and dropped-clause changes passed CI on all eight jobs.
 The Chinese round-trip changes (second 2026-10-19 entry) passed CI on all eight jobs.
 Green in CI on all eight jobs for the first 2026-10-19 changes: 615-616 passed with
@@ -131,6 +132,91 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-21 — what Chinese listeners hear, measured on ten files
+
+Goal set: Chinese listeners understanding the reading comes first; Chinese
+back to English second. Everything before this was tuned on 0101 alone, so
+a harness now runs the app's own code over ten Manna files that were never
+used for tuning (0120 0226 0403 0510 0616 0723 0829 1005 1111 1218):
+transcribe, translate to Chinese, read aloud with the speaker's cloned voice,
+then have Whisper listen to the reading. The score is the share of the
+spoken-form Chinese characters Whisper heard wrong, a stand-in for a
+listener, plus every stretch of six or more characters that was lost. The
+script is not in the repository. It lived in the session scratchpad.
+
+**Baseline: 5.3% misheard.** Most files were 0.4-5.8%. The two worst
+(0510 12.4%, 0829 11.4%) were bad Chinese, not bad speech:
+
+1. **Whisper sometimes writes English with no punctuation**
+   (`punctuate.py`). Three files of ten had an opening 30 s window of 90-150
+   lowercase words with no stops, so the translator got a 150-word sentence
+   and wrote word salad, `yieldeth` left in English. Prompting Whisper
+   (`initial_prompt`, `hotwords`, with and without timestamps) punctuated
+   but **lost words**: 0510's title and verse, a third of 0616. A
+   punctuation model labels words instead, so it cannot lose any:
+   `oliverguhr/fullstop-punctuation-multilang-large`, MIT, 2.2 GB, pinned
+   revision, on the CPU, under a second a file. It only touches stretches of
+   40 words or more with almost no punctuation (a real 96-word sentence with
+   15 commas is left alone), keeps scripture references whole, and is
+   fetched at job start beside the translation model. English, German,
+   French and Italian only, which is what it was trained on.
+2. **A reference placeholder leaked into the Chinese** (`scripture.py`).
+   madlad wrote `@0@` as `@ 0 @`. Matched exactly, the reference was
+   appended at the end and `@ 0 @` was read aloud (heard as `00令`).
+   Placeholders are now read back with spaces or full-width ＠.
+3. **`James 4.3`, and Simplified book names** (`numbers.py`). Whisper writes
+   a dot. It was read as "four three three". After a book name a dot now
+   means chapter:verse. Book names are matched in Simplified as well as the
+   table's Traditional, through a 23-character map generated with OpenCC.
+4. **Chatterbox stopped at a closing quote** (`speech.py`). 1005's last
+   chunk ended `...疲乏乏力 。 " 希伯來書 第十二章第三节.`, and three takes of
+   three stopped at the quote. Without the quote marks, three of three read
+   the reference. Quotation marks are removed from Chinese before reading.
+5. **吗哪 was read as "ma"** (`speech.SPOKEN_AS`). Heard as 妈 ("mother")
+   two takes in four. Read as 玛哪, it was heard as 玛 (mǎ) four of four.
+   Only what the model reads changes.
+6. **Listening back for dropped text** (`listen_back.py`). Whisper `base` on
+   the CPU transcribes each Chinese chunk; six or more unheard characters
+   send the chunk back for another take (within the existing retry budget),
+   and the most complete take is kept. On 1005, 0120 and 1111 it flagged the
+   missing reference and nothing else. It found 1005's quote problem (all
+   three takes left the same 11 characters out), which is how item 4 was
+   found. Chinese only, the one language it was measured on.
+7. **The Chinese punctuation hint lost text too** (`transcribe.py`). Over
+   20 readings with the app's settings, the bare sentence dropped a whole
+   reference the unhinted run kept, and misheard more (5.5% / 4.3% against
+   5.2% / 4.1%). The same sentence followed by the scripture words these
+   readings use lost nothing extra, misheard 5.1% / 4.1%, and still
+   punctuated. That is the hint now.
+
+**After 1-3: 4.3%** (0510 7.8%, 0616 6.5%, 0829 5.5%). **After all seven:
+3.2%, with nothing lost in any file.** 1005 went from 5.8% to 1.4%, its
+reference now read. Listening back caught one more chunk in the ten (part of
+a clause left out) and the retake had it.
+
+**Google Translate, compared in Chrome on the same input:**
+- English to Chinese (0120): Google's Chinese is plainly better for a
+  listener. It splits the 96-word sentence into several, says
+  再读一遍经文 for "The text again" (madlad: 文本再次, word for word), and
+  writes 《希伯来书》12章7节.
+- Chinese to English, given the Chinese Whisper heard from 0101: Google
+  recognized Psalm 66:8-9 from the misheard words and gave the verse as
+  scripture. It also silently dropped the misheard title line. madlad
+  cannot do either.
+
+On clean input the translator is now what limits a Chinese listener.
+**Decided: Qwen3-4B-Instruct-2507 (Apache-2.0) is tried next** as the
+offline translator: an 8 GB download, needs 4-bit to fit the card, and a new
+dependency. See *Next steps*, item 0.
+
+**Deferred:** protecting Chinese references from madlad in the
+Chinese-to-English direction. Whisper spells the book names differently each
+time (帖萨罗尼加, 帖撒罗尼迦), so exact matching would miss them, and the last
+app run already brought all three references back right.
+
+**Speed note:** a reading slowed to a crawl while the GPU was busy with a
+different task. Nothing was wrong with Tertius.
 
 ## 2026-10-20 — verse numbers, and a clause madlad dropped
 
@@ -2611,6 +2697,23 @@ did not.
 
 ## Next steps
 
+0. **Next up (decided 2026-10-21): try Qwen3-4B-Instruct-2507 as the
+   translator.** Chinese listeners come first, and on clean input madlad's
+   literal Chinese is now what limits them; Google's was plainly better on the
+   same English (see the 2026-10-21 entry). Qwen3-4B is Apache-2.0, an 8 GB
+   download, and needs 4-bit to fit the 6 GB card. Judge it with the same
+   ten-file harness and the Google comparison, English to Chinese first, then
+   Chinese to English. Still open alongside it:
+   - Protect Chinese references from the translator in the Chinese-to-English
+     direction. Needs fuzzy book-name matching: Whisper spells them
+     differently each time (帖萨罗尼加, 帖撒罗尼迦).
+   - Listening back and quote removal are measured on Chinese only. Other
+     languages may drop text the same way.
+   - The punctuation restorer covers English, German, French and Italian
+     only. Other source languages that Whisper leaves unpunctuated still reach
+     the translator as one long sentence.
+   - Chatterbox occasionally babbles on a short chunk (2026-10-19); nothing
+     catches it yet unless listening back notices missing text.
 1. Read a whole translated volume properly. `V1_01` has been checked closely on
    three sentences out of 206, and structurally on all of them; that is not the
    same as having read it.
