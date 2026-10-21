@@ -194,8 +194,41 @@ stopped updating):
 - 0829: recovered "because you ask amiss (James 4:3)" from garbled Chinese.
   madlad ended on "Chapter 4 Chapter 4" and lost the reference.
 
-**Still to come:** the ten-file listening scores for Qwen passage and Qwen
-sentence (running), and Qwen Chinese to English on the same three files.
+**Qwen passage, ten files, listened to: 5.1% misheard (122/2409), and one
+reference lost** - 0829's closing 雅各书第四章第三节 was never read. madlad on
+the same transcripts: 3.4%, nothing lost. So on this measure Qwen's more
+natural Chinese is *worse* for a listener, not better. Per file: 0120 1.4%
+(madlad 2.2%), 0226 6.4%, 0403 5.1%, 0510 9.7%, 0616 5.2%, 0723 2.5%, 0829
+8.1%, 1005 4.2%, 1111 5.1%, 1218 5.9%. Only 0120 beat madlad.
+
+Some of the gap may be the reading, not the translation. Neither is
+confirmed:
+- **祂.** Qwen writes 祂 for God's "He" (9 times in the ten files); madlad
+  never does. Twice in 0510 it was heard as 怨. 祂 and 他 are both tā, so
+  reading it as 他 would be one `speech.SPOKEN_AS` entry. Two in nine is
+  thin.
+- **Line endings.** Qwen's passage output ends lines with two spaces and
+  leaves blank lines, Markdown style. Whether that changes the reading's
+  chunking, and so the lost 0829 reference, has not been checked.
+- 0510's 头浇油 was heard as 投交友 both times it was read; madlad's wording
+  of the same verse (用油膏我的头) was heard right.
+
+**Qwen Chinese to English**, same input as Google and madlad (passage mode,
+one call per file, 17-20 s each):
+- 0120: kept "Manna" (madlad lost it), but did not recover the verse: "Who
+  is the son of a father who disciplines?" inverts it. Google gave the
+  scripture wording.
+- 0510: recognized the verse and gave the KJV wording, "Thou anointest my
+  head with oil". Google was not run on 0510.
+- 0829: the closing verse came out close ("because you ask not in the right
+  way"), but the opening one was **invented**: "do not think that you have a
+  right to it". Google recovered "because you ask amiss" in both places.
+
+Between madlad and Google, and it makes things up: that is the second time
+today Qwen added content the input does not have.
+
+**Still to come:** the ten-file listening score for Qwen sentence mode
+(running).
 
 ## 2026-10-21 — what Chinese listeners hear, measured on ten files
 
