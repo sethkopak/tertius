@@ -697,6 +697,12 @@ class Translator:
 
         tokenizer_class = getattr(transformers, TOKENIZER_CLASSES[self.family])
         tokenizer = tokenizer_class.from_pretrained(str(directory))
+
+        # Fetched here, at job start, so the download is over before any work
+        # begins. Not fatal if it fails; see punctuate.ensure_model.
+        from .punctuate import ensure_model
+
+        ensure_model(self.on_download_progress)
         self._translator = translator
         self._adapter = (
             _M2M100Adapter(tokenizer)
@@ -979,12 +985,15 @@ def prose_sentences(result) -> list[str]:
     needs to know how many sentences there are to report progress against.
     """
     from .alignment import split_sentences
+    from .punctuate import restore
 
-    text = " ".join(
-        segment.text.strip()
-        for segment in result.segments
-        if segment.text and segment.text.strip()
+    # Whisper sometimes writes a whole window with no stops at all, which made
+    # one 150-word "sentence" for the translator. See punctuate.py.
+    texts = restore(
+        [segment.text.strip() for segment in result.segments if segment.text],
+        getattr(result, "language", None),
     )
+    text = " ".join(t for t in texts if t and t.strip())
     return split_sentences(text) if text else []
 
 
