@@ -521,7 +521,19 @@ def register_cuda_dll_directories() -> list[str]:
 # The unhinted run also invented a line after the audio ended (a TV channel's
 # credit); the hinted one did not. That is one run, so it is a note, not a
 # claim.
-PUNCTUATION_HINTS = {"zh": "以下是普通话的句子。"}
+#
+# **The hint alone also dropped text.** Measured on 2026-10-21 over 20 Chinese
+# readings of ten Manna files, with this app's settings: the bare sentence lost
+# a whole scripture reference that the unhinted run kept (0829, twice in one
+# reading; on the CPU, 1111 too), and misheard 5.5% / 4.3% of characters
+# against 5.2% / 4.1% unhinted. The same sentence followed by the scripture
+# vocabulary these readings use lost nothing the unhinted run kept, misheard
+# 5.1% / 4.1%, and still punctuated every window. So that is the hint. The
+# words are Bible vocabulary because that is what this app reads; outside it
+# they are rare enough not to be heard where they were not said.
+PUNCTUATION_HINTS = {
+    "zh": "以下是普通话的句子。吗哪,众民,称颂,经文,诗篇,希伯来书,雅各书,帖撒罗尼迦后书。"
+}
 
 
 class WhisperTranscriber:
