@@ -215,11 +215,35 @@ The ten misses are not spread out:
   the verse before it was. The takes kept in the 3.1% and fixed-lines runs
   both logged Chatterbox **forcing EOS on token repetition** in that chunk.
   Psalms are the one book whose reference says 篇 twice (詩篇...第二十三篇), the
-  likely repetition - a hypothesis, not tested.
+  likely repetition - a hypothesis, tested next and wrong.
 - 0616's closing reference skipped 第十二章 in 2 of 4 (希伯来书第十一节).
 - The other four were read with slips (集七节, 习普来书, an extra 第三章, one
   take of babble).
 The test script is in a session scratchpad.
+
+**Not the wording either.** 0510's last chunk, four takes each with the
+reference read five ways - as today (`詩篇 第二十三篇第五节.`), with `。`, a
+pause after 詩篇, a pause before the verse, and without 第 - same voice and
+seeds, no retakes: heard 1/4, 0/4, 0/4, 0/4, 0/4, and **Chatterbox forced
+EOS in all 20 takes**. Every wording still said 篇 twice, so that idea was
+never really tested. What the takes did show: several stopped *before* the
+verse, after 我又说你们要欢喜. The chunk is long and repeats itself (欢喜
+three times, 溢出 twice in a few sentences), and the reference is the last
+thing in it.
+
+**Splitting the chunk at 再读一遍经文 fixes it.** The same chunk, four takes
+whole and four split in two at 再读一遍经文, so the verse and its reference
+are a chunk of their own; same voice and seeds, no retakes:
+
+| | Reference heard | 你们要欢喜 heard | Forced EOS |
+|---|---|---|---|
+| Whole, as today | 0/4 | 4/4 | 4 of 4 chunks |
+| Split | **4/4** | 4/4 | 6 of 8 chunks |
+
+EOS still fires, but on the first part it cost nothing, and on the verse it
+fired in 2 of 4 without losing the reference. Measured on this one chunk
+only. **Not in the app**: a change to how readings are chunked, waiting on
+a decision.
 
 ## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
 
@@ -3078,10 +3102,12 @@ did not.
        context in the ten-file run (3.3%, the rise all from 0616's cut-short
        references).
      - **References cut short.** Not the Traditional book names (35/40
-       either way, 2026-10-22). Next: test whether the doubled 篇 in a Psalm
-       reference is what makes Chatterbox force EOS - 0510's closing Psalm
-       23:5 was read 0 of 4 - by reading that chunk with the reference
-       worded other ways. 0616 skipping 第十二章 (2 of 4) is a separate case.
+       either way) and not the wording (five wordings, 1/20). Starting a
+       new chunk at 再读一遍经文 took 0510's closing reference from 0/4 to
+       4/4 (2026-10-22). **Decision: make 再读一遍经文 always start a chunk**
+       (in `speech._pack`), then measure on the ten files. 0616 skipping
+       第十二章 (2 of 4) is a separate case - its 再读一遍经文 already starts
+       its chunk.
      - **Score 吗哪 heard as 玛纳 as right, and ignore a trailing 谢谢**, in
        `tools/zh_harness.py`. 22 of the 77 are these; the run is about 2.2%
        without them. Changes every score's footing, so earlier runs would
