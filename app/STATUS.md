@@ -136,6 +136,40 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-22 (later) — the scorer stops counting its own artifacts
+
+`tools/zh_harness.py` score no longer counts two things that were never a
+listener's error, and **every figure from here on is on this footing**:
+- **吗哪 heard as 玛纳 or 玛娜.** It is read as 玛哪 on purpose
+  (`SPOKEN_AS`), so Whisper writing what it hears cost every title two
+  characters.
+- **A known Whisper hallucination at the very end of what was heard** -
+  only the two seen here, 谢谢 and 请不吝点赞订阅转发打赏支持明镜与点点栏目 - unless
+  the text itself ends that way.
+`--raw` scores as before. It reproduced all nine recorded figures exactly,
+so nothing else moved. Every run whose readings still exist, rescored:
+
+| Run (same ten files) | Raw | **Now** |
+|---|---|---|
+| madlad, 2026-10-21 rerun | 3.4% | **3.2%** |
+| madlad with the dot fix | 3.4% | **3.2%** |
+| Qwen passage | 5.1% | **5.1%** |
+| Qwen sentence | 4.7% | **4.1%** |
+| Qwen strict prompt | 5.5% | **4.7%** |
+| Fixed lines | 3.5% | **2.7%** |
+| + colon chunking, babble check | 3.1% | **2.2%** |
+| + 白昼/祷告/羊羔 substitutions | 3.3% | **2.5%** |
+| + new chunk at 再读一遍经文 (the code now) | 4.1% | **2.6%** |
+
+The 2026-10-21 baseline (5.5% raw) and its first fixes (3.2% raw) cannot be
+rescored: those readings are gone. Read across: madlad 3.2% to 2.2-2.7%
+with the day's changes. The last three runs differ by eight to ten
+characters in 2,523, inside the take-to-take noise of a point or so per
+file seen all day, so they are best read as one level, about 2.5%, not as
+the last two changes making things worse. Both of those fixed something
+specific that was measured directly (five of five words heard; 0510's
+reference read).
+
 ## 2026-10-22 — what the misheard characters are, and three Chatterbox gets wrong
 
 **Every misheard character of the 3.1% run, sorted by cause.** A scratch
@@ -3128,11 +3162,12 @@ did not.
        ten-file run 0510's closing reference was heard. Still open: 0616
        skipping 第十二章 (2 of 4) - its 再读一遍经文 already started its chunk,
        so it is something else.
-     - **Score 吗哪 heard as 玛纳 as right, and ignore Whisper's trailing
-       hallucinations** (谢谢, 请不吝点赞订阅...), in `tools/zh_harness.py`.
-       They were 22 of the 77 in one run and 20 of 103 in another, and they
-       swamp real differences of a point or less. Changes every score's
-       footing, so earlier runs would need rescoring to compare.
+     - ~~Stop scoring 吗哪/玛纳 and trailing hallucinations.~~ Done
+       2026-10-22; nine runs rescored, the code now at about 2.5%.
+     - **Take-to-take noise** is now the limit on what one ten-file run
+       can show: a point or so per file. Telling a change of half a point
+       from noise needs more than one reading per file - two or three takes
+       per file, or more files.
    - **Split long English sentences before madlad sees them**, at clause
      breaks. madlad keeps a 96-word sentence as one; Google and Qwen split it.
      Measure with the harness.

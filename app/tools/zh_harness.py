@@ -29,8 +29,13 @@ would count as an error. That conversion needs OpenCC, which the app does not:
 
 and pass `--pylib PYLIB`, or install it into the environment.
 
-Results recorded so far are in STATUS.md, 2026-10-21: ten Manna files (the
-default `--files`), 5.3% misheard at baseline and 3.2% after that day's fixes.
+**Two things are not counted** (since 2026-10-22): 吗哪 heard as 玛纳 or 玛娜 -
+it is read as 玛哪 on purpose - and a known Whisper hallucination at the very
+end of what was heard (谢谢, 请不吝点赞订阅...), Whisper's text for trailing
+silence. `--raw` scores as before, for comparing with older figures.
+
+Results are in STATUS.md: ten Manna files (the default `--files`), 5.3%
+misheard at baseline on 2026-10-21, raw scoring, and the runs since.
 """
 
 from __future__ import annotations
@@ -140,6 +145,28 @@ def listen(out, source, files, args):
     free()
 
 
+# Scoring, unless `--raw`. Both were scorer artifacts, not things a listener
+# would get wrong, and together they were 22 of 77 misheard characters in one
+# run and 20 of 103 in another (2026-10-22) - more than the differences being
+# measured.
+MANNA = re.compile("[吗玛][哪纳娜]")
+# Whisper's own text on the silence after speech, as found at the end of these
+# readings. Only ones actually seen here; it has others.
+HALLUCINATIONS = ("请不吝点赞订阅转发打赏支持明镜与点点栏目", "谢谢")
+
+
+def drop_trailing_hallucinations(ref: str, hyp: str) -> str:
+    """`hyp` without known Whisper hallucinations at its end, unless `ref` ends so."""
+    stripped = True
+    while stripped:
+        stripped = False
+        for phrase in HALLUCINATIONS:
+            if hyp.endswith(phrase) and not ref.endswith(phrase):
+                hyp = hyp[: -len(phrase)]
+                stripped = True
+    return hyp
+
+
 def score(out, source, files, args):
     if args.pylib:
         sys.path.insert(0, args.pylib)
@@ -161,7 +188,12 @@ def score(out, source, files, args):
             lambda m: _chinese(int(m.group())) if int(m.group()) <= 9999 else m.group(),
             text,
         )
-        return re.sub(r"[\W_a-zA-Z]+", "", cc.convert(text).translate(same))
+        text = re.sub(r"[\W_a-zA-Z]+", "", cc.convert(text).translate(same))
+        if not args.raw:
+            # 吗哪 is read as 玛哪 on purpose (speech.SPOKEN_AS), and Whisper
+            # writes what it hears: 玛纳, 玛娜. Not a mishearing of the title.
+            text = MANNA.sub("吗哪", text)
+        return text
 
     total_e = total_n = 0
     for stem in files:
@@ -170,6 +202,8 @@ def score(out, source, files, args):
             continue
         ref = norm((out / f"{stem}.zh.txt").read_text(encoding="utf-8"), True)
         hyp = norm(hp.read_text(encoding="utf-8"), False)
+        if not args.raw:
+            hyp = drop_trailing_hallucinations(ref, hyp)
         sm = difflib.SequenceMatcher(None, ref, hyp, autojunk=False)
         errors, lost = 0, []
         for op, i1, i2, j1, j2 in sm.get_opcodes():
@@ -205,6 +239,9 @@ def main() -> None:
     ap.add_argument("--heard-tag", default="", help="suffix for a listen/score variant")
     ap.add_argument("--hotwords", default=None, help='Chinese Whisper hint for listen; "" for none')
     ap.add_argument("--pylib", default=None, help="extra folder on sys.path holding OpenCC")
+    ap.add_argument("--raw", action="store_true",
+                    help="score as before 2026-10-22: 玛纳 for 吗哪 and trailing "
+                         "hallucinations count as errors")
     args = ap.parse_args()
 
     stages = list(STAGES) if args.stage == "all" else [args.stage]
