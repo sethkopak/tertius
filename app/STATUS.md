@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**710 tests, all passing** on Windows locally (one skips, a librosa path).
+**713 tests, all passing** on Windows locally (one skips, a librosa path).
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -135,6 +135,47 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-22 (evening) — three takes per file, and extra takes for a cut reference
+
+**Three takes per file: 2.5% misheard** (188 of 7,569 characters). Same ten
+files, the translations of the last run above, the code as it now stands.
+`tools/zh_harness.py --takes 3` reads and hears each file three times, each
+take seeded apart; the first take keeps the old seed and file names.
+
+| File | Mean | Take 1 | Take 2 | Take 3 |
+|---|---|---|---|---|
+| 0120 | 1.7% | 1.9% | 1.9% | 1.5% |
+| 0226 | 4.2% | 2.3% | 4.3% | 5.9% |
+| 0403 | 0.8% | 0.5% | 0.9% | 0.9% |
+| 0510 | 2.8% | 1.9% | 2.8% | 3.8% |
+| 0616 | 3.9% | 6.1% | 2.2% | 3.6% |
+| 0723 | 1.2% | 0.3% | 1.0% | 2.3% |
+| 0829 | 4.8% | 4.9% | 2.0% | 7.4% |
+| 1005 | 2.9% | 3.3% | 1.7% | 3.7% |
+| 1111 | 1.8% | 2.1% | 2.5% | 0.8% |
+| 1218 | 0.9% | 0.8% | 2.0% | 0.0% |
+| **All** | **2.5%** | 2.4% | 2.1% | 2.9% |
+
+- **The noise, measured.** Whole-run totals span 2.1-2.9% on unchanged
+  text; single files swing by up to 5.4 points (0829: 2.0% to 7.4%). So the
+  2.2-2.7% of the last four runs above were one level, as read, and a change
+  worth less than about a point over ten files needs `--takes 3` to show.
+- No take lost a stretch of six or more characters.
+
+**Extra takes for a reference cut short (`SPEECH_REFERENCE_RETRIES = 2`):
+never fired.** When listening back finds a chapter or verse among what was
+left out (`listen_back.names_a_reference`), a chunk gets five takes instead of
+three. In 30 readings it fired zero times, yet 0616 read 希伯來書 12:11 as
+希伯来书第十一节, without 第十二章, in 3 of its 6 references. 第十二章 is four
+characters, and listening back only counts a gap of six or more
+(`MIN_MISSING_CHARS`), so the drop it was built for passes unseen. It is
+committed because it is harmless and tested, but **it does nothing yet**;
+catching a cut reference needs a check of the reference itself, not a lower
+threshold for everything (shorter gaps are what `base` mishears anyway).
+
+Retakes that did fire: 3 for babble (all on the first or second take of a
+chunk), 14 for an abrupt ending, 2 of which kept the least bad of three.
 
 ## 2026-10-22 (later) — the scorer stops counting its own artifacts
 
