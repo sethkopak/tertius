@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**707 tests, all passing** on Windows locally (one skips, a librosa path).
+**708 tests, all passing** on Windows locally (one skips, a librosa path).
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -163,9 +163,11 @@ not in the app):
 - **A tone differs** (神→身, 显→贤, 士兵→事并, 疲乏→批发): Chatterbox or Whisper.
   Only listening can tell, and a Chinese speaker is the right judge.
 - **Near or different sound**: mostly real mispronunciations, and three
-  words were **never heard as written in any run on 2026-10-21**, across
-  different translations and voices: 白昼 0 of 20, 祷告 0 of 7, 羊羔 0 of 5.
-  For comparison 罗马书 was heard right 13 of 14, 得着 9 of 13 (得 also reads
+  words were **never heard as written in any harness reading**, six runs of
+  ten files across different translations and voices: 白昼 0 of 17, 祷告 0
+  of 7, 羊羔 0 of 4 (counted once per reading; first written 20/7/5, which
+  counted readings the dot-fix run reused). For comparison 罗马书 was heard
+  right 11 of 12, 得着 9 of 13 (得 also reads
   děi, heard as 逮).
 - **Dropped**: 第十二章 from 0616's closing reference, 十 from 0510's 二十三.
 - **Added**: the 谢谢 above, and a 乏 from madlad's own doubled 疲乏乏力.
@@ -181,8 +183,10 @@ holding one of them, three takes each way, same voice and seeds, no retakes:
 | 祷告 dǎo gào | 0/3 | 导告 | 3/3 |
 | 羊羔 yáng gāo | 0/3 | 羊高 | 3/3 |
 
-Not yet in `SPOKEN_AS`: waiting on a decision. The test script is in a
-session scratchpad, not the repo.
+**Now in `speech.SPOKEN_AS`**, Simplified forms only (the Traditional 白晝
+and 禱告 never occurred, so were not measured). One test. Not yet measured
+in a full ten-file run. The test script is in a session scratchpad, not the
+repo.
 
 ## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
 
@@ -3036,8 +3040,9 @@ did not.
      nothing lost; the babble check fired once in ten files, on real text.
    - ~~Sort the misheard characters by cause.~~ Done 2026-10-22 (the 77 of
      the 3.1% run). Two follow-ups, each a decision:
-     - **Add 白昼→白宙, 祷告→导告, 羊羔→羊高 to `speech.SPOKEN_AS`.** Measured
-       0/15 heard right as they are, 13/15 with them.
+     - ~~Add 白昼→白宙, 祷告→导告, 羊羔→羊高 to `speech.SPOKEN_AS`.~~ Done
+       2026-10-22: 0/15 heard right as they were, 13/15 with them. Not yet
+       run through the ten-file harness.
      - **Score 吗哪 heard as 玛纳 as right, and ignore a trailing 谢谢**, in
        `tools/zh_harness.py`. 22 of the 77 are these; the run is about 2.2%
        without them. Changes every score's footing, so earlier runs would

@@ -178,3 +178,29 @@ def test_manna_is_read_with_the_spelling_the_model_says_right():
 
     assert spoken["text"] == "每日天上的玛哪。"
     assert chunk.text == "每日天上的吗哪。"
+
+
+def test_words_chatterbox_never_said_right_are_read_as_same_sound_ones():
+    """白昼, 祷告 and 羊羔: 0 of 15 heard right as written, 13 of 15 like this."""
+    from tertius.speech import Speaker
+
+    spoken = {}
+
+    class _Model:
+        sr = 24000
+
+        def generate(self, text, **kwargs):
+            spoken["text"] = text
+            return [0.0] * 24000
+
+    speaker = Speaker("chatterbox-multilingual", device="cpu")
+    speaker._model = _Model()
+    speaker._listener = type("L", (), {"check": lambda *a: ([], []), "unload": lambda s: None})()
+    speaker.load = lambda: None
+    written = "白昼将临,我们学会正确的祷告,谦卑如羊羔。"
+    chunk = _chunk(written)
+    speaker.speak(chunk, "zh")
+
+    assert spoken["text"] == "白宙将临,我们学会正确的导告,谦卑如羊高。"
+    # The text a reader sees, and the cues, keep the real words.
+    assert chunk.text == written

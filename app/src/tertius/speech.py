@@ -898,7 +898,23 @@ def _packaged_speech_languages() -> tuple[str, ...]:
 # and Chatterbox read it that way: heard back as 妈 ("mother") in two takes of
 # four. Spelled 玛哪, the first syllable was heard as 玛 (mǎ) four of four
 # (2026-10-21).
-SPOKEN_AS = {"zh": {"吗哪": "玛哪"}}
+#
+# Three more were never heard as written in any harness reading, six runs of
+# ten files (2026-10-21/22): 白昼 0 of 17 (heard 白赞, 白蛋, 白凳...), 祷告 0 of
+# 7, 羊羔 0 of 4.
+# Each is given a common character with the same sound. Every chunk holding
+# one, three takes each way, same voice and seed (2026-10-22): 白昼 0/9 as it
+# is, 7/9 as 白宙 (the two misses a tone off); 祷告 0/3, 3/3 as 导告; 羊羔 0/3,
+# 3/3 as 羊高. Simplified only: the Traditional forms never occurred and were
+# not measured.
+SPOKEN_AS = {
+    "zh": {
+        "吗哪": "玛哪",
+        "白昼": "白宙",
+        "祷告": "导告",
+        "羊羔": "羊高",
+    }
+}
 
 # Languages whose quotation marks are removed before reading; see Speaker.speak.
 QUOTES_STRIPPED = frozenset({"zh"})
