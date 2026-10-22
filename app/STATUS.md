@@ -183,10 +183,43 @@ holding one of them, three takes each way, same voice and seeds, no retakes:
 | 祷告 dǎo gào | 0/3 | 导告 | 3/3 |
 | 羊羔 yáng gāo | 0/3 | 羊高 | 3/3 |
 
-**Now in `speech.SPOKEN_AS`**, Simplified forms only (the Traditional 白晝
-and 禱告 never occurred, so were not measured). One test. Not yet measured
-in a full ten-file run. The test script is in a session scratchpad, not the
-repo.
+**Now in `speech.SPOKEN_AS`** (`dae883b`), Simplified forms only (the
+Traditional 白晝 and 禱告 never occurred, so were not measured). One test.
+The test script is in a session scratchpad, not the repo.
+
+**Ten-file run with them: 3.3% (82/2523), nothing lost** - against 3.1%
+without. Same translations; the four files holding one of the words were
+read again (0403, 0616, 0829, 1218), and the other six readings reused,
+their chunks being unchanged (unchanged files scored identically last
+time). **All five occurrences were heard right in context** - 白昼 3/3,
+祷告 1/1, 羊羔 1/1 - where the 3.1% run heard none. 0403 went 2.3% to 1.4%,
+1218 2.4% to 1.6%, 0829 stayed at 4.4%. The total rose because of **0616,
+4.7% to 7.9%**: with its chunk text changed, the takes changed too, and
+both Hebrews 12:11 references came out cut short (8 characters dropped).
+Listening back heard it and retook, and three takes of three were still
+short. So the words are fixed; the noise is a reference that Chatterbox
+sometimes truncates whatever the change - the *Dropped* row above, and the
+next thing worth looking at.
+
+**References cut short: not the Traditional book names.** Every missing
+stretch of 0616's reference began at 來, and the book names come from the
+table in Traditional (希伯來書) inside Simplified prose. Tested: all 20
+reference chunks of the ten files, two takes as written and two with each
+book name read in Simplified (`numbers._BOOK_T2S`, via `SPOKEN_AS`), same
+voice and seeds, no retakes, the whole reference sought in what the
+harness's Whisper heard (toneless pinyin, digits as numerals): **35 of 40
+both ways.** Ruled out.
+
+The ten misses are not spread out:
+- **0510's closing 詩篇第二十三篇第五节 was never read - 0 of 4**, either form;
+  the verse before it was. The takes kept in the 3.1% and fixed-lines runs
+  both logged Chatterbox **forcing EOS on token repetition** in that chunk.
+  Psalms are the one book whose reference says 篇 twice (詩篇...第二十三篇), the
+  likely repetition - a hypothesis, not tested.
+- 0616's closing reference skipped 第十二章 in 2 of 4 (希伯来书第十一节).
+- The other four were read with slips (集七节, 习普来书, an extra 第三章, one
+  take of babble).
+The test script is in a session scratchpad.
 
 ## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
 
@@ -3041,8 +3074,14 @@ did not.
    - ~~Sort the misheard characters by cause.~~ Done 2026-10-22 (the 77 of
      the 3.1% run). Two follow-ups, each a decision:
      - ~~Add 白昼→白宙, 祷告→导告, 羊羔→羊高 to `speech.SPOKEN_AS`.~~ Done
-       2026-10-22: 0/15 heard right as they were, 13/15 with them. Not yet
-       run through the ten-file harness.
+       2026-10-22: 0/15 heard right as they were, 13/15 with them; 5/5 in
+       context in the ten-file run (3.3%, the rise all from 0616's cut-short
+       references).
+     - **References cut short.** Not the Traditional book names (35/40
+       either way, 2026-10-22). Next: test whether the doubled 篇 in a Psalm
+       reference is what makes Chatterbox force EOS - 0510's closing Psalm
+       23:5 was read 0 of 4 - by reading that chunk with the reference
+       worded other ways. 0616 skipping 第十二章 (2 of 4) is a separate case.
      - **Score 吗哪 heard as 玛纳 as right, and ignore a trailing 谢谢**, in
        `tools/zh_harness.py`. 22 of the 77 are these; the run is about 2.2%
        without them. Changes every score's footing, so earlier runs would
