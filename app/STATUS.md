@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## Where it stands
 
@@ -135,6 +135,54 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-22 — what the misheard characters are, and three Chatterbox gets wrong
+
+**Every misheard character of the 3.1% run, sorted by cause.** A scratch
+script aligns the reference and what was heard exactly as `zh_harness.score`
+does (its total matches: 77/2523) and tags each span by sound with
+`pypinyin` (MIT, checked on PyPI, installed with `--target` beside OpenCC,
+not in the app):
+
+| Cause | Chars | Share |
+|---|---|---|
+| Scorer artifacts | 22 | 29% |
+| Same syllables, same tones (Whisper picked a homophone) | 6 | 8% |
+| Same syllables, a tone differs | 23 | 30% |
+| Near or different sound | 20 | 26% |
+| Dropped (parts of references) | 5 | 6% |
+| Added | 3 | 4% |
+
+- **Scorer artifacts.** 吗哪 is read as 玛哪 on purpose (`SPOKEN_AS`) and
+  Whisper writes 玛纳, so every title costs two characters - 20 in all. The
+  other two are 谢谢, Whisper's usual hallucination on the silence at the end
+  of 0120. Neither is anything a listener would get wrong. **Without them
+  the run is about 2.2% (55/2523).**
+- **Homophones** (膏→高, 在→再, 义→异): the reading was right; a person has
+  context Whisper lacks.
+- **A tone differs** (神→身, 显→贤, 士兵→事并, 疲乏→批发): Chatterbox or Whisper.
+  Only listening can tell, and a Chinese speaker is the right judge.
+- **Near or different sound**: mostly real mispronunciations, and three
+  words were **never heard as written in any run on 2026-10-21**, across
+  different translations and voices: 白昼 0 of 20, 祷告 0 of 7, 羊羔 0 of 5.
+  For comparison 罗马书 was heard right 13 of 14, 得着 9 of 13 (得 also reads
+  děi, heard as 逮).
+- **Dropped**: 第十二章 from 0616's closing reference, 十 from 0510's 二十三.
+- **Added**: the 谢谢 above, and a 乏 from madlad's own doubled 疲乏乏力.
+
+**A same-sound character fixes the three words.** Read the way 吗哪 already
+is - Chatterbox given a common character with the same sound, the text left
+alone - and listened to by the harness's Whisper. Every chunk of the 3.1% run
+holding one of them, three takes each way, same voice and seeds, no retakes:
+
+| Word | As it is | Read as | With it |
+|---|---|---|---|
+| 白昼 bái zhòu | 0/9 (白赠, 白电, 白赞, 白凳, 白蛋) | 白宙 | 7/9 (the two misses: 白肘, a tone off) |
+| 祷告 dǎo gào | 0/3 | 导告 | 3/3 |
+| 羊羔 yáng gāo | 0/3 | 羊高 | 3/3 |
+
+Not yet in `SPOKEN_AS`: waiting on a decision. The test script is in a
+session scratchpad, not the repo.
 
 ## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
 
@@ -2986,10 +3034,14 @@ did not.
    - ~~Catch babble.~~ Done (`ef27871`), and a line ending in a colon now
      stays with what follows it (`ce33f3e`). With all three: **3.1%**,
      nothing lost; the babble check fired once in ten files, on real text.
-   - **Sort madlad's 84 misheard characters by cause** before fixing any:
-     how many are a mispronunciation (fixable in `speech.SPOKEN_AS`, as 吗哪
-     was), how many a homophone Whisper picks without context (头浇油 heard as
-     投交友 - a person might not), how many the translation itself.
+   - ~~Sort the misheard characters by cause.~~ Done 2026-10-22 (the 77 of
+     the 3.1% run). Two follow-ups, each a decision:
+     - **Add 白昼→白宙, 祷告→导告, 羊羔→羊高 to `speech.SPOKEN_AS`.** Measured
+       0/15 heard right as they are, 13/15 with them.
+     - **Score 吗哪 heard as 玛纳 as right, and ignore a trailing 谢谢**, in
+       `tools/zh_harness.py`. 22 of the 77 are these; the run is about 2.2%
+       without them. Changes every score's footing, so earlier runs would
+       need rescoring to compare.
    - **Split long English sentences before madlad sees them**, at clause
      breaks. madlad keeps a 96-word sentence as one; Google and Qwen split it.
      Measure with the harness.
