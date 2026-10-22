@@ -170,6 +170,18 @@ the last two changes making things worse. Both of those fixed something
 specific that was measured directly (five of five words heard; 0510's
 reference read).
 
+**0616's skipped 第十二章: not the wording.** Both drops went from the first
+第十 of 第十二章第十一节 to the second, so the guess was that the reading
+jumps between the two. Both of 0616's reference chunks, three takes each,
+same voice and seeds, no retakes: as today 5/6, with a pause
+(第十二章，第十一节) 5/6, without 第 (十二章十一节) 5/6. The pause still
+skipped once, the version without 第 lost the whole reference once, and
+Chatterbox forced EOS in all 18 takes. Not supported; no wording change.
+The miss rate moves between samples - 1 of 6 here, 2 of 4 the day before,
+3 of 3 in one harness run - which is what a random failure looks like on
+this few takes. Retakes are what catch it now, and in that harness run
+three were not enough.
+
 ## 2026-10-22 — what the misheard characters are, and three Chatterbox gets wrong
 
 **Every misheard character of the 3.1% run, sorted by cause.** A scratch
@@ -3160,8 +3172,9 @@ did not.
        new chunk at 再读一遍经文 took 0510's closing reference from 0/4 to
        4/4 (2026-10-22). 再读一遍经文 now always starts a chunk; in the
        ten-file run 0510's closing reference was heard. Still open: 0616
-       skipping 第十二章 (2 of 4) - its 再读一遍经文 already started its chunk,
-       so it is something else.
+       skipping 第十二章 - not its wording (three wordings, 5/6 each). What
+       is left to try is more takes for a chunk whose reference was not
+       heard, beyond today's retry budget of three.
      - ~~Stop scoring 吗哪/玛纳 and trailing hallucinations.~~ Done
        2026-10-22; nine runs rescored, the code now at about 2.5%.
      - **Take-to-take noise** is now the limit on what one ten-file run
