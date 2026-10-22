@@ -10,7 +10,9 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**679 tests, all passing** on Windows locally (one skips, a librosa path).
+**707 tests, all passing** on Windows locally (one skips, a librosa path).
+The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
+all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
 The 2026-10-21 changes passed CI on all eight jobs.
 The 2026-10-20 verse-number and dropped-clause changes passed CI on all eight jobs.
@@ -134,7 +136,86 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
-## 2026-10-21 (later) — Qwen3-4B-Instruct-2507 as translator: in progress
+## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
+
+Three changes to how Chinese is translated and read, after the Qwen trial
+(next entry) settled on keeping madlad. All measured with the ten-file
+harness, against madlad's 3.4% on the same transcripts.
+
+**All three together: 3.1% misheard (77/2523), nothing lost** - the best of
+the day (madlad 3.4%, fixed lines alone 3.5%). Same translations as the
+fixed-lines run; only the reading changed. Per file: 0120 3.3%, 0226 1.6%,
+0403 2.3%, 0510 3.3%, 0616 4.7%, 0723 1.0%, 0829 4.4%, 1005 4.7%, 1111 3.0%,
+1218 2.4%. Three files changed, two of them for the better:
+- **0616, 7.2% to 4.7%**: 再读一遍经文 now opens the last chunk with its verse
+  and was read.
+- **1218, 4.8% to 2.4%**: the babble check heard the repeated phrase
+  (钢丝千倍如杨齐, the doubled 谦卑如羊羔), retook the chunk, and the retake was
+  clean.
+- **0403, 1.8% to 2.3%** (about one character): the colon change repacked
+  it too, 再读一遍经文 moving into the last chunk with its verse; the line was
+  heard either way.
+The other seven scored exactly as before: their chunks did not change, and
+the reading is seeded per file. **The babble check retook one chunk in ten
+files, and that one was real** - no false alarms in this run. Three other
+retakes were for missing references, as before (0510 twice, 0616 once).
+(The run was stopped at 3 of 10 and resumed the next day; finished files
+were kept.)
+
+**1. The Manna title and "The text again" come from a table**
+(`fixed_lines.py`, `642fe18`). Over the ten files madlad wrote the title
+three ways - 曼纳, 吗哪, and twice 放款记录, "loan record" - and "The text
+again" as 文本再次 or, once, 耶稣说 ("Jesus said"), which is not in the
+English. English into Chinese, these are now `<month>月<day>日的吗哪` and
+`再读一遍经文：` (Google's wording), and only the rest of the sentence reaches
+the model when Whisper runs the line into the verse. "The text again" counts
+only when punctuation or the end follows, so "The text again shows..." is
+left alone. Every other language pair is unchanged. 21 tests.
+
+Read and listened to: **3.5% misheard (89/2523)** - no overall change from
+3.4%. The lines themselves were heard right: every title as
+`<month>月<day>日的玛纳` (吗哪 read through `SPOKEN_AS`), and 再读一遍经文 in nine
+files of ten. Files moved both ways: 0120 3.3% (madlad 2.2%), 0226 1.6%
+(4.4%), 0403 1.8% (2.3%), 0510 3.3% (7.8%), 0616 7.2% (5.4%), 0723 1.0%
+(1.3%), 0829 4.4% (4.5%), 1005 4.7% (1.4%), 1111 3.0% (1.7%), 1218 4.8%
+(4.0%). Besides the twenty fixed lines, a few other sentences shifted by a
+character with identical English; likely CTranslate2's batches now holding
+different sentences, not checked.
+
+**2. A line ending in a colon stays with what it introduces** (`speech.py`,
+`ce33f3e`). 0616 lost 再读一遍经文 in all three takes: it fell at the end of a
+chunk, its verse opening the next. Read alone that chunk dropped it two takes
+in three ending in `：`, and two in three ending in `。` - so not the colon:
+Chatterbox drops a short last sentence after a long one. A colon-ended unit
+is now packed with the next one whenever the two fit the budget. Read that
+way, the line was in three takes of three. 2 tests.
+
+**3. Listening back catches added text as well as missing**
+(`listen_back.py`, `ef27871`). `added_text` mirrors `missing_text`: six or
+more heard characters with nothing in the chunk to match them. A take is
+ranked by left-out plus added characters and retaken on either, within the
+same retry budget. 5 tests.
+
+Run over today's 40 finished readings with Whisper `base` on the CPU, as
+listening back runs it (whole files, since chunk audio is not kept - a
+weaker test of false alarms than per-chunk use):
+- **Caught**: the 0403 babble (Qwen strict), and one nobody knew of -
+  madlad's 1218 reads 谦卑如羊羔 twice (heard 谦卑如庚子，谦卑如养仙); the text has
+  it once.
+- **Probably false**: madlad 0120 and Qwen strict 1005, where only the CPU
+  model heard the extra characters, not the GPU one the harness scores with.
+  Not confirmed by listening.
+- Qwen passage 0120: the CPU model lost its place in a long reading and both
+  checks fired over most of the file - an artifact of whole-file listening.
+A false alarm costs up to two more takes of that chunk, not quality: the
+most faithful take is kept. Per chunk, in the ten-file run above, it fired
+once, on real repeated text.
+
+**Corrected**: the Qwen entry below said the "Jesus said" in Chinese to
+English came from Whisper mishearing. It came from madlad, going into
+Chinese.
+
+## 2026-10-21 (later) — Qwen3-4B-Instruct-2507 as translator: tried, madlad stays
 
 Nothing in the app has changed. Qwen runs from a scratch script outside the
 repo that mirrors `Translator.translate`'s reference protection (bare
@@ -317,8 +398,9 @@ be joyful" for "Rejoice") costs Qwen. Read side by side, all thirty:
 - **Invention**: Qwen default invented 0829's opening verse; Qwen strict added
   nothing in the ten.
 - Some oddities are in the input, not the translators: "Jesus said" (0226) is
-  耶稣说 in what Whisper heard; "loan record" and "Sorry" are mishearings both
-  carried through. Neither recovers the opening verse of 0120 or 0226.
+  耶稣说 in what Whisper heard - put there by madlad going into Chinese, as it
+  turned out (see the evening entry); "loan record" (放款记录, also madlad's)
+  and "Sorry" both translators carried through. Neither recovers the opening verse of 0120 or 0226.
 
 So the split is a modest gain in scripture recovery, one chrF does not show, set
 against misreadings and wrong dates, for a second model and an 8 GB
@@ -2897,16 +2979,13 @@ did not.
    second entry that day): worse for a listener in every form tried (4.7-5.5%
    against madlad's 3.4%), and it invents content. **madlad stays.** Improving
    the Chinese from here, cheapest and most certain first:
-   - **Fixed lines from a table, not the model.** Every Manna file opens
-     "Manna for <date>" and repeats its verse after "The text again".
-     madlad writes 文本再次 and drops or garbles the title; Google wrote
-     再读一遍经文. All ten harness files have both lines (the other
-     recordings are untranscribed, so unchecked); if the rest do too, they
-     can be named the way references already are, and the model never sees
-     them.
-   - **Catch babble.** Listening back checks only for missing text; 0403's
-     babble was added text and cost 18%. Flag a chunk whose heard characters
-     have no counterpart in its text, and retake it.
+   - ~~Fixed lines from a table.~~ Done (`642fe18`); no overall change
+     (3.5%), the lines themselves heard right. See the evening entry.
+     Checked on the ten harness files only; the other recordings are
+     untranscribed.
+   - ~~Catch babble.~~ Done (`ef27871`), and a line ending in a colon now
+     stays with what follows it (`ce33f3e`). With all three: **3.1%**,
+     nothing lost; the babble check fired once in ten files, on real text.
    - **Sort madlad's 84 misheard characters by cause** before fixing any:
      how many are a mispronunciation (fixable in `speech.SPOKEN_AS`, as 吗哪
      was), how many a homophone Whisper picks without context (头浇油 heard as
@@ -2925,10 +3004,10 @@ did not.
    - The punctuation restorer covers English, German, French and Italian
      only. Other source languages that Whisper leaves unpunctuated still reach
      the translator as one long sentence.
-   - Chatterbox occasionally babbles (2026-10-19; again in 0403 on
-     2026-10-21, inside a four-chunk reading). Listening back cannot catch
-     it: it looks only for missing text, and babble is added text. Needs a
-     check for heard characters that are not in the chunk.
+   - Chatterbox occasionally babbles or repeats a phrase (2026-10-19; 0403
+     and 1218 on 2026-10-21). Listening back now looks for added text too,
+     Chinese only; one firing in ten files, a real one, is all the
+     false-alarm evidence so far.
 1. Read a whole translated volume properly. `V1_01` has been checked closely on
    three sentences out of 206, and structurally on all of them; that is not the
    same as having read it.
