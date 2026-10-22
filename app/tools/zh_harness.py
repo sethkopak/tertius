@@ -16,6 +16,12 @@ already done, so an experiment can redo one stage and keep the rest: delete
 `*.zh.spoken.wav` to read again, or `listen --heard-tag _x --hotwords "..."`
 to try a different Whisper hint without touching the readings.
 
+`--takes N` reads and listens to each file N times, each take seeded apart,
+and scores the mean with every take's figure beside it. One reading per file
+cannot tell half a point from take-to-take noise, which was about a point per
+file on 2026-10-22. The first take keeps the file names and seed a one-take
+run uses, so an existing run is its first take; later takes add `.t1`, `.t2`.
+
 It runs the app's own code - the same calls `jobs.py` makes, voice cloning
 included - so what it measures is what the app does.
 
@@ -101,13 +107,20 @@ def translate(out, source, files, args):
     free()
 
 
+def take_tags(args):
+    """File-name tags for each take: "" for the first, so a run made before
+    `--takes` existed is that run's first take, then ".t1", ".t2"..."""
+    return [""] + [f".t{t}" for t in range(1, args.takes)]
+
+
 def speak(out, source, files, args):
     import torch
     from tertius.speech import Speaker, chunks_from_prose, speak_chunks, voice_for
 
     sp = Speaker(device="cuda")
     for i, stem in enumerate(files):
-        if (out / f"{stem}.zh.spoken.wav").exists():
+        tags = [t for t in take_tags(args) if not (out / f"{stem}.zh.spoken{t}.wav").exists()]
+        if not tags:
             continue
         r = pickle.loads((out / f"{stem}.result.pkl").read_bytes())
         prose = (out / f"{stem}.zh.txt").read_text(encoding="utf-8")
@@ -115,13 +128,17 @@ def speak(out, source, files, args):
         scratch = tempfile.mkdtemp(prefix="harness-voice-")
         try:
             voice, _ = voice_for(source / f"{stem}.mp3", r, None, scratch)
-            # Seeded per file, so two runs over unchanged text read it the
-            # same way and a difference in score comes from a change.
-            torch.manual_seed(1000 + i)
-            speak_chunks(chunks, sp, "zh", out, stem, voice=voice, suffix=".zh.spoken", formats=[])
+            for tag in tags:
+                take = take_tags(args).index(tag)
+                # Seeded per file and take, so two runs over unchanged text
+                # read it the same way and a difference in score comes from a
+                # change; the first take keeps the seed it always had.
+                torch.manual_seed(1000 + i + 1000 * take)
+                speak_chunks(chunks, sp, "zh", out, stem, voice=voice,
+                             suffix=f".zh.spoken{tag}", formats=[])
+                print("spoke", stem, f"take {take + 1}", flush=True)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
-        print("spoke", stem, flush=True)
     sp.unload()
     free()
 
@@ -135,12 +152,13 @@ def listen(out, source, files, args):
         T.PUNCTUATION_HINTS = {"zh": args.hotwords}
     tr = T.WhisperTranscriber(TranscriptionOptions(language=None))
     for stem in files:
-        p = out / f"{stem}.heard{args.heard_tag}.txt"
-        if p.exists():
-            continue
-        r = tr.transcribe(out / f"{stem}.zh.spoken.wav")
-        p.write_text("".join(s.text for s in r.segments), encoding="utf-8")
-        print("listened", stem, r.language, flush=True)
+        for tag in take_tags(args):
+            p = out / f"{stem}.heard{args.heard_tag}{tag}.txt"
+            if p.exists():
+                continue
+            r = tr.transcribe(out / f"{stem}.zh.spoken{tag}.wav")
+            p.write_text("".join(s.text for s in r.segments), encoding="utf-8")
+            print("listened", stem, tag or "take 1", r.language, flush=True)
     tr.unload()
     free()
 
@@ -195,15 +213,7 @@ def score(out, source, files, args):
             text = MANNA.sub("吗哪", text)
         return text
 
-    total_e = total_n = 0
-    for stem in files:
-        hp = out / f"{stem}.heard{args.heard_tag}.txt"
-        if not hp.exists():
-            continue
-        ref = norm((out / f"{stem}.zh.txt").read_text(encoding="utf-8"), True)
-        hyp = norm(hp.read_text(encoding="utf-8"), False)
-        if not args.raw:
-            hyp = drop_trailing_hallucinations(ref, hyp)
+    def errors_in(ref, hyp):
         sm = difflib.SequenceMatcher(None, ref, hyp, autojunk=False)
         errors, lost = 0, []
         for op, i1, i2, j1, j2 in sm.get_opcodes():
@@ -212,12 +222,38 @@ def score(out, source, files, args):
             errors += max(i2 - i1, j2 - j1)
             if op == "delete" and i2 - i1 >= 6:
                 lost.append(ref[i1:i2])
-        total_e += errors
-        total_n += len(ref)
-        print(f"{stem}  {errors / len(ref):6.1%}  of {len(ref):4d} chars  lost: "
-              f"{' | '.join(lost) if lost else '-'}", flush=True)
-    if total_n:
-        print(f"ALL   {total_e / total_n:6.1%}  ({total_e}/{total_n})", flush=True)
+        return errors, lost
+
+    # Per take, so the spread between takes is visible next to the mean.
+    tags = take_tags(args)
+    take_e = [0] * len(tags)
+    take_n = [0] * len(tags)
+    for stem in files:
+        ref = norm((out / f"{stem}.zh.txt").read_text(encoding="utf-8"), True)
+        per_take, lost_all = [], []
+        for t, tag in enumerate(tags):
+            hp = out / f"{stem}.heard{args.heard_tag}{tag}.txt"
+            if not hp.exists():
+                continue
+            hyp = norm(hp.read_text(encoding="utf-8"), False)
+            if not args.raw:
+                hyp = drop_trailing_hallucinations(ref, hyp)
+            errors, lost = errors_in(ref, hyp)
+            per_take.append(errors / len(ref))
+            lost_all += lost
+            take_e[t] += errors
+            take_n[t] += len(ref)
+        if not per_take:
+            continue
+        mean = sum(per_take) / len(per_take)
+        takes = "  ".join(f"{p:5.1%}" for p in per_take) if len(per_take) > 1 else ""
+        print(f"{stem}  {mean:6.1%}  of {len(ref):4d} chars  {takes}  lost: "
+              f"{' | '.join(lost_all) if lost_all else '-'}", flush=True)
+    done = [(e, n) for e, n in zip(take_e, take_n) if n]
+    if done:
+        total_e, total_n = sum(e for e, _ in done), sum(n for _, n in done)
+        spread = "  ".join(f"{e / n:5.1%}" for e, n in done) if len(done) > 1 else ""
+        print(f"ALL   {total_e / total_n:6.1%}  ({total_e}/{total_n})  {spread}", flush=True)
 
 
 STAGES = {
@@ -239,6 +275,9 @@ def main() -> None:
     ap.add_argument("--heard-tag", default="", help="suffix for a listen/score variant")
     ap.add_argument("--hotwords", default=None, help='Chinese Whisper hint for listen; "" for none')
     ap.add_argument("--pylib", default=None, help="extra folder on sys.path holding OpenCC")
+    ap.add_argument("--takes", type=int, default=1,
+                    help="read and listen to each file this many times; "
+                         "scores are the mean, with each take's shown")
     ap.add_argument("--raw", action="store_true",
                     help="score as before 2026-10-22: 玛纳 for 吗哪 and trailing "
                          "hallucinations count as errors")
