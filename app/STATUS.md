@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**708 tests, all passing** on Windows locally (one skips, a librosa path).
+**710 tests, all passing** on Windows locally (one skips, a librosa path).
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -242,8 +242,28 @@ are a chunk of their own; same voice and seeds, no retakes:
 
 EOS still fires, but on the first part it cost nothing, and on the verse it
 fired in 2 of 4 without losing the reference. Measured on this one chunk
-only. **Not in the app**: a change to how readings are chunked, waiting on
-a decision.
+only.
+
+**Now in the app: 再读一遍经文 always starts a chunk** (`speech._pack`, via
+`fixed_lines.STARTS_A_CHUNK`; 2 tests, 710 pass). Ten-file run: six files
+gained a chunk and were read again (0120, 0226, 0510, 0829, 1005, 1218); the
+other four, chunked identically, reused the substitutions run's readings.
+- **Raw 4.1% (103/2523)** - but 20 of those characters are one Whisper
+  hallucination at the end of 0120, 请不吝点赞订阅转发打赏支持明镜与点点栏目 ("please
+  like, subscribe..."), its well-known YouTube-outro text on trailing
+  silence; not read by Chatterbox. **Without it 3.3% (83/2523)**, level
+  with the run before.
+- **0510's closing Psalm 23:5 was heard** in the full run, where the run
+  before missed it. Whole references heard: 17 of 20, against 16. The three
+  short: 0510's *opening* reference (十 dropped from 二十三, as before) and
+  0616's two (a separate case; its readings were reused).
+- Per file, re-read: 0120 10.0% (2.6% without the hallucination; 3.3%
+  before), 0226 3.1% (1.6%), 0510 3.3% (3.3%), 0829 4.9% (4.4%), 1005 4.0%
+  (4.7%), 1218 1.6% (1.6%). Take-to-take noise of a point or so per file
+  is normal here.
+- The babble check caught a long babble in 0226 (发义义商是香港的一场...) and
+  the retake was clean - its second real catch in two runs, still no false
+  alarm seen.
 
 ## 2026-10-21 (evening) — fixed lines, babble, and a line Chatterbox dropped
 
@@ -3104,14 +3124,15 @@ did not.
      - **References cut short.** Not the Traditional book names (35/40
        either way) and not the wording (five wordings, 1/20). Starting a
        new chunk at 再读一遍经文 took 0510's closing reference from 0/4 to
-       4/4 (2026-10-22). **Decision: make 再读一遍经文 always start a chunk**
-       (in `speech._pack`), then measure on the ten files. 0616 skipping
-       第十二章 (2 of 4) is a separate case - its 再读一遍经文 already starts
-       its chunk.
-     - **Score 吗哪 heard as 玛纳 as right, and ignore a trailing 谢谢**, in
-       `tools/zh_harness.py`. 22 of the 77 are these; the run is about 2.2%
-       without them. Changes every score's footing, so earlier runs would
-       need rescoring to compare.
+       4/4 (2026-10-22). 再读一遍经文 now always starts a chunk; in the
+       ten-file run 0510's closing reference was heard. Still open: 0616
+       skipping 第十二章 (2 of 4) - its 再读一遍经文 already started its chunk,
+       so it is something else.
+     - **Score 吗哪 heard as 玛纳 as right, and ignore Whisper's trailing
+       hallucinations** (谢谢, 请不吝点赞订阅...), in `tools/zh_harness.py`.
+       They were 22 of the 77 in one run and 20 of 103 in another, and they
+       swamp real differences of a point or less. Changes every score's
+       footing, so earlier runs would need rescoring to compare.
    - **Split long English sentences before madlad sees them**, at clause
      breaks. madlad keeps a 96-word sentence as one; Google and Qwen split it.
      Measure with the harness.

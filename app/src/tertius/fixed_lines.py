@@ -53,6 +53,12 @@ _AGAINS = {"zh": "再读一遍经文"}
 _ALONE = {"zh": "。"}
 _BEFORE_REST = {"zh": "："}
 
+# "The text again" opens the reading's last section, the verse read once more.
+# A reading starts a new chunk there (`speech._pack`): left at the end of a
+# long chunk, 0510's closing reference was cut off in four takes of four, and
+# split off with its verse it was read four of four (2026-10-22).
+STARTS_A_CHUNK = tuple(_AGAINS.values())
+
 
 def split(
     text: str, target_language: str, source_language: str | None = "en"

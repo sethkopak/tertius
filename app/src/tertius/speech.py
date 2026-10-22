@@ -455,8 +455,9 @@ def _keep_with_next(units: Sequence[str], budget: int) -> list[str]:
     A short last sentence after a long one is where Chatterbox stops early.
     0616's `再读一遍经文：` fell at the end of a chunk, with its verse opening the
     next, and was left out of seven takes in nine - ending in `。` instead made
-    no difference, two in three either way (2026-10-21). A colon says the next sentence belongs with this
-    one, so they go into a chunk together whenever the two fit the budget.
+    no difference, two in three either way (2026-10-21). A colon says the next
+    sentence belongs with this one, so they go into a chunk together whenever
+    the two fit the budget.
     """
     out: list[str] = []
     for unit in units:
@@ -472,11 +473,20 @@ def _keep_with_next(units: Sequence[str], budget: int) -> list[str]:
 
 
 def _pack(sentences: Sequence[str], budget: int) -> list[str]:
-    """Group sentences into chunks of at most `budget` characters of speech."""
+    """Group sentences into chunks of at most `budget` characters of speech.
+
+    "The text again" always starts a chunk, however much room is left in the
+    one before it; see `fixed_lines.STARTS_A_CHUNK`.
+    """
+    from .fixed_lines import STARTS_A_CHUNK
+
     chunks: list[str] = []
     current = ""
     for sentence in _keep_with_next(_units(sentences, budget), budget):
         if not current:
+            current = sentence
+        elif sentence.startswith(STARTS_A_CHUNK):
+            chunks.append(current)
             current = sentence
         elif spoken_length(current) + 1 + spoken_length(sentence) <= budget:
             current = f"{current} {sentence}"

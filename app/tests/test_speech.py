@@ -175,6 +175,24 @@ def test_a_line_ending_in_a_colon_stays_with_what_it_introduces():
     assert chunks == [before, f"再读一遍经文： {verse}"]
 
 
+def test_the_text_again_always_starts_a_chunk():
+    """0510: at the end of a long chunk its reference was cut off 4 takes of 4."""
+    from tertius.speech import _pack
+
+    before = "我又说,你们要欢喜。"
+    again = "再读一遍经文：你用油膏我的头,我的杯溢满了。"
+    # Room for both in one chunk; they are split anyway.
+    assert _pack([before, again, "詩篇 23:5."], 1000) == [before, f"{again} 詩篇 23:5."]
+
+
+def test_other_sentences_still_share_a_chunk():
+    from tertius.speech import _pack
+
+    assert _pack(["我又说,你们要欢喜。", "这段话再次呈现。"], 1000) == [
+        "我又说,你们要欢喜。 这段话再次呈现。"
+    ]
+
+
 def test_a_colon_line_is_not_joined_past_the_budget():
     from tertius.speech import _pack
 
