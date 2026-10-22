@@ -50,6 +50,7 @@ from .config import (
     PARALINGUISTIC_TAGS,
     SPEECH_CHUNK_CHARS,
     SPEECH_GAP_SECONDS,
+    SPEECH_REFERENCE_RETRIES,
     SPEECH_TRUNCATED_TAIL_RATIO,
     SPEECH_TRUNCATION_RETRIES,
     SPEECH_MODELS,
@@ -1178,8 +1179,16 @@ class Speaker:
         # Takes are ranked by how many characters they got wrong that way
         # first and how abruptly they ended second, so a faithful take beats a
         # tidy unfaithful one.
+        #
+        # A take that left out a scripture reference earns the chunk
+        # SPEECH_REFERENCE_RETRIES more takes than the usual budget.
+        from .listen_back import names_a_reference
+
         best = None
-        for attempt in range(1 + SPEECH_TRUNCATION_RETRIES):
+        budget = 1 + SPEECH_TRUNCATION_RETRIES
+        takes = 0
+        while takes < budget:
+            takes += 1
             wav = self._model.generate(text, **arguments)
             try:
                 samples = _as_samples(wav)
@@ -1193,21 +1202,23 @@ class Speaker:
                 best = ((lost, ratio), wav)
             if ratio <= SPEECH_TRUNCATED_TAIL_RATIO and not lost:
                 break
+            if names_a_reference(missing):
+                budget = 1 + SPEECH_TRUNCATION_RETRIES + SPEECH_REFERENCE_RETRIES
             if lost:
                 log.info(
                     "chunk left out %s, added %s; attempt %d of %d",
                     " / ".join(missing) or "nothing",
                     " / ".join(added) or "nothing",
-                    attempt + 1,
-                    1 + SPEECH_TRUNCATION_RETRIES,
+                    takes,
+                    budget,
                 )
             else:
                 log.info(
                     "chunk ended abruptly (tail %.0f%% of full volume); "
                     "attempt %d of %d",
                     ratio * 100,
-                    attempt + 1,
-                    1 + SPEECH_TRUNCATION_RETRIES,
+                    takes,
+                    budget,
                 )
         assert best is not None
         (lost, ratio), wav = best
@@ -1215,12 +1226,12 @@ class Speaker:
             log.warning(
                 "a chunk still leaves out or adds %d character(s) after %d "
                 "attempts; keeping the most faithful take",
-                lost, 1 + SPEECH_TRUNCATION_RETRIES,
+                lost, takes,
             )
         elif ratio > SPEECH_TRUNCATED_TAIL_RATIO:
             log.warning(
                 "a chunk still ends abruptly after %d attempts; keeping the "
-                "least bad take", 1 + SPEECH_TRUNCATION_RETRIES,
+                "least bad take", takes,
             )
         return wav
 

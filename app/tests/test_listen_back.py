@@ -121,6 +121,39 @@ def test_left_out_and_added_count_together_when_choosing_a_take():
     assert calls["n"] == 3
 
 
+def test_a_left_out_reference_earns_more_takes():
+    """0616: three takes of three cut its Hebrews 12:11 short in one run."""
+    from tertius.config import SPEECH_REFERENCE_RETRIES, SPEECH_TRUNCATION_RETRIES
+
+    quiet = [[0.1 * n] * 2400 + [0.0] * 24000 for n in range(1, 7)]
+    allowed = 1 + SPEECH_TRUNCATION_RETRIES + SPEECH_REFERENCE_RETRIES
+    left_out = [["希伯來書第十二章"]] * (allowed - 1) + [[]]
+    speaker, calls = _speaker_with(quiet[:allowed], left_out)
+
+    assert speaker.speak(_chunk(), "zh") is quiet[allowed - 1]
+    assert calls["n"] == allowed
+
+
+def test_other_text_left_out_keeps_the_usual_budget():
+    from tertius.config import SPEECH_TRUNCATION_RETRIES
+
+    quiet = [[0.1 * n] * 2400 + [0.0] * 24000 for n in range(1, 7)]
+    speaker, calls = _speaker_with(quiet, [["一二三四五六七"]] * 6)
+
+    speaker.speak(_chunk(), "zh")
+    assert calls["n"] == 1 + SPEECH_TRUNCATION_RETRIES
+
+
+def test_a_reference_is_recognized_in_what_was_left_out():
+    from tertius.listen_back import names_a_reference
+
+    assert names_a_reference(["來書第十二章"])
+    assert names_a_reference(["果希伯來書第十二章第十一节"])
+    assert names_a_reference(["詩篇第二十三篇第五节"])
+    assert not names_a_reference(["再读一遍经文"])
+    assert not names_a_reference([])
+
+
 def test_other_languages_are_not_listened_to():
     from tertius.speech import Speaker
 

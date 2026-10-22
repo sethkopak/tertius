@@ -303,6 +303,14 @@ SPEECH_PARAGRAPH_GAP_SECONDS = 0.7
 SPEECH_TRUNCATED_TAIL_RATIO = 0.55
 SPEECH_TRUNCATION_RETRIES = 2
 
+# More takes, on top of those, for a chunk whose scripture reference was not
+# heard (listen_back.py). A reference is what a listener most needs and the
+# likeliest thing to be cut: Chatterbox skipped part of 0616's Hebrews 12:11 in
+# one take in six to two in four, varying by sample, and in one ten-file run
+# all three takes of that chunk came out short (2026-10-22). Only those chunks
+# pay for the extra takes.
+SPEECH_REFERENCE_RETRIES = 2
+
 # The files each family needs in order to convert. Named explicitly so a
 # download never drags in the duplicate TensorFlow, Flax, Rust and GGUF copies
 # the Hub also carries - on madlad400-3b-mt those alone would add ~4 GB to an

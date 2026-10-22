@@ -36,6 +36,17 @@ WHISPER_RATE = 16_000
 
 _NOT_TEXT = re.compile(r"[\W_a-zA-Z]+")
 _DIGITS = re.compile(r"\d+")
+# A chapter or verse as `numbers.spell` says one: 第十二章, 第二十三篇, 第五节.
+_CHAPTER_OR_VERSE = re.compile(r"第[〇零一二三四五六七八九十百千]+[章篇节節]")
+
+
+def names_a_reference(stretches: Sequence[str]) -> bool:
+    """Is any of these left-out stretches part of a scripture reference?
+
+    Every reference cut short on 2026-10-21/22 lost a chapter or a verse with
+    it: 來書第十二章, 詩篇第二十三篇第五节, 希伯來書第十二章第十一节.
+    """
+    return any(_CHAPTER_OR_VERSE.search(s) for s in stretches)
 
 
 def _normalize(text: str) -> str:
