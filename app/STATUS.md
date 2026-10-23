@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**717 tests, all passing** on Windows locally (one skips, a librosa path).
+**749 tests, all passing** on Windows locally (one skips, a librosa path).
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -135,6 +135,69 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-23 (later) — what the 2.1% is, splitting rejected, Chinese references kept
+
+**The 162 misheard characters, by sound** (pypinyin against what Whisper
+wrote, all 30 readings of the run below):
+
+| Cause | Chars | |
+|---|---|---|
+| Tone only | 71 | Right syllable, other tone: 着/者 ×5, 腓立/菲利 ×4, 神/身 ×3, 善事/膳食, 士兵/事并. Some are Whisper choosing a word; context settles many for a person. |
+| Different sound | 50 | Misread: 得→逮 ×4, 福祉→扶持 ×3, 渣滓→扎值 ×3, 然→拿, 哀哉→爱胎, 正确→煞雀. |
+| Same sound, other character | 21 | Read right; Whisper chose 在/再, 膏/高, 事奉/侍奉, 义/异. Not a listener's error. |
+| Left out | 12 | 5 are references (0616's 第十二章 once, 0510's 十 once). |
+| Added | 8 | 3 are madlad's own 疲乏乏力 heard as 疲乏力. |
+
+Clusters a fix could take: **得着** in 0829, read děi zhe for dé zháo (得→逮
+×4, 着→者 ×5: most of the worst file); and four rare characters, 渣滓 (6),
+福祉 (6), 哀哉 (5), 溢 (8 across its spellings), as `SPOKEN_AS` candidates
+like 白昼. Not tried yet.
+
+**Splitting long English sentences before madlad: rejected, without a
+harness run.** 13 of the ten files' 108 sentences run 30 words or more, the
+longest 96. Translated whole, madlad kept every clause of all 13. Split at
+commas into pieces of up to 20 words, 4 of the 13 came back with scripture
+invented for a fragment (`11:11 耶和华的使者来到他面前...`,
+`主耶稣基督的话,是主的话,是主的话`) and one lost its clause. Up to 30 words
+was worse: a piece of 0120 became a line of fiction
+(`文龙看着她的眼睛...`). madlad needs the whole sentence; a reading of
+invented text is not worth measuring.
+
+**References in the Chinese-to-English direction** (goal 2). What Whisper
+heard of the 30 readings, put through madlad into English:
+
+| | References right (of 60) | Title kept (of 30) | chrF vs the English |
+|---|---|---|---|
+| Before | 41 | 21 | 53.8 |
+| References protected | 59 | 18 | 53.5 |
+| + the title and "The text again" named | **59** | **30** | **55.9** |
+
+- Before, madlad wrote its own citations: `Hebrews, chapter 12, section 3`
+  (1005, all three readings), `James, chapter IV, section 3`, 1 Timothy as
+  `I Matthew 5:8`, and once a verse invented in place of one
+  (`10:13 And he said unto them...`).
+- `scripture.chinese_references` finds 第...章第...节 (and 篇, `2,12`,
+  `13:12`, 和-lists and 至-ranges) after a book named **by sound**: Whisper
+  wrote 菲利比书, 西伯来书, 贴萨罗尼加 and 十篇 for 詩篇, and every one sounds
+  exactly like the table's Traditional name. An ending of three syllables or
+  more that only one book's name has also counts (听摩太前书, 0723). Nothing
+  looser: 腓立比書 and 腓利門書 are a syllable apart. It refuses a number
+  that is not one (`第二三篇`, 0510's cut 二十三) rather than cite Psalm 3.
+- The miss is 0616's reference the reading itself cut (希伯来书第十一节).
+- **Protecting the reference cost the title** in three readings: with a
+  placeholder in the opening sentence, madlad dropped `4月3日的玛纳`. So the
+  title and 再读一遍经文 are now named from the table in this direction too
+  (`fixed_lines`), from the spellings Whisper actually wrote (玛纳 45, 玛娜 7,
+  妈哪 4, 马懒 2; 再度一遍经文 4 of 60).
+- `pypinyin` (0.55.0, MIT, pure Python, checked on PyPI) does the sound.
+  It is in the translate extra and installed by Download and prepare, but
+  not required: without it Chinese references go to madlad as before, and
+  an existing install is not told translation is unavailable. CI installs
+  it; without it the 22 tests of this skip (checked).
+
+English into Chinese is untouched: nothing here runs on a text with no
+Chinese in it, so the reading and its 2.1% are unchanged.
 
 ## 2026-10-23 — a check for the reference itself: 2.5% to 2.1%
 
@@ -3264,29 +3327,24 @@ did not.
        2026-10-22: 0/15 heard right as they were, 13/15 with them; 5/5 in
        context in the ten-file run (3.3%, the rise all from 0616's cut-short
        references).
-     - **References cut short.** Not the Traditional book names (35/40
-       either way) and not the wording (five wordings, 1/20). Starting a
-       new chunk at 再读一遍经文 took 0510's closing reference from 0/4 to
-       4/4 (2026-10-22). 再读一遍经文 now always starts a chunk; in the
-       ten-file run 0510's closing reference was heard. Still open: 0616
-       skipping 第十二章 - not its wording (three wordings, 5/6 each). What
-       is left to try is more takes for a chunk whose reference was not
-       heard, beyond today's retry budget of three.
+     - ~~References cut short.~~ A new chunk at 再读一遍经文 (2026-10-22),
+       and a listen-back check of each chapter and verse with two extra takes
+       (2026-10-23): 0616 keeps 第十二章 in 5 of 6. 2.5% to 2.1%.
      - ~~Stop scoring 吗哪/玛纳 and trailing hallucinations.~~ Done
        2026-10-22; nine runs rescored, the code now at about 2.5%.
-     - **Take-to-take noise** is now the limit on what one ten-file run
-       can show: a point or so per file. Telling a change of half a point
-       from noise needs more than one reading per file - two or three takes
-       per file, or more files.
-   - **Split long English sentences before madlad sees them**, at clause
-     breaks. madlad keeps a 96-word sentence as one; Google and Qwen split it.
-     Measure with the harness.
+     - ~~Take-to-take noise.~~ `zh_harness.py --takes 3`; whole-run totals
+       span 2.1-2.9% on unchanged text.
+   - ~~Sort the 2.1% (162 characters) by cause.~~ Done 2026-10-23 (later).
+     Candidates for `SPOKEN_AS`, each needing the 0-of-N test the last three
+     had: 得着 (9 characters, 0829), 渣滓, 福祉, 哀哉, 溢.
+   - ~~Split long English sentences before madlad sees them.~~ Tried
+     2026-10-23 (later): madlad invents scripture for a fragment. Not done.
    - **A Chinese speaker** (item 7). Whisper is a stand-in; every number
-     above is about Whisper, not a person.
+     above is about Whisper, not a person. None available yet (Seth,
+     2026-10-23).
    Still open alongside it:
-   - Protect Chinese references from the translator in the Chinese-to-English
-     direction. Needs fuzzy book-name matching: Whisper spells them
-     differently each time (帖萨罗尼加, 帖撒罗尼迦).
+   - ~~Protect Chinese references in the Chinese-to-English direction.~~
+     Done 2026-10-23 (later), matched by sound: 41 to 59 of 60.
    - Listening back and quote removal are measured on Chinese only. Other
      languages may drop text the same way.
    - The punctuation restorer covers English, German, French and Italian
