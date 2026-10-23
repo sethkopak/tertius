@@ -154,6 +154,54 @@ def test_a_reference_is_recognized_in_what_was_left_out():
     assert not names_a_reference([])
 
 
+REFERENCE_SPOKEN = "果希伯來書 第十二章第十一节. 正是在这样的纪律下。再读一遍经文：希伯來書 第十二章第十一节."
+
+
+def test_a_chapter_too_short_to_be_a_gap_is_still_found():
+    """0616, 2026-10-22: 第十二章 left out, 3 readings in 6. What `base` heard."""
+    from tertius.listen_back import missing_references
+
+    spoken = "这是由它练习: 希伯來書 第十二章第十一节."
+    heard = "这是由它练习,西部来书第11节。"
+    assert missing_text(spoken, heard) == []
+    assert missing_references(spoken, heard) == ["第十二章"]
+
+
+def test_a_reference_heard_whole_is_not_missing():
+    from tertius.listen_back import missing_references
+
+    heard = "果希伯来书第12章第11节。正是在这样的纪律下。再读一遍经文:希伯来书第十二章第十一節。"
+    assert missing_references(REFERENCE_SPOKEN, heard) == []
+
+
+def test_a_chapter_heard_as_the_same_sound_is_not_missing():
+    """`base` on 0616: 西波兰书第12张第11节, for a reference read whole."""
+    from tertius.listen_back import missing_references
+
+    spoken = "结出了和平的义果。希伯來書 第十二章第十一节."
+    assert missing_references(spoken, "结出了和平的义果,西波兰书第12张第11节。") == []
+    # 0403 and 0510, the same day.
+    assert missing_references("羅馬書 第十三章第十二节.", "羅馬書第13張第12節") == []
+    assert missing_references("詩篇 第二十三篇第五节.", "食片第二十三片第五节") == []
+
+
+def test_a_cut_reference_reaches_the_take_budget(monkeypatch):
+    """Through `Listener.check`, so the extra takes see it."""
+    import tertius.listen_back as L
+
+    class _Model:
+        def transcribe(self, *args, **kwargs):
+            text = "这是由它练习,西部来书第11节。"
+            return [type("S", (), {"text": text})()], None
+
+    listener = L.Listener()
+    listener._model = _Model()
+    spoken = "这是由它练习: 希伯來書 第十二章第十一节."
+    missing, added = listener.check(spoken, [0.0] * 16000, 16000, "zh")
+    assert missing == ["第十二章"] and added == []
+    assert L.names_a_reference(missing)
+
+
 def test_other_languages_are_not_listened_to():
     from tertius.speech import Speaker
 

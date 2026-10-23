@@ -38,6 +38,10 @@ _NOT_TEXT = re.compile(r"[\W_a-zA-Z]+")
 _DIGITS = re.compile(r"\d+")
 # A chapter or verse as `numbers.spell` says one: 第十二章, 第二十三篇, 第五节.
 _CHAPTER_OR_VERSE = re.compile(r"第[〇零一二三四五六七八九十百千]+[章篇节節]")
+# What `base` writes for a chapter or verse that was read, 2026-10-22: 第12张
+# and 第13張 for 章 (zhāng), 第二十三片 for Psalm's 篇 (piān). Counted as heard,
+# or every Psalm and most chapters cost the chunk five takes for nothing.
+_SAME_SOUND = str.maketrans("张張片節", "章章篇节")
 
 
 def names_a_reference(stretches: Sequence[str]) -> bool:
@@ -47,6 +51,25 @@ def names_a_reference(stretches: Sequence[str]) -> bool:
     it: 來書第十二章, 詩篇第二十三篇第五节, 希伯來書第十二章第十一节.
     """
     return any(_CHAPTER_OR_VERSE.search(s) for s in stretches)
+
+
+def missing_references(spoken: str, heard: str) -> list[str]:
+    """Chapters and verses of `spoken` heard fewer times than they are said.
+
+    A cut reference loses too little for `missing_text` to see: on 2026-10-22
+    0616 read 希伯來書 12:11 without 第十二章, four characters, in 3 of 6
+    readings, and listening back passed all of them: `base` heard the book
+    name wrong too (西部来书, 西伯来输), so 希伯來書第十二章 against 西部来书 was a
+    misheard word to `missing_text`, not a gap. So each 第...章, 第...篇 and
+    第...节 is counted on its own, whatever its length.
+    """
+    said = _normalize(spoken).replace("節", "节")
+    got = _normalize(heard).translate(_SAME_SOUND)
+    out = []
+    for ref in dict.fromkeys(m.group() for m in _CHAPTER_OR_VERSE.finditer(said)):
+        short = len(re.findall(re.escape(ref), said)) - len(re.findall(re.escape(ref), got))
+        out += [ref] * max(short, 0)
+    return out
 
 
 def _normalize(text: str) -> str:
@@ -153,7 +176,13 @@ class Listener:
         except Exception:
             log.debug("listening back failed", exc_info=True)
             return [], []
-        return missing_text(spoken, heard), added_text(spoken, heard)
+        missing = missing_text(spoken, heard)
+        # A chapter or verse already inside a left-out stretch is not counted twice.
+        missing += [
+            ref for ref in missing_references(spoken, heard)
+            if not any(ref in stretch.replace("節", "节") for stretch in missing)
+        ]
+        return missing, added_text(spoken, heard)
 
     def unload(self) -> None:
         self._model = None
