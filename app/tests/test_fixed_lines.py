@@ -71,8 +71,33 @@ def test_other_sentences_are_left_to_the_model(text):
     assert split(text, "zh") is None
 
 
-def test_only_english_into_chinese_for_now():
-    """The only pair this was measured on. Everything else is unchanged."""
+@pytest.mark.parametrize(
+    "heard, expected",
+    [
+        ("1月20日的玛娜。", ("Manna for January 20.", "")),
+        ("十月五日的玛纳", ("Manna for October 5.", "")),
+        ("8月29日的妈哪,你们求也得不着", ("Manna for August 29. ", "你们求也得不着")),
+        ("5月10日的马懒,你用油膏我的头", ("Manna for May 10. ", "你用油膏我的头")),
+        ("再读一遍经文。", ("The text again:", "")),
+        ("再度一遍经文,你们要靠主常常喜乐", ("The text again: ", "你们要靠主常常喜乐")),
+    ],
+)
+def test_the_lines_come_back_into_english(heard, expected):
+    """As Whisper wrote them from a Chinese reading, 2026-10-22/23."""
+    assert split(heard, "en", source_language="zh") == expected
+
+
+@pytest.mark.parametrize(
+    "heard",
+    ["13月5日的玛纳", "我们要再读一遍经文吗", "黑暗的作为就是一切经不起最彻底查考的作为"],
+)
+def test_other_chinese_is_left_to_the_model(heard):
+    assert split(heard, "en", source_language="zh") is None
+
+
+def test_only_the_pairs_measured():
+    """English into Chinese and back. Everything else is unchanged."""
+    assert split("1月20日的玛娜。", "es", source_language="zh") is None
     assert split("Manna for January 20th.", "es") is None
     assert split("The text again.", "ru") is None
     assert split("Manna for January 20th.", "zh", source_language="de") is None

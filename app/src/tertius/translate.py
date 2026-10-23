@@ -71,6 +71,11 @@ T5_LANG_TOKEN = re.compile(r"^<2([a-zA-Z_]{2,})>$")
 # `transformers` and `sentencepiece` tokenize at run time, because M2M-100 ships
 # no `tokenizer.json` and no fast tokenizer class.
 TRANSLATION_REQUIREMENTS = ("torch", "transformers", "sentencepiece")
+# Installed with them, but translating works without: `pypinyin` matches a
+# scripture reference in a Chinese source by sound (scripture.chinese_references),
+# and without it those references go to the model as they did before. So an
+# install made before it existed is not told translation is unavailable.
+TRANSLATION_OPTIONAL = ("pypinyin",)
 
 # CPU-only torch, deliberately. Conversion loads a checkpoint and writes it back
 # out; it never runs the model, so a GPU build buys nothing. On Linux the
@@ -241,6 +246,17 @@ def missing_requirements() -> list[str]:
     return missing
 
 
+def missing_optional() -> list[str]:
+    """Which of `TRANSLATION_OPTIONAL` are not importable yet."""
+    missing = []
+    for name in TRANSLATION_OPTIONAL:
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    return missing
+
+
 def _in_a_virtualenv() -> bool:
     return sys.prefix != sys.base_prefix
 
@@ -262,7 +278,7 @@ def install_requirements(
 
     Returns the packages it installed, so a caller can say what it did.
     """
-    missing = missing_requirements()
+    missing = missing_requirements() + missing_optional()
     if not missing:
         return []
 
@@ -525,6 +541,9 @@ class _T5Adapter:
 CLAUSE_CHECKED_SOURCES = frozenset({"zh", "ja"})
 # The check compares words, so it needs a target written with spaces.
 UNSPACED_TARGETS = frozenset({"zh", "ja", "th", "lo", "km", "my"})
+_WESTERN_STOPS = str.maketrans(
+    {"。": ".", "！": "!", "？": "?", "，": ",", "：": ":", "；": ";"}
+)
 # Not after a digit: `2,12` is one reference, not two clauses.
 _CLAUSE_END = re.compile(r"(?<=\D[,，;；])")
 # A clause shorter than this is joined to the next: `感谢上帝,` is not worth a
@@ -773,7 +792,12 @@ class Translator:
             wanted = [i for i in wanted if i not in set(bare)]
             for i in bare:
                 masked, refs = mask(source[i])
-                out[i] = lead.get(i, "") + restore(masked, refs, language=target_language)
+                restored = restore(masked, refs, language=target_language)
+                if target_language not in UNSPACED_TARGETS:
+                    # A Chinese line's own stop, which nothing else would turn
+                    # into the target's: `Hebrews 12:3。` (2026-10-23).
+                    restored = restored.translate(_WESTERN_STOPS).strip()
+                out[i] = lead.get(i, "") + restored
 
         if not wanted:
             return out

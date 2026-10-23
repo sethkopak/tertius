@@ -39,6 +39,10 @@ translate = [
     "transformers>=4.40",
     "sentencepiece>=0.2",
     "torch>=2.2",
+    # Matches a scripture reference in Chinese by sound, so one Whisper spelled
+    # its own way is still found and kept from the model. Optional at run time:
+    # see TRANSLATION_OPTIONAL in tertius/translate.py. MIT, pure Python.
+    "pypinyin",
 ]
 # Reading text aloud. `torch` here is not a setup-only dependency the way it is
 # for translating - it is the runtime, and it runs the model on every chunk.

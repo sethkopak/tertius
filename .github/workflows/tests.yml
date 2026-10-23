@@ -50,6 +50,9 @@ jobs:
           # skip, and the thing they cover is real: the voice model cannot say
           # an Arabic digit in any language but English.
           python -m pip install num2words
+          # `pypinyin` likewise, for the translate extra: pure Python, and without
+          # it the tests of Chinese references (test_scripture_chinese.py) skip.
+          python -m pip install pypinyin
 
       - name: Run tests
         working-directory: app

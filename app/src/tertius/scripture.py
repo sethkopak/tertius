@@ -371,24 +371,179 @@ def localize(reference: str, language: str) -> str | None:
     return f"{label} {chapter_and_verse(reference)}".strip()
 
 
+# ------------------------------------------- references written in Chinese
+#
+# The Chinese-to-English direction. madlad, handed what Whisper heard of a
+# Chinese reading, got 24 of 60 references wrong on 2026-10-23 (ten files,
+# three readings each): `Hebrews, chapter 12, section 3`, `James, chapter IV,
+# section 3`, 1 Timothy as `I Matthew 5:8`, and once a whole verse invented
+# around the reference. So a Chinese reference is lifted out like an English
+# one, and put back as an English citation, `Hebrews 12:3`.
+#
+# The book is matched by sound, not by character. Whisper writes a name
+# differently each time - 腓立比书 and 菲利比书, 希伯来书 and 西伯来书,
+# 帖撒罗尼迦 and 贴萨罗尼加, 十篇 for 詩篇 - and the table is in Traditional
+# characters. Every one of those has exactly the sound of the table's name.
+
+# A number as Whisper writes one in a reference: digits, or Chinese numerals.
+_ZH_NUMBER = r"(?:\d{1,3}|[〇零一二两三四五六七八九十百]{1,5})"
+# Title brackets too: Whisper wrote 《罗马书》第13章第12节 (0403, 2026-10-23).
+_ZH_GAP = r"[\s,，、》」]*"
+_ZH_REFERENCE = re.compile(
+    rf"(?P<book>[一-鿿]{{2,10}}?){_ZH_GAP}"
+    # 张 and 張: what Whisper wrote for a 章 that was read, 2026-10-22/23.
+    rf"第?\s*(?P<chapter>{_ZH_NUMBER})\s*(?:[章张張篇]{_ZH_GAP}|[:：,，]\s*)"
+    rf"第?\s*(?P<verses>{_ZH_NUMBER}"
+    rf"(?:\s*(?:节|節)?\s*(?:和|至|到|[-–、,，])\s*第?\s*{_ZH_NUMBER})*)"
+    r"\s*(?:节|節)?"
+)
+_ZH_DIGITS = dict(zip("〇零一二两三四五六七八九", (0, 0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9)))
+_ZH_LABELS: dict[tuple[str, ...], str] | None = None
+
+
+def _sound(text: str) -> tuple[str, ...]:
+    from pypinyin import lazy_pinyin
+
+    return tuple(lazy_pinyin(text))
+
+
+def _zh_number(text: str) -> int | None:
+    """`十二` -> 12, `一百五十` -> 150, `23` -> 23; None if it is not one.
+
+    Two digits in a row are not a number: `二三` is what Whisper heard when
+    the reading dropped the 十 of 二十三 (0510, 2026-10-23), and reading it
+    as 3 would make a wrong citation out of a cut one.
+    """
+    if text.isdigit():
+        return int(text)
+    total, digit = 0, None
+    for ch in text:
+        if ch in _ZH_DIGITS:
+            if digit is not None:
+                return None
+            digit = _ZH_DIGITS[ch]
+        elif ch in "十百":
+            total += (digit if digit is not None else 1) * (10 if ch == "十" else 100)
+            digit = None
+        else:
+            return None
+    return total + (digit or 0)
+
+
+def _zh_labels() -> dict[tuple[str, ...], str]:
+    """The table's Chinese book names by sound, mapped to the English book."""
+    global _ZH_LABELS
+    if _ZH_LABELS is None:
+        _ZH_LABELS = {}
+        for book, entry in _table().items():
+            label = entry.get("labels", {}).get("zh")
+            if label:
+                _ZH_LABELS[_sound(label)] = book
+    return _ZH_LABELS
+
+
+def _zh_book(before: str) -> tuple[str, int] | None:
+    """The book named at the end of `before`, and how many characters name it.
+
+    The longest ending of `before` that sounds exactly like a book in the
+    table. Failing that, an ending of three syllables or more that sounds
+    like the end of one book's name and no other's: 0723's 提摩太前书 was
+    heard once as 听摩太前书, and 摩太前书 is only ever 1 Timothy. Nothing
+    looser: 腓立比書 and 腓利門書 (Philippians, Philemon) are one syllable
+    apart, and so are every 前書 and 後書.
+    """
+    labels = _zh_labels()
+    sounds = _sound(before)
+    if len(sounds) != len(before):
+        return None
+    for length in range(min(len(before), 8), 1, -1):
+        book = labels.get(sounds[-length:])
+        if book:
+            return book, length
+    for length in range(min(len(before), 7), 2, -1):
+        ending = sounds[-length:]
+        books = {book for label, book in labels.items() if label[-length:] == ending}
+        if len(books) == 1:
+            return books.pop(), length
+    return None
+
+
+def _zh_verses(text: str) -> str | None:
+    """`第八和第九` -> `8,9`, `十至十二` -> `10-12`."""
+    out = ""
+    for piece in re.finditer(rf"({_ZH_NUMBER})|(至|到|[-–])|(和|[、,，])", text):
+        number, through, also = piece.groups()
+        if number:
+            value = _zh_number(number)
+            if value is None:
+                return None
+            out += str(value)
+        elif out and out[-1].isdigit():
+            out += "-" if through else ","
+    return out.strip(",-") or None
+
+
+def chinese_references(text: str) -> list[tuple[int, int, str]]:
+    """Spans of `text` that are references written in Chinese, as English.
+
+    `(start, end, "Hebrews 12:3")`. Empty when there are none, and always
+    empty without `pypinyin`, which the matching needs: the references are
+    then left to the translator, as they were before this existed.
+    """
+    if not text or not re.search(r"[一-鿿]", text):
+        return []
+    try:
+        import pypinyin  # noqa: F401
+    except ImportError:
+        return []
+    found = []
+    position = 0
+    while match := _ZH_REFERENCE.search(text, position):
+        book = _zh_book(match.group("book"))
+        chapter = _zh_number(match.group("chapter"))
+        verses = _zh_verses(match.group("verses"))
+        if not book or chapter is None or not verses:
+            # One character on, not past the match: in `满了,十篇第二十三篇`
+            # the first try takes 满了 for a book and 十篇 for a chapter, and
+            # the reference itself starts inside that.
+            position = match.start() + 1
+            continue
+        position = match.end()
+        name, length = book
+        # A single psalm is cited as `Psalm 23:5`.
+        name = "Psalm" if name == "Psalms" else name
+        start = match.start("book") + len(match.group("book")) - length
+        if start and text[start - 1] in "《「":
+            start -= 1
+        found.append((start, match.end(), f"{name} {chapter}:{verses}"))
+    return found
+
+
 def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     """Replace whole scripture references with placeholders.
 
     Returns the masked text and what was taken out, in order. Only spans that
     `find_references` recognised as a citation are touched; a year, a page
-    number or a section number elsewhere in the line is left alone.
+    number or a section number elsewhere in the line is left alone. A
+    reference written in Chinese is taken out as its English citation (see
+    `chinese_references`), which is what goes back in.
     """
-    spans = find_references(text)
+    spans = [(start, end, text[start:end]) for start, end in find_references(text)]
+    spans += [
+        found for found in chinese_references(text)
+        if not any(found[0] < end and start < found[1] for start, end, _ in spans)
+    ]
     if not spans:
         return text, []
+    spans.sort()
 
     pieces: list[str] = []
     taken: list[str] = []
     cursor = 0
-    for start, end in spans:
+    for start, end, reference in spans:
         pieces.append(text[cursor:start])
         pieces.append(PLACEHOLDER.format(offset + len(taken)))
-        taken.append(text[start:end])
+        taken.append(reference)
         cursor = end
     pieces.append(text[cursor:])
     return "".join(pieces), taken

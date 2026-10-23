@@ -12,8 +12,11 @@ text again" into the verse (`Manna for june 16th, no chastening, ...`,
 `The text again: thou anointest my head ...`), so what follows is handed back
 to be translated as usual, and the rendered words are put in front of it.
 
-English into Chinese only, for now: those are the readings this was measured
-on. Every other pair is left to the model exactly as before.
+English into Chinese, and back: Chinese into English, for what Whisper hears
+of a Chinese reading (2026-10-23). There the title kept its place in 21 of 30
+readings left to madlad, and in fewer once the reference beside it was
+protected: with a placeholder in the sentence, madlad dropped `4月3日的玛纳`
+outright. Every other pair is left to the model exactly as before.
 """
 
 from __future__ import annotations
@@ -59,6 +62,47 @@ _BEFORE_REST = {"zh": "："}
 # split off with its verse it was read four of four (2026-10-22).
 STARTS_A_CHUNK = tuple(_AGAINS.values())
 
+# The same two lines as Whisper writes them from a Chinese reading. Every
+# spelling here is one it wrote over 60 readings (2026-10-22/23): the title as
+# 玛纳 45 times, 玛娜 7, 妈哪 4, 马懒 2; 再读一遍经文 56 times and 再度一遍经文 4.
+_ZH_NUMBER = r"\d{1,2}|[一二三四五六七八九十]{1,3}"
+_ZH_TITLE = re.compile(
+    rf"^\s*(?P<month>{_ZH_NUMBER})\s*月\s*(?P<day>{_ZH_NUMBER})\s*日的?"
+    r"\s*(?:[吗玛妈马][哪纳娜懒])\s*[。.,，:：;；!！]?\s*(?P<rest>.*)$",
+    re.DOTALL,
+)
+_ZH_AGAIN = re.compile(
+    r"^\s*再[读讀度]一遍[经經]文\s*(?:[。.,，:：;；]\s*|$)(?P<rest>.*)$",
+    re.DOTALL,
+)
+_MONTH_NAMES = {number: name.capitalize() for name, number in _MONTHS.items()}
+
+
+def _zh_number(text: str) -> int:
+    if text.isdigit():
+        return int(text)
+    digits = dict(zip("一二三四五六七八九", range(1, 10)))
+    tens, _, ones = text.rpartition("十")
+    if "十" not in text:
+        return digits.get(text, 0)
+    return (digits.get(tens, 1) if tens else 1) * 10 + digits.get(ones, 0)
+
+
+def _split_chinese(text: str) -> tuple[str, str] | None:
+    """`split` for a Chinese source and an English target."""
+    title = _ZH_TITLE.match(text or "")
+    if title:
+        month, day = _zh_number(title.group("month")), _zh_number(title.group("day"))
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            return None
+        rest = title.group("rest").strip()
+        return f"Manna for {_MONTH_NAMES[month]} {day}." + (" " if rest else ""), rest
+    again = _ZH_AGAIN.match(text or "")
+    if not again:
+        return None
+    rest = again.group("rest").strip()
+    return "The text again:" + (" " if rest else ""), rest
+
 
 def split(
     text: str, target_language: str, source_language: str | None = "en"
@@ -69,6 +113,8 @@ def split(
     follows it; `rest` is the remainder of the sentence, still to translate,
     and empty when the line stood alone.
     """
+    if source_language == "zh" and target_language == "en":
+        return _split_chinese(text)
     if (source_language or "en") != "en" or target_language not in _TITLES:
         return None
     title = _TITLE.match(text or "")

@@ -733,6 +733,7 @@ def test_nothing_is_installed_when_it_is_all_already_there(monkeypatch):
     from tertius import translate as T
 
     monkeypatch.setattr(T, "missing_requirements", lambda: [])
+    monkeypatch.setattr(T, "missing_optional", lambda: [])
     monkeypatch.setattr(
         T.subprocess, "Popen", lambda *a, **k: pytest.fail("should not have run pip")
     )
@@ -760,6 +761,7 @@ def test_torch_is_installed_from_the_cpu_index_and_on_its_own(monkeypatch):
 
     seen = iter([["torch", "transformers", "sentencepiece"], []])
     monkeypatch.setattr(T, "missing_requirements", lambda: next(seen))
+    monkeypatch.setattr(T, "missing_optional", lambda: [])
     monkeypatch.setattr(T, "_in_a_virtualenv", lambda: True)
     monkeypatch.setattr(T.subprocess, "Popen", fake_popen)
 
@@ -770,6 +772,29 @@ def test_torch_is_installed_from_the_cpu_index_and_on_its_own(monkeypatch):
     assert calls[0][-3:] == ["--index-url", T.TORCH_CPU_INDEX, "torch"]
     assert calls[1][-2:] == ["transformers", "sentencepiece"]
     assert "torch" not in calls[1]
+
+
+def test_an_optional_package_is_installed_but_not_required(monkeypatch):
+    """`pypinyin` comes with Download and prepare, and its absence alone does
+    not make translation unavailable."""
+    from tertius import translate as T
+
+    calls: list[list[str]] = []
+
+    class FakeProcess:
+        stdout = iter(())
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(T, "missing_requirements", lambda: [])
+    monkeypatch.setattr(T, "missing_optional", lambda: ["pypinyin"])
+    monkeypatch.setattr(T, "_in_a_virtualenv", lambda: True)
+    monkeypatch.setattr(T.subprocess, "Popen", lambda command, **k: calls.append(command) or FakeProcess())
+
+    assert T.install_requirements() == ["pypinyin"]
+    assert calls[0][-1] == "pypinyin"
+    assert "pypinyin" not in T.TRANSLATION_REQUIREMENTS
 
 
 def test_it_refuses_to_install_into_a_system_python(monkeypatch):
@@ -1501,6 +1526,24 @@ def test_a_fixed_line_before_a_bare_reference_keeps_both():
     assert asked == []
     assert chinese.startswith("再读一遍经文：")
     assert "12:7" in chinese
+
+
+def test_chinese_heard_back_keeps_its_title_and_reference_in_english():
+    """2026-10-23: the title kept 21 of 30, the references 41 of 60, to madlad."""
+    pytest.importorskip("pypinyin")
+    verse = "你们要靠主常常喜乐。"
+    translator, asked = _canned_translator({verse: "Rejoice in the Lord always."})
+    translator.protect_references = True
+    out = translator.translate(
+        ["2月26日的玛纳。", "再读一遍经文：" + verse, "腓立比书第四章第四节。"],
+        "en", source_language="zh",
+    )
+    assert out == [
+        "Manna for February 26.",
+        "The text again: Rejoice in the Lord always.",
+        "Philippians 4:4.",
+    ]
+    assert asked == [verse]
 
 
 def test_other_languages_still_get_the_model():
