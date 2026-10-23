@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-22
+Last updated: 2026-10-23
 
 ## Where it stands
 
@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**713 tests, all passing** on Windows locally (one skips, a librosa path).
+**717 tests, all passing** on Windows locally (one skips, a librosa path).
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -136,6 +136,57 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-23 — a check for the reference itself: 2.5% to 2.1%
+
+**Three takes per file: 2.1% misheard** (162 of 7,569), against 2.5% for the
+same files, translations and seeds without it (the entry below).
+
+| File | Mean | Take 1 | Take 2 | Take 3 |
+|---|---|---|---|---|
+| 0120 | 1.1% | 0.0% | 1.9% | 1.5% |
+| 0226 | 3.0% | 2.3% | 4.3% | 2.3% |
+| 0403 | 0.6% | 0.5% | 0.0% | 1.4% |
+| 0510 | 3.0% | 2.8% | 2.8% | 3.3% |
+| 0616 | 2.9% | 2.9% | 2.2% | 3.6% |
+| 0723 | 0.9% | 0.3% | 1.0% | 1.3% |
+| 0829 | 4.8% | 4.9% | 2.0% | 7.4% |
+| 1005 | 2.9% | 3.3% | 1.7% | 3.7% |
+| 1111 | 1.8% | 2.1% | 2.5% | 0.8% |
+| 1218 | 0.9% | 0.8% | 2.0% | 0.0% |
+| **All** | **2.1%** | 1.9% | 2.0% | 2.5% |
+
+**Why the old check missed it.** `base`, the listener, hears the book name
+wrong too: 希伯來書第十二章 came back as 西部来书. To `missing_text` that is
+eight characters heard as four, a mishearing, not a gap.
+`listen_back.missing_references` now counts each 第...章, 第...篇 and
+第...节 in a chunk against what was heard, whatever its length, and any one
+short is left out, which earns the chunk the two extra takes.
+
+**Its first version cried wolf.** `base` writes 第12张 / 第13張 for 章 and
+第二十三片 for Psalm's 篇, read correctly. In a first run (stopped part way)
+it fired 29 times in five files, most of them false, and used all five
+takes on 0510's Psalm 23:5 four times. Those same-sound characters now count
+as heard (`_SAME_SOUND`). In the run above it fired on 7 chunks in 30
+readings:
+- **Five fixed on the next take**, and every one of those takes scored
+  better than the same take without the check: 0120 take 1 1.9% to 0.0%,
+  0226 take 3 5.9% to 2.3%, 0403 take 2 0.9% to 0.0%, 0616 take 1 6.1% to
+  2.9%, 0723 take 3 2.3% to 1.3%.
+- **Two used all five takes and kept the best.** 0510 take 1: both
+  listeners heard 第二三篇, so Chatterbox likely did drop the 十; that take
+  went 1.9% to 2.8%. 0616 take 3: the second reference still came out
+  without 第十二章.
+- **0616 now keeps 第十二章 in 5 of its 6 references, against 3 of 6.**
+- Files where it never fired (0829, 1005, 1111, 1218) scored exactly as
+  before, take for take.
+
+Cost: 15 extra takes over 30 readings, a chunk's worth of speech each.
+Other retakes: 5 for babble, 11 for an abrupt ending.
+
+The run was stopped four times (low memory while the session sat idle, and
+Seth's pauses) and resumed from the readings on disk; the last reading,
+listening and scoring ran in the foreground.
+
 ## 2026-10-22 (evening) — three takes per file, and extra takes for a cut reference
 
 **Three takes per file: 2.5% misheard** (188 of 7,569 characters). Same ten
@@ -173,6 +224,11 @@ characters, and listening back only counts a gap of six or more
 committed because it is harmless and tested, but **it does nothing yet**;
 catching a cut reference needs a check of the reference itself, not a lower
 threshold for everything (shorter gaps are what `base` mishears anyway).
+
+> Corrected 2026-10-23: the length was not the whole reason. With the
+> Traditional 來書 the gap is six characters; it passed because `base`
+> heard the book name wrong as well (西部来书), making it a mishearing to
+> `missing_text`. Fixed by the check in the entry above.
 
 Retakes that did fire: 3 for babble (all on the first or second take of a
 chunk), 14 for an abrupt ending, 2 of which kept the least bad of three.
