@@ -11,6 +11,7 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **749 tests, all passing** on Windows locally (one skips, a librosa path).
+The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
 The 2026-10-21 dot-reference fix (`e6a4ce2`) passed CI on all eight jobs.
@@ -3384,7 +3385,11 @@ did not.
      2026-10-23 (later): madlad invents scripture for a fragment. Not done.
    - **A Chinese speaker** (item 7). Whisper is a stand-in; every number
      above is about Whisper, not a person. None available yet (Seth,
-     2026-10-23).
+     2026-10-23). **Chinese is on hold until there is one** (2026-10-24):
+     what is left of the 2.0% is mostly tones and same-sound characters
+     Whisper chose, with no cheap fix, and 得着→得到 needs a speaker's say.
+     One measurement-only change remains: scoring a character that sounds
+     right (渣子 for 渣滓) as heard.
    Still open alongside it:
    - ~~Protect Chinese references in the Chinese-to-English direction.~~
      Done 2026-10-23 (later), matched by sound: 41 to 59 of 60.

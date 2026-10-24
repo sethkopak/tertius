@@ -670,11 +670,14 @@ output is not good enough, that is the first thing to change.
 
 Honest limits, as of the last time this was written:
 
-- Only the two M2M-100 models have been run. `madlad400-3B` is a different
-  architecture entirely and **has never been tried**.
-- Translation has only ever run on the **CPU**. Whether a model fits on a GPU
-  beside Whisper is unknown, which is why the comparison table has no verdict
-  column.
+- `madlad400-3B` has been run, English into Chinese, on ten Daily Heavenly
+  Manna recordings (see *Chinese, measured* below). transformers 5 loads its
+  checkpoint wrong without saying so, and every translation was fluent
+  nonsense until Tertius loaded it itself. Qwen3-4B-Instruct was tried
+  against it as a translator and was worse for a listener, and it invented
+  content.
+- Translation has run on the GPU too, but only `m2m100-418M` has been timed,
+  so the comparison table still has no throughput column.
 
 ## Reading text aloud
 
@@ -1108,6 +1111,38 @@ Recognition needs a known book name, so `Section 2`, `Volume 6 chapter 2` and
 `Figure 3` are left alone. Anything it does not recognise is simply translated
 as before.
 
+### Chinese, measured
+
+English into Chinese is the one pair measured end to end. `app/tools/zh_harness.py`
+runs Tertius's own code over ten Manna recordings that were never used for
+tuning: transcribe, translate, read aloud in the speaker's cloned voice, then
+have Whisper `large` listen to the reading, three takes per file. The score is
+the share of characters Whisper heard wrong, a stand-in for a listener. It was
+5.3% on 2026-10-21 and is **2.0%** now (2026-10-24). Part of that drop is the
+scorer, which since 2026-10-22 no longer counts two artifacts of its own; see
+`app/STATUS.md`. The rest came mostly from these:
+
+- **Listening back.** A small Whisper (`base`, on the CPU) transcribes each
+  chunk as it is read. If a stretch of the text, or a chapter or verse of a
+  reference, was not heard, or the model babbled text that is not there, the
+  chunk is read again: up to two more takes, two beyond that for a reference.
+  Chinese only, because it is the only language this was measured on.
+- **Same-sound spellings.** A few words the voice model never once said right
+  are read as a common character with the same sound: 吗哪 as 玛哪, 白昼 as
+  白宙, 祷告 as 导告, and four more (`speech.SPOKEN_AS`). Only what the model
+  reads changes; the transcript and cues keep the real word.
+- **Fixed lines.** "Manna for January 20th." and "The text again." are named
+  from a table rather than translated, both ways. madlad once rendered the
+  first as "loan record".
+- **References back into English.** A Chinese reference is found by its sound
+  (`pypinyin`), so a book name Whisper spelled its own way is still recognized
+  and kept from the model. On 30 readings, references came back right 59 of
+  60 times, against 41 before.
+
+What is left is mostly a tone off, or a character Whisper chose that sounds
+the same, and a person may not mishear either. **Every number here is
+Whisper's, not a listener's.**
+
 ### What has actually been heard
 
 A Russian speaker has listened to a Russian reading and says it sounds good.
@@ -1117,7 +1152,8 @@ person rather than from a waveform.
 Chinese has been run and sounds fine to someone who does not speak Chinese,
 which is a weaker claim and is kept separate on purpose: a reading can be
 fluent and wrong, and duration, pitch and a back-transcription would all report
-it as fine. The other twenty-one languages have nobody behind them.
+it as fine. The measurements above are by Whisper, not by a speaker. The
+other twenty-one languages have nobody behind them.
 
 ### Honest limits
 
@@ -1165,8 +1201,9 @@ As of the last time this was written:
 cd app && pytest
 ```
 
-382 tests. The whisper model is mocked throughout, and so is the translator —
-the suite downloads nothing, decodes no audio and converts no checkpoints, which
+749 tests. The whisper model is mocked throughout, and so are the translator
+and the voice model — the suite downloads nothing, decodes no audio, generates
+no audio and converts no checkpoints, which
 is also what makes it safe to run in CI. Coverage is aimed at what is easy to
 get wrong: state tracking and resume semantics, the job's independence from the
 HTTP request that started it, download-progress aggregation,

@@ -152,6 +152,7 @@ Installed only when translation is used, and not redistributed here either.
 | transformers | 5.16.1 | Apache-2.0 |
 | sentencepiece | 0.2.2 | Apache-2.0 |
 | torch | 2.14.0+cpu | BSD-3-Clause |
+| pypinyin | 0.55.0 | MIT |
 
 `torch` is installed from <https://download.pytorch.org/whl/cpu> rather than
 PyPI. Conversion loads a checkpoint and writes it back out — it never runs the
