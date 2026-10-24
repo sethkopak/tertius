@@ -918,12 +918,21 @@ def _packaged_speech_languages() -> tuple[str, ...]:
 # is, 7/9 as 白宙 (the two misses a tone off); 祷告 0/3, 3/3 as 导告; 羊羔 0/3,
 # 3/3 as 羊高. Simplified only: the Traditional forms never occurred and were
 # not measured.
+#
+# Three more from the 162 characters the 3-take run misheard (2026-10-23),
+# measured the same way, three takes each: 渣滓 0/3 (heard 扎值, 扎之), 3/3 as
+# 渣子; 哀哉 0/3 (哀胎, 爱胎), 2/3 as 哀灾 (the miss a tone off); 福祉 1/3
+# (扶持), 2/3 as 福止. Not 得着: 得 is fixed by 德, but 着 is still read zhe,
+# and no common character has its sound.
 SPOKEN_AS = {
     "zh": {
         "吗哪": "玛哪",
         "白昼": "白宙",
         "祷告": "导告",
         "羊羔": "羊高",
+        "渣滓": "渣子",
+        "哀哉": "哀灾",
+        "福祉": "福止",
     }
 }
 

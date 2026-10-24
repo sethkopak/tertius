@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Where it stands
 
@@ -136,6 +136,32 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-24 — three more same-sound spellings, and 得着 left alone
+
+The five candidates below, tried the way 白昼 was: every chunk holding one,
+three takes as written and three spelled with a same-sound character, same
+voice, seeds 700+, no retakes, heard back by Whisper large (2026-10-23).
+
+| Word | As written | Spelled | |
+|---|---|---|---|
+| 渣滓 | 0/3 (扎值, 扎之) | 3/3 as 渣子 | Added |
+| 哀哉 | 0/3 (哀胎, 爱胎, 嗨) | 2/3 as 哀灾 (miss 爱哉, a tone) | Added |
+| 福祉 | 1/3 (扶持) | 2/3 as 福止 (miss 复制) | Added |
+| 溢 | 18/18 | 18/18 as 益 | Not needed; the harness misses were Whisper's |
+| 得着 | 得 7/9, 着 2/9 | 得 9/9, 着 4/9 as 德着 | Not added |
+
+Now in `speech.SPOKEN_AS`: 渣滓→渣子, 哀哉→哀灾, 福祉→福止 (1 of 9 heard
+right as written, 7 of 9 spelled). One chunk each, so three takes is all the
+evidence.
+
+**得着 is two errors.** 德 fixes the 得. 着 (zháo) is read zhe either way,
+heard 者 in every remaining miss; 2/9 against 4/9 is take-to-take noise. No
+common character has its sound, so no same-sound spelling can fix it. Reading
+another word (得到) would change what a listener hears, which no `SPOKEN_AS`
+entry does yet: left for a Chinese speaker to judge. The scorer miscounted the
+second 得着 in 0829 chunk 0 (before a full stop); the 得着 row is counted by
+hand from all twelve takes' text.
+
 ## 2026-10-23 (later) — what the 2.1% is, splitting rejected, Chinese references kept
 
 **The 162 misheard characters, by sound** (pypinyin against what Whisper
@@ -152,7 +178,7 @@ wrote, all 30 readings of the run below):
 Clusters a fix could take: **得着** in 0829, read děi zhe for dé zháo (得→逮
 ×4, 着→者 ×5: most of the worst file); and four rare characters, 渣滓 (6),
 福祉 (6), 哀哉 (5), 溢 (8 across its spellings), as `SPOKEN_AS` candidates
-like 白昼. Not tried yet.
+like 白昼. Tried 2026-10-24, above.
 
 **Splitting long English sentences before madlad: rejected, without a
 harness run.** 13 of the ten files' 108 sentences run 30 words or more, the
@@ -3337,6 +3363,9 @@ did not.
    - ~~Sort the 2.1% (162 characters) by cause.~~ Done 2026-10-23 (later).
      Candidates for `SPOKEN_AS`, each needing the 0-of-N test the last three
      had: 得着 (9 characters, 0829), 渣滓, 福祉, 哀哉, 溢.
+   - ~~Test the five candidates.~~ Done 2026-10-24: 渣滓, 哀哉, 福祉 added;
+     溢 not needed; 得着's 着 has no same-sound spelling (needs a Chinese
+     speaker's say on 得到).
    - ~~Split long English sentences before madlad sees them.~~ Tried
      2026-10-23 (later): madlad invents scripture for a fragment. Not done.
    - **A Chinese speaker** (item 7). Whisper is a stand-in; every number
