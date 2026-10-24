@@ -154,6 +154,20 @@ Now in `speech.SPOKEN_AS`: 渣滓→渣子, 哀哉→哀灾, 福祉→福止 (1 
 right as written, 7 of 9 spelled). One chunk each, so three takes is all the
 evidence.
 
+**In the ten-file run** (`--takes 3`, 2026-10-24, transcripts and
+translations reused from the 2.1% run): **2.0% (152/7569)**, from 2.1%
+(162). Every take of the three words, Whisper large:
+
+| Word | File | 2.1% run | Now |
+|---|---|---|---|
+| 福祉 | 0226 | 扶持 ×3 | 福祉 ×3 |
+| 渣滓 | 0616 | 扎值 ×3 | 渣子 ×3 (same sound; still scored an error) |
+| 哀哉 | 1005 | 爱胎, 哀胎, 爱泰 | 埃灾 ×2, 爱在 (a tone off) |
+
+0226 went 3.0% to 2.5% and 1005 2.9% to 2.2%; 0616 stayed 2.9%. Five of
+the other seven files scored exactly as before; 0510 (+1 character) and 0829
+(-1) hold none of the words.
+
 **得着 is two errors.** 德 fixes the 得. 着 (zháo) is read zhe either way,
 heard 者 in every remaining miss; 2/9 against 4/9 is take-to-take noise. No
 common character has its sound, so no same-sound spelling can fix it. Reading
