@@ -1183,7 +1183,7 @@ class Speaker:
         # The best take is kept rather than the last, so a chunk that never
         # comes out clean is no worse off than it is today.
         #
-        # Chinese chunks are also listened to (listen_back.py): a take can end
+        # Chinese and Hebrew chunks are also listened to (listen_back.py): a take can end
         # cleanly and still leave text out, or babble text that is not there.
         # Takes are ranked by how many characters they got wrong that way
         # first and how abruptly they ended second, so a faithful take beats a

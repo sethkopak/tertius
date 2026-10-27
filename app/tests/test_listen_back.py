@@ -195,7 +195,7 @@ def test_a_cut_reference_reaches_the_take_budget(monkeypatch):
             return [type("S", (), {"text": text})()], None
 
     listener = L.Listener()
-    listener._model = _Model()
+    listener._models = {"base": _Model()}
     spoken = "这是由它练习: 希伯來書 第十二章第十一节."
     missing, added = listener.check(spoken, [0.0] * 16000, 16000, "zh")
     assert missing == ["第十二章"] and added == []
@@ -207,7 +207,7 @@ def test_other_languages_are_not_listened_to():
 
     class _Refuse:
         def check(self, *args):
-            raise AssertionError("only Chinese is listened to")
+            raise AssertionError("only Chinese and Hebrew are listened to")
 
     speaker = Speaker("chatterbox-multilingual", device="cpu")
     speaker._listener = _Refuse()
@@ -285,3 +285,44 @@ def test_words_chatterbox_never_said_right_are_read_as_same_sound_ones():
     assert spoken["text"] == "白宙将临,我们学会正确的导告,谦卑如羊高。哀灾,渣子无关福止。"
     # The text a reader sees, and the cues, keep the real words.
     assert chunk.text == written
+
+
+# Hebrew, 2026-10-26. The spoken text carries vowel points; Whisper writes
+# none, and writes the numbers it hears as digits.
+HE_SPOKEN = (
+    "זֶה כְּמוֹ צֶמַח. בַּהַתְחָלָה זֶה מְאוֹד רַךְ. "
+    "הָאִיגֶּרֶת אֶל הָעִבְרִים, פֶּרֶק שְׁנֵים עָשָׂר, פָּסוּק אַחַד עָשָׂר."
+)
+
+
+def test_a_hebrew_reference_left_out_is_found():
+    heard = "זה כמו צמח. בהתחלה זה מאוד רך."
+    missing = missing_text(HE_SPOKEN, heard, "he")
+    assert missing == ["האיגרתאלהעברימפרקשנימעשרפסוקאחדעשר"]
+
+    from tertius.listen_back import names_a_reference
+
+    assert names_a_reference(missing)
+
+
+def test_hebrew_heard_whole_with_digits_and_no_points_is_not_missing():
+    heard = "זה כמו צמח, בהתחלה זה מאוד רך. ההיגרת אל העברים, פרק 12, פסוק 11."
+    assert missing_text(HE_SPOKEN, heard, "he") == []
+    assert added_text(HE_SPOKEN, heard, "he") == []
+
+
+def test_hebrew_is_heard_by_its_own_listener(monkeypatch):
+    """`small` for Hebrew; `base` mishears a fifth of its letters."""
+    import tertius.listen_back as L
+
+    asked = []
+
+    class _Model:
+        def transcribe(self, *args, **kwargs):
+            asked.append(kwargs.get("language"))
+            return [type("S", (), {"text": "זה כמו צמח. בהתחלה זה מאוד רך."})()], None
+
+    listener = L.Listener()
+    listener._models = {"small": _Model()}
+    missing, _ = listener.check(HE_SPOKEN, [0.0] * 16000, 16000, "he")
+    assert asked == ["he"] and missing

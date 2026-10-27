@@ -14,8 +14,17 @@ missing reference and nothing else, as `small` did, at 7-18 s per file
 against 19-26 s. On the CPU because the GPU is full of the voice model while
 this runs.
 
-Chinese only for now: it is the only language this was measured on, and the
-threshold below is in Chinese characters.
+Chinese, and Hebrew since 2026-10-26: the languages this was measured on.
+
+**Hebrew listens with `small`.** `base` mishears 12-27% of Hebrew letters in
+these readings (large-v3-turbo about 4%). Run over thirty whole Hebrew
+readings with two real drops in them - 0120's `בהתחלה זה מאוד רך`, 0616's
+`האיגרת אל העברים 12:11` - `base` found both and raised three false alarms;
+`small` (9-18% misheard) found both and raised one, at 12 s against 4 s per
+minute of reading. Two more apparent drops were Whisper large mishearing
+them, not Chatterbox leaving them out. A chapter-and-verse count like
+Chinese's is not used: `small` missed `פרק` or `פסוק` in readings that had
+them all.
 """
 
 from __future__ import annotations
@@ -27,11 +36,13 @@ from typing import Sequence
 
 log = logging.getLogger(__name__)
 
-LISTENER_MODEL = "base"
-LANGUAGES = frozenset({"zh"})
+# The model that listens to each language. See the module docstring.
+LISTENER_MODELS = {"zh": "base", "he": "small"}
+LANGUAGES = frozenset(LISTENER_MODELS)
 # A stretch of the text this long, unheard, counts as left out. Shorter gaps
-# are what a small model mishears anyway.
-MIN_MISSING_CHARS = 6
+# are what a small model mishears anyway. Chinese in characters; Hebrew in
+# letters, the spaces taken out - 12 is about three words.
+MIN_MISSING = {"zh": 6, "he": 12}
 WHISPER_RATE = 16_000
 
 _NOT_TEXT = re.compile(r"[\W_a-zA-Z]+")
@@ -50,7 +61,10 @@ def names_a_reference(stretches: Sequence[str]) -> bool:
     Every reference cut short on 2026-10-21/22 lost a chapter or a verse with
     it: 來書第十二章, 詩篇第二十三篇第五节, 希伯來書第十二章第十一节.
     """
-    return any(_CHAPTER_OR_VERSE.search(s) for s in stretches)
+    # Hebrew references are read `פרק ..., פסוק ...` (numbers.py).
+    return any(
+        _CHAPTER_OR_VERSE.search(s) or "פרק" in s or "פסוק" in s for s in stretches
+    )
 
 
 def missing_references(spoken: str, heard: str) -> list[str]:
@@ -72,7 +86,21 @@ def missing_references(spoken: str, heard: str) -> list[str]:
     return out
 
 
-def _normalize(text: str) -> str:
+# Hebrew: vowel points and cantillation (the text spoken carries them), and
+# the final letter forms, which Whisper may or may not write.
+_HEBREW_POINTS = re.compile(r"[֑-ׇ]")
+_NOT_HEBREW = re.compile(r"[^א-ת]+")
+_FINALS = str.maketrans("ךםןףץ", "כמנפצ")
+
+
+def _normalize(text: str, language: str = "zh") -> str:
+    if language == "he":
+        from .numbers import spell
+
+        # Whisper writes numbers it hears as digits; the reading says words.
+        text = spell(_HEBREW_POINTS.sub("", text), "he")
+        return _NOT_HEBREW.sub("", text).translate(_FINALS)
+
     from .numbers import _chinese
 
     text = _DIGITS.sub(
@@ -82,25 +110,26 @@ def _normalize(text: str) -> str:
     return _NOT_TEXT.sub("", text)
 
 
-def missing_text(spoken: str, heard: str) -> list[str]:
+def missing_text(spoken: str, heard: str, language: str = "zh") -> list[str]:
     """Stretches of `spoken` that are absent from `heard`.
 
     A replacement counts only when the spoken side is more than twice the
     heard side: a Traditional character heard back as its Simplified form, or
     a misheard word, is a one-for-one swap and not an omission.
     """
-    said, got = _normalize(spoken), _normalize(heard)
+    said, got = _normalize(spoken, language), _normalize(heard, language)
+    least = MIN_MISSING[language]
     matcher = difflib.SequenceMatcher(None, said, got, autojunk=False)
     out = []
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        if i2 - i1 < MIN_MISSING_CHARS:
+        if i2 - i1 < least:
             continue
         if op == "delete" or (op == "replace" and i2 - i1 > 2 * (j2 - j1)):
             out.append(said[i1:i2])
     return out
 
 
-def added_text(spoken: str, heard: str) -> list[str]:
+def added_text(spoken: str, heard: str, language: str = "zh") -> list[str]:
     """Stretches of `heard` with no counterpart in `spoken`: babble.
 
     The mirror of `missing_text`. On 2026-10-21 Chatterbox babbled in the
@@ -108,11 +137,12 @@ def added_text(spoken: str, heard: str) -> list[str]:
     of it in the text - and listening back, which looked only for what was
     left out, passed it. It was most of that file's 18% misheard.
     """
-    said, got = _normalize(spoken), _normalize(heard)
+    said, got = _normalize(spoken, language), _normalize(heard, language)
+    least = MIN_MISSING[language]
     matcher = difflib.SequenceMatcher(None, said, got, autojunk=False)
     out = []
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        if j2 - j1 < MIN_MISSING_CHARS:
+        if j2 - j1 < least:
             continue
         if op == "insert" or (op == "replace" and j2 - j1 > 2 * (i2 - i1)):
             out.append(got[j1:j2])
@@ -131,14 +161,15 @@ def _resample(samples: Sequence[float], rate: int):
 
 
 class Listener:
-    """A CPU Whisper, loaded on first use, that never fails a reading."""
+    """A CPU Whisper per language, loaded on first use, that never fails a reading."""
 
     def __init__(self):
-        self._model = None
-        self._unavailable = False
+        self._models: dict = {}
+        self._unavailable: set[str] = set()
 
-    def _load(self):
-        if self._model is None and not self._unavailable:
+    def _load(self, language: str):
+        name = LISTENER_MODELS[language]
+        if name not in self._models and name not in self._unavailable:
             try:
                 from huggingface_hub import snapshot_download
                 from faster_whisper import WhisperModel
@@ -148,15 +179,15 @@ class Listener:
                 # Downloaded by `Speaker.load` at job start. Here only what is
                 # already on disk is used, so a reading never stops to fetch it.
                 folder = snapshot_download(
-                    resolve_repo_id(LISTENER_MODEL),
+                    resolve_repo_id(name),
                     allow_patterns=MODEL_FILE_PATTERNS,
                     local_files_only=True,
                 )
-                self._model = WhisperModel(folder, device="cpu", compute_type="int8")
+                self._models[name] = WhisperModel(folder, device="cpu", compute_type="int8")
             except Exception as exc:
                 log.info("not listening back to the reading: %s", exc)
-                self._unavailable = True
-        return self._model
+                self._unavailable.add(name)
+        return self._models.get(name)
 
     def check(
         self, spoken: str, samples: Sequence[float], rate: int, language: str
@@ -164,7 +195,7 @@ class Listener:
         """`(left out, added)` for a chunk; both empty when nothing could tell."""
         if language not in LANGUAGES:
             return [], []
-        model = self._load()
+        model = self._load(language)
         if model is None:
             return [], []
         try:
@@ -176,23 +207,28 @@ class Listener:
         except Exception:
             log.debug("listening back failed", exc_info=True)
             return [], []
-        missing = missing_text(spoken, heard)
+        missing = missing_text(spoken, heard, language)
         # A chapter or verse already inside a left-out stretch is not counted twice.
         missing += [
             ref for ref in missing_references(spoken, heard)
             if not any(ref in stretch.replace("節", "节") for stretch in missing)
         ]
-        return missing, added_text(spoken, heard)
+        return missing, added_text(spoken, heard, language)
 
     def unload(self) -> None:
-        self._model = None
+        self._models = {}
 
 
 def ensure_model(on_progress=None) -> None:
-    """Fetch the listener at job start. Not fatal: no listener, no check."""
-    try:
-        from .transcribe import ensure_model_downloaded
+    """Fetch the listeners at job start. Not fatal: no listener, no check.
 
-        ensure_model_downloaded(LISTENER_MODEL, on_progress)
-    except Exception as exc:
-        log.info("could not fetch the listen-back model: %s", exc)
+    Every language's, since the speech model is loaded before the reading
+    says which language it is in.
+    """
+    from .transcribe import ensure_model_downloaded
+
+    for name in dict.fromkeys(LISTENER_MODELS.values()):
+        try:
+            ensure_model_downloaded(name, on_progress)
+        except Exception as exc:
+            log.info("could not fetch the listen-back model %s: %s", name, exc)
