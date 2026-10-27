@@ -75,6 +75,7 @@ rather than reason about tokenizers.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -519,6 +520,151 @@ def chinese_references(text: str) -> list[tuple[int, int, str]]:
     return found
 
 
+# Hebrew references as Whisper writes Tertius's Hebrew readings, which say
+# them `<book>, פרק <n>, פסוק <n>` (numbers.py): the numbers as digits or as
+# words of either gender, and the book name close to the table's but rarely
+# exact - `ההיגרת אל העברים`, `ההגלת אל הרומאים`, `הגר את פטרוס השנייה`,
+# `איגרת יעקב` (2026-10-26, 180 readings). Given to madlad as written,
+# `ההגלת` ("the exile") came back "Emigrate to the Romans".
+_HE_UNITS = {
+    "אחד": 1, "אחת": 1, "שניים": 2, "שתיים": 2, "שנים": 2, "שתים": 2, "שני": 2,
+    "שתי": 2, "שלושה": 3, "שלוש": 3, "ארבעה": 4, "ארבע": 4, "חמישה": 5, "חמש": 5,
+    "שישה": 6, "שש": 6, "שבעה": 7, "שבע": 7, "שמונה": 8, "תשעה": 9, "תשע": 9,
+}
+_HE_TENS = {
+    "עשר": 10, "עשרה": 10, "עשרים": 20, "שלושים": 30, "ארבעים": 40, "חמישים": 50,
+    "שישים": 60, "שבעים": 70, "שמונים": 80, "תשעים": 90, "מאה": 100,
+}
+_HE_LETTERS = re.compile(r"[^א-ת]")
+_HE_FINALS = str.maketrans("ךםןףץ", "כמנפצ")
+# How alike, 0 to 1, the words before `פרק` must be to a book's name: at
+# least _HE_BOOK_SURE, or at least _HE_BOOK_LIKENESS and ahead of every other
+# book by _HE_BOOK_MARGIN. The epistles all begin `האיגרת אל ה`, so a well
+# heard one is close to several; a single word may be close to a short name by
+# chance (`העבלים`, Hebrews misheard, against `תהילים`).
+# `פסוק` and `פסוקים`, and how Whisper also wrote it: `פסוג`, `בסוק`, `פסופ`,
+# `עסוק`.
+_HE_VERSE = re.compile(r"^[פבע]סו[קגפכ](?:ימ)?$")
+_HE_BOOK_SURE = 0.85
+_HE_BOOK_LIKENESS = 0.65
+_HE_BOOK_MARGIN = 0.1
+
+
+def _he_letters(word: str) -> str:
+    return _HE_LETTERS.sub("", word).translate(_HE_FINALS)
+
+
+def _he_number(words: list[str]) -> tuple[int, int] | None:
+    """`(value, words used)` for a number at the start of `words`."""
+    if not words:
+        return None
+    first = re.sub(r"[^\d]", "", words[0])
+    if first and first == re.sub(r"[.,:;?!]", "", words[0]):
+        return int(first), 1
+    value, used = 0, 0
+    for word in words[:4]:
+        bare = re.sub(r"[.,:;?!]", "", word)
+        if used and bare.startswith("ו"):
+            bare = bare[1:]
+        if bare in _HE_UNITS and value % 10 == 0:
+            value += _HE_UNITS[bare]
+        elif bare in ("עשר", "עשרה") and 0 < value < 10:
+            value += 10
+        elif bare in _HE_TENS and value == 0:
+            value = _HE_TENS[bare]
+        else:
+            break
+        used += 1
+        if word[-1:] in ".,:;?!":
+            break
+    return (value, used) if used and value else None
+
+
+@functools.lru_cache(maxsize=1)
+def _he_labels() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (_he_letters(entry["labels"]["he"].replace(" ", "")), book)
+        for book, entry in _table().items()
+        if entry.get("labels", {}).get("he")
+    )
+
+
+def _he_book(words: list[str]) -> tuple[str, int] | None:
+    """The book the last one to five of `words` name, and how many name it."""
+    import difflib
+
+    tries = []
+    for length in range(1, min(len(words), 5) + 1):
+        heard = "".join(_he_letters(w) for w in words[-length:])
+        if not heard:
+            continue
+        scores = sorted(
+            ((difflib.SequenceMatcher(None, heard, label).ratio(), book)
+             for label, book in _he_labels()),
+            reverse=True,
+        )
+        (score, book), (second, _) = scores[0], scores[1]
+        tries.append((score, book, length, score >= _HE_BOOK_SURE or (
+            score >= _HE_BOOK_LIKENESS and score - second >= _HE_BOOK_MARGIN)))
+    if not tries:
+        return None
+    # The book that the best-matching ending names, if some ending names it
+    # clearly: `ההיגרת הלשונה את טימוטיוס` is 1 Timothy at 0.80 but only 0.03
+    # ahead of 2 Timothy; its last three words are 0.67, 0.12 ahead.
+    book = max(tries)[1]
+    clear = [t for t in tries if t[1] == book and t[3]]
+    if not clear:
+        return None
+    return book, max(clear)[2]
+
+
+def hebrew_references(text: str) -> list[tuple[int, int, str]]:
+    """Spans of `text` that are references written in Hebrew, as English.
+
+    `(start, end, "Hebrews 12:3")`, found by `פרק` and `פסוק` with a number
+    after each and a book named before them. Empty when there are none.
+    """
+    if not text or "פרק" not in text:
+        return []
+    tokens = list(re.finditer(r"\S+", text))
+    words = [t.group() for t in tokens]
+    found = []
+    for i, word in enumerate(words):
+        if _he_letters(word) != "פרק":
+            continue
+        chapter = _he_number(words[i + 1:])
+        if not chapter:
+            continue
+        j = i + 1 + chapter[1]
+        if j >= len(words) or not _HE_VERSE.match(_he_letters(words[j])):
+            continue
+        verse = _he_number(words[j + 1:])
+        if not verse:
+            continue
+        verses, end = str(verse[0]), j + verse[1]
+        # `פסוקים שמונה ותשעה`
+        following = words[end + 1:end + 5]
+        more = None
+        if following and following[0].startswith("ו"):
+            more = _he_number([following[0][1:], *following[1:]])
+        if more:
+            verses += f",{more[0]}"
+            end += more[1]
+        # Five words: `ההיגרת הראשונה אל תימות יוס` is 1 Timothy, split.
+        start_word = max(0, i - 5)
+        if found:
+            start_word = max(start_word, found[-1][3] + 1)
+        book = _he_book(words[start_word:i])
+        if not book:
+            continue
+        name, length = book
+        name = "Psalm" if name == "Psalms" else name
+        first = i - length
+        stop = tokens[end].end() - len(re.search(r"[.,:;?!]*$", words[end]).group())
+        found.append((tokens[first].start(), stop, f"{name} {chapter[0]}:{verses}", end))
+    return [(a, b, c) for a, b, c, _ in found]
+
+
 def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     """Replace whole scripture references with placeholders.
 
@@ -529,10 +675,11 @@ def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     `chinese_references`), which is what goes back in.
     """
     spans = [(start, end, text[start:end]) for start, end in find_references(text)]
-    spans += [
-        found for found in chinese_references(text)
-        if not any(found[0] < end and start < found[1] for start, end, _ in spans)
-    ]
+    for written in (chinese_references, hebrew_references):
+        spans += [
+            found for found in written(text)
+            if not any(found[0] < end and start < found[1] for start, end, _ in spans)
+        ]
     if not spans:
         return text, []
     spans.sort()
