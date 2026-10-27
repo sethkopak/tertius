@@ -1516,6 +1516,27 @@ def test_only_the_rest_of_a_sentence_reaches_the_model():
     assert chinese == "再读一遍经文：你们要靠主常常喜乐，我再说，你们要喜乐。"
 
 
+def test_a_lowercase_lord_reaches_the_model_capitalized():
+    """madlad renders "the lord" as a peer, `הלורד` (2026-10-27)."""
+    sent = [
+        "He who would partake of the joys of the Lord must also partake.",
+        "Our Lord's course was the proper one.",
+        # A master, not the Lord.
+        "The servant is not above his lord.",
+    ]
+    translator, asked = _canned_translator({text: "x" for text in sent})
+    translator.translate(
+        [
+            "He who would partake of the joys of the lord must also partake.",
+            "Our lord's course was the proper one.",
+            "The servant is not above his lord.",
+        ],
+        "he",
+        source_language="en",
+    )
+    assert asked == sent
+
+
 def test_a_fixed_line_before_a_bare_reference_keeps_both():
     """`The text again. Hebrews 12:7.` needs no model at all."""
     translator, asked = _canned_translator({})

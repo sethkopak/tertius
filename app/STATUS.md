@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**809 tests, all passing** on Windows locally (one skips, a librosa path).
+**810 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -138,6 +138,57 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-27 (night) — madlad's Hebrew mistranslations, found; nothing changed
+
+The ten readings' 108 English sentences against madlad's Hebrew for each,
+one line to one sentence. Each Hebrew line was put back into English by
+madlad and by m2m100 separately and scored (chrF) against its English;
+sentence medians 49.2 and 46.7. The lowest were read. **What is wrong is
+judged by the two back-translations agreeing and by my reading of the
+Hebrew - not a native speaker's.** Not counted: citations (`איגרת יעקב 4:3`
+is right; both models put it back badly), the title `מן`, and 0829's
+`Ye ask and receive, not because ye ask, amiss`, which is Whisper's
+punctuation.
+
+Found, most frequent first:
+- **"Rejoice" as "enjoy" or "get excited".** 9 of the 13 sentences with
+  rejoice: `תהנו` ×5 (0226 verse, said twice, and 0510), `להתרגש` /
+  `התרגשות` ×4. The sense is `שמחו`; `השמחה` was right where the noun
+  was "rejoicing" once.
+- **"The Lord" as "God".** `באלוהים`, `אלוהים הוא עוזר שלי` (1218's verse,
+  twice), `בני האלוהים` ("the sons of God" for "the Lord's people"),
+  `אלוהינו`, `האל`; `אדוננו` once. And twice Whisper wrote "the lord"
+  lowercase and madlad wrote `הלורד`, an English peer (0510); capitalized,
+  the same sentence gives `האל`.
+- **KJV wording misread.** "exercised thereby" as "activated" (`מופעלים`,
+  0616's verse, twice); "for the present" as "because the present" (`כי
+  ההווה`, 0616's title); "as with sons" as `כמו לבנים`, which both models
+  read back as "like whites" (0120's verse, twice); "contradiction of
+  sinners" as "of sins" (`חטאים`, 1005's verse, twice); "runneth over" as
+  "is filling" (0510).
+- **Single words.** "sympathetic nature" as "fifth nature" (`בטבע החמישי`,
+  0723); "dross" as "poisons" (`רעלים`, 0616); "mellowed" as "warms"
+  (0616); John as `ג'ון`, the English name, for `יוחנן` (0723);
+  "chastening" as "punishment" (`ענישה`, six sentences).
+
+Two cheap rewrites tried on seven of these, madlad only: modern verb forms
+(`ye`, `-eth`, `thou anointest`) changed little - "trained" for
+"exercised" fixed that one, but that is rewording the verse, and "for the
+present" got worse. "Be glad" for "rejoice" gave `תהיו שמחים`, right, but
+also a rewording. So most of what is wrong is in the verses, which are
+Bible text that already exists in Hebrew. **Not taken up:** the app
+translates what was heard; it does not swap in a published Hebrew Bible
+(Seth, 2026-10-27).
+
+**Fixed: the lowercase lord.** English going to the translator has "the
+lord" and "our lord" capitalized (`translate._LOWERCASE_LORD`): 48 in the
+375 English transcripts, every one the Lord. Not "his lord" - "the servant
+is not above his lord" is a master (0418, 0814). 0510's sentence through
+the app now gives `של האל` for `של הלורד`. One sentence in the ten
+harness readings, so no harness figure moves; not re-run. Side effect seen
+in that sentence: "cup" came back `ספל` (mug) instead of `כוס` - the
+model's choice shifts with any change to the sentence. 810 tests pass.
 
 ## 2026-10-27 (evening) — Hebrew back to English: sentences, and references by sound
 

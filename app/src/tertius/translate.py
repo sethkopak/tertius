@@ -544,6 +544,13 @@ UNSPACED_TARGETS = frozenset({"zh", "ja", "th", "lo", "km", "my"})
 _WESTERN_STOPS = str.maketrans(
     {"。": ".", "！": "!", "？": "?", "，": ",", "：": ":", "；": ";"}
 )
+# Whisper writes "the lord" lowercase now and then - 48 times after "the" or
+# "our" in the 375 English Manna transcripts, against about 570 capitalized,
+# every one of them the Lord - and madlad renders a lowercase lord as a peer:
+# `הלורד` in Hebrew (0510, 2026-10-27); capitalized, the same sentence gives
+# `האל`. Only after "the" and "our": "the servant is not above his lord" is a
+# master, and lowercase there on purpose.
+_LOWERCASE_LORD = re.compile(r"\b(?i:the|our)\s+lord\b")
 # Not after a digit: `2,12` is one reference, not two clauses.
 _CLAUSE_END = re.compile(r"(?<=\D[,，;；])")
 # A clause shorter than this is joined to the next: `感谢上帝,` is not worth a
@@ -808,6 +815,11 @@ class Translator:
         # reading - comes through here, and a citation mangled in any of them
         # is mangled for good.
         prepared = [source[i].strip() for i in wanted]
+        if (source_language or "en") == "en":
+            prepared = [
+                _LOWERCASE_LORD.sub(lambda m: m.group()[:-4] + "Lord", text)
+                for text in prepared
+            ]
         if self.protect_references:
             from .scripture import protect, unprotect
 
