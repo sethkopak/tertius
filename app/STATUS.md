@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**799 tests, all passing** on Windows locally (one skips, a librosa path).
+**804 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -139,7 +139,7 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
-## 2026-10-27 — English transcription against the book: 1.61% to 1.19%
+## 2026-10-27 — English transcription against the book: 1.61% to 1.16%
 
 All 375 Manna recordings transcribed with the app's settings and scored
 against the book (366 have a page): the verse, the comment and the verse
@@ -214,6 +214,43 @@ the book's typo `mattthew`), and King James forms (`shewed`, `stablish`).
 **One real thing in it: "Thank you" at the end of six transcripts**,
 Whisper's text on the closing silence. The scripts are in a session
 scratchpad.
+
+**The closing "Thank you", and refills cased and gated.** Three changes,
+each measured on all 375 recordings:
+- **Text on the closing silence is dropped.** Eight transcripts ended in a
+  segment nobody said - `Thank you.` six times, `We'll be right back.`,
+  `Here we go.` - each starting within the last second of the audio, stamped
+  30 s past its end, over audio at about a fiftieth of the speech's
+  loudness. A segment starting within 1.5 s of the end and running more than
+  a second past it is dropped (`_closing_filler`); 0719's real closing verse,
+  1.4 s past the end, began 5.7 s before it and stays. Never fired on the
+  Chinese or Hebrew readings; their scores are unchanged.
+- **What is decoded again is prompted for punctuation, and decoded without
+  too.** Whisper picks its style per decode: 0520's opening from 0.08 s came
+  back `manna for may 20th a peculiar people...`, from 0.10 s cased. A
+  punctuated prompt (`The following is a transcript, with punctuation.`)
+  set it every time - but 0317's verse, decoded with the prompt, came back
+  as its citation alone stretched over 20 s, every time, and whole without
+  it. So each stretch is decoded both ways and the one with more words kept,
+  the prompted one on a tie. (The reading's neighboring sentence as a prompt
+  was tried first: Whisper left out whatever matched it.)
+- **A gap is decoded again only if it holds speech.** Decoded both ways,
+  0412's silent 1.7 s pause came back `Oh, my God.` and `That's the thing.`
+  Speech-loud 0.1 s frames (over a third of the file's 75th-percentile
+  loudness): the seven real recoveries, English and Hebrew, 46-70% of their
+  gap; the invented ones 0-37%. A gap needs 40% (`SPEECH_SHARE`). The margin
+  is thin - one invented Hebrew gap was 37% - but that one was also outside
+  its gap in time, which the earlier check catches.
+
+**Now 1.16% (665/57516)**, 146 files word-perfect, none over 10%; the only
+runs of four or more missing are the reader's (0805, 1208). Hebrew's thirty
+readings: 3.4% of letters, 1.9% by sound, as before.
+
+**Whisper's main pass is not repeatable between runs.** 0317's verse was
+heard in one full run of the 375 and skipped in the next, same code and
+settings; and one full run against the next, unchanged files scored the
+same except where a change touched them. Figures here are single full runs;
+a difference of a few errors in one file is within that.
 
 ## 2026-10-26 — Hebrew, measured the way Chinese was
 

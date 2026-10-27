@@ -347,6 +347,17 @@ class SkippingModel:
                      S(start=14.0, end=20.0, text=C, words=None)]), info
 
 
+@pytest.fixture(autouse=True)
+def _every_gap_has_speech(monkeypatch, request):
+    """The fake models read no audio, so loudness is not measured; the test
+    of the loudness check itself asks for the real one."""
+    if "speech_loud" in request.node.name:
+        return
+    import tertius.transcribe as T
+
+    monkeypatch.setattr(T, "_speech_loud", lambda path, gaps: gaps)
+
+
 def _transcriber_skipping(refill, language="he"):
     from tertius.transcribe import WhisperTranscriber
 
@@ -481,3 +492,54 @@ def test_what_an_opening_segment_swallowed_goes_before_it():
         "Manna for May 13th. Behold, to obey is better than sacrifice",
         "Our Heavenly Father wishes us to be very attentive to His Word",
     ]
+
+
+@pytest.mark.parametrize(
+    "start, end, dropped",
+    [
+        (60.0, 90.0, True),    # 0315's `Thank you.`, 0.9 s before a 60.9 s end
+        (54.5, 61.6, False),   # 0719's last verse, 1.4 s over but begun 5.7 s before
+        (59.5, 60.5, False),   # a last word that ends inside the audio
+    ],
+)
+def test_text_on_the_closing_silence_is_dropped(start, end, dropped):
+    from tertius.transcribe import _closing_filler
+    from types import SimpleNamespace as S
+
+    assert _closing_filler(S(start=start, end=end), 60.9) is dropped
+
+
+def test_english_decoded_again_is_prompted_for_punctuation():
+    """0520's opening came back `manna for may 20th a peculiar people...`."""
+    from tertius.transcribe import REFILL_PROMPTS
+
+    transcriber = _transcriber_skipping([(10.2, 13.6, "let every one of us")], "en")
+    transcriber.transcribe("reading.wav")
+
+    first, prompted, plain = transcriber._model.calls[:3]
+    assert "initial_prompt" not in first
+    assert prompted["initial_prompt"] == REFILL_PROMPTS["en"]
+    # And without, in case the prompt loses speech (0317).
+    assert "initial_prompt" not in plain and "clip_timestamps" in plain
+
+
+def test_only_speech_loud_gaps_are_decoded_again_speech_loud(tmp_path):
+    """0412's silent pause came back `Oh, my God.`; real skips were 46-70% loud."""
+    import wave
+
+    import numpy
+    from tertius.transcribe import _speech_loud
+
+    rate = 16_000
+    rng = numpy.random.default_rng(0)
+    speech = 0.2 * rng.standard_normal(rate * 10)
+    quiet = 0.002 * rng.standard_normal(rate * 2)
+    audio = numpy.concatenate([speech, quiet, speech])  # 0-10 s, 10-12 s, 12-22 s
+    path = tmp_path / "reading.wav"
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes((numpy.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+
+    assert _speech_loud(path, [(10.0, 12.0), (14.0, 16.0)]) == [(14.0, 16.0)]

@@ -594,6 +594,37 @@ SLOW_WORDS_PER_SECOND = 1.3
 READING_WORDS_PER_SECOND = 2.5
 
 
+# **What Whisper writes on the closing silence.** Eight of the 375 English
+# Manna transcripts ended in a segment nobody said - `Thank you.` six times,
+# `We'll be right back.`, `Here we go.` - each starting within the last
+# second of the audio and stamped a full 30 s past its end, over audio at
+# about a fiftieth of the speech's loudness (2026-10-27). One real closing
+# segment also ran past the end (0719, 1.4 s), but it started 5.7 s before
+# it. So a segment that starts within CLOSING_SECONDS of the end and runs
+# more than REFILL_SLACK_SECONDS past it is dropped.
+CLOSING_SECONDS = 1.5
+
+# **A prompt for what is decoded again.** A stretch decoded on its own can
+# come back all lowercase and unpunctuated - 0520's `manna for may 20th a
+# peculiar people zealous of good works titus chapter 2 verse 14 a`, from
+# 0.08 s, where from 0.10 s it was cased (2026-10-27): Whisper picks a style
+# per decode. A punctuated prompt sets it, and every span tried came back
+# cased; the prompt is not the reading's own text, because given the
+# neighboring sentence Whisper left out whatever matched it. But a prompt can
+# lose speech too: 0317's verse, decoded with it, came back as its citation
+# alone stretched over the verse's 20 s, every time; without it, whole. So a
+# stretch is decoded both ways and the one with more words kept, the
+# prompted one on a tie.
+REFILL_PROMPTS = {"en": "The following is a transcript, with punctuation."}
+
+
+def _closing_filler(segment, duration) -> bool:
+    return bool(duration) and (
+        segment.start > duration - CLOSING_SECONDS
+        and segment.end > duration + REFILL_SLACK_SECONDS
+    )
+
+
 def _repeats(text: str, of: str) -> float:
     """How much of `text`, by words, is words of `of`."""
     said = {w.strip(".,;:!?\"'").lower() for w in of.split()}
@@ -610,6 +641,37 @@ def _slow(segments, duration):
         if span >= SLOW_SEGMENT_SECONDS and len(segment.text.split()) / span < SLOW_WORDS_PER_SECOND:
             out.append(segment)
     return out
+
+
+# **Only a gap with speech in it.** Decoded both ways, a silent pause can still
+# come back as three invented words - 0412's 1.7 s after its citation, `Oh,
+# my God.` and `That's the thing.` So a gap is decoded again only when
+# SPEECH_SHARE of it is speech-loud: 0.1 s frames above a third of the
+# file's speech level (its loudness at the 75th percentile). The seven real
+# recoveries, English and Hebrew, were 46-70% speech-loud; the invented ones
+# 0-37% (2026-10-27).
+SPEECH_SHARE = 0.4
+WHISPER_SAMPLE_RATE = 16_000
+
+
+def _speech_loud(path, gaps) -> list[tuple[float, float]]:
+    """The `gaps` with SPEECH_SHARE or more of their 0.1 s frames speech-loud."""
+    import numpy
+    from faster_whisper.audio import decode_audio
+
+    audio = decode_audio(str(path), sampling_rate=WHISPER_SAMPLE_RATE)
+    frame = WHISPER_SAMPLE_RATE // 10
+    frames = audio[: len(audio) // frame * frame].reshape(-1, frame)
+    if not len(frames):
+        return []
+    loud = numpy.sqrt((frames ** 2).mean(axis=1))
+    level = numpy.percentile(loud, 75) * 0.3
+    kept = []
+    for start, end in gaps:
+        stretch = loud[int(start * 10):int(end * 10)]
+        if len(stretch) and (stretch > level).mean() >= SPEECH_SHARE:
+            kept.append((start, end))
+    return kept
 
 
 def _gaps(segments, duration) -> list[tuple[float, float]]:
@@ -757,6 +819,20 @@ class WhisperTranscriber:
                 **extra,
             )
 
+        def again(language: str | None, a: float, b: float) -> list:
+            """A stretch decoded on its own: the decode with more words that
+            end inside it, prompted and not; the prompted one on a tie."""
+            ways = [{}]
+            if language in REFILL_PROMPTS:
+                ways.insert(0, {"initial_prompt": REFILL_PROMPTS[language]})
+            best: list = []
+            for extra in ways:
+                found, _ = run(language, clip_timestamps=[a, b], **extra)
+                found = [f for f in found if f.end <= b + REFILL_SLACK_SECONDS]
+                if sum(len(f.text.split()) for f in found) > sum(len(f.text.split()) for f in best):
+                    best = found
+            return best
+
         segments_iter, info = run(self.options.language)
         detected = getattr(info, "language", None)
         if self.options.language is None and detected in PUNCTUATION_HINTS:
@@ -790,14 +866,16 @@ class WhisperTranscriber:
             take(segment)
         language = getattr(info, "language", None)
         gaps = _gaps(segments, audio_seconds) if language in REFILL_LANGUAGES else []
+        if gaps:
+            try:
+                gaps = _speech_loud(path, gaps)
+            except Exception:  # pragma: no cover - not knowing is not a reason to decode
+                log.debug("could not measure the gaps", exc_info=True)
+                gaps = []
         for start, end in gaps:
             try:
-                found, _ = run(language, clip_timestamps=[start, end])
-                for segment in found:
-                    if (
-                        len(segment.text.split()) >= REFILL_MIN_WORDS
-                        and segment.end <= end + REFILL_SLACK_SECONDS
-                    ):
+                for segment in again(language, start, end):
+                    if len(segment.text.split()) >= REFILL_MIN_WORDS:
                         log.info("decoded %.1f-%.1f s again: %s", start, end, segment.text.strip())
                         take(segment)
             except Exception:  # pragma: no cover - a refill must never cost the transcript
@@ -820,8 +898,7 @@ class WhisperTranscriber:
                                    (start + said, end, kept_first)):
                     if b - a < REFILL_GAP_SECONDS:
                         continue
-                    found, _ = run(language, clip_timestamps=[a, b])
-                    found = [f for f in found if f.end <= b + REFILL_SLACK_SECONDS]
+                    found = again(language, a, b)
                     if keep is not None:
                         # `said` is an estimate, so the old text may come
                         # back in what was decoded (0728, 0828). A piece
@@ -843,6 +920,11 @@ class WhisperTranscriber:
                     take(segment)
             except Exception:  # pragma: no cover - a refill must never cost the transcript
                 log.debug("could not decode a slow segment again", exc_info=True)
+        for segment in [s for s in segments if _closing_filler(s, audio_seconds)]:
+            log.info("dropped %.1f-%.1f s, past the end: %s",
+                     segment.start, segment.end, segment.text.strip())
+            segments.remove(segment)
+            words[:] = [w for w in words if w.start < segment.start]
         segments.sort(key=lambda s: s.start)
         words.sort(key=lambda w: w.start)
         return TranscriptionResult(
