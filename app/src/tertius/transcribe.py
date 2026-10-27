@@ -584,9 +584,13 @@ REFILL_SLACK_SECONDS = 1.0
 # missing a verse or more. Decoding the segment's span again, and the parts
 # before and after what its text accounts for, brought back the missing speech
 # in 12 of the 13. The decode with the most words replaces the segment when it
-# adds REFILL_MIN_WORDS or more.
+# adds REFILL_MIN_WORDS or more. The line was first 1.0; three more openings
+# lost their title and verse inside segments of 13.5-17 s at 1.2 words a
+# second (0520, 0827, 1213), and at 1.3 all three came back, errors 7, 8, 9
+# to 1, 3, 2. One other segment in the 375 files runs between 1.0 and 1.3
+# (0608), and decoding it again changed nothing.
 SLOW_SEGMENT_SECONDS = 6.0
-SLOW_WORDS_PER_SECOND = 1.0
+SLOW_WORDS_PER_SECOND = 1.3
 READING_WORDS_PER_SECOND = 2.5
 
 

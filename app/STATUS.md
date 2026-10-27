@@ -139,7 +139,7 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
-## 2026-10-27 — English transcription against the book: 1.61% to 1.22%
+## 2026-10-27 — English transcription against the book: 1.61% to 1.19%
 
 All 375 Manna recordings transcribed with the app's settings and scored
 against the book (366 have a page): the verse, the comment and the verse
@@ -179,12 +179,41 @@ the book; not checked. Hebrew and English only, like the refill; the thirty
 Hebrew readings scored exactly as before (567 letters) - it never fired
 there. 3 tests.
 
-What the remaining errors are, from the 1.22% run's most common pairs:
-much of it is the book's spelling (`every one`/`everyone`, `fulfil`,
-`offence`, `co operation`, `stablish`), the King James forms the reader
-modernizes or Whisper does (`shewed`/`showed`, `received`/`receiveth`), and
-single function words (`a`/`the`, `in`/`and`). Not yet sorted by count.
-The scoring script is in a session scratchpad.
+**Three more openings, and the line moved to 1.3 words a second.** The
+seven runs still missing, each stretch decoded again on its own and with
+beam 1:
+- **0520, 0827, 1213: in the audio.** The opening title and verse were
+  inside a first segment of 13.5-17 s at about 1.2 words a second, just over
+  the line. At 1.3 they came back: errors 7, 8, 9 to 1, 3, 2. One other
+  segment in the 375 files runs between 1.0 and 1.3 (0608, 6.8 s), and
+  decoding it again changed nothing. Hebrew's thirty readings: unchanged.
+- **0805, 1208: the reader, not Whisper.** The book has "to them who are the
+  called"; the reading says "to them that love God, the called". 1208's
+  reader paraphrases. Neither decode hears the book's words.
+Two of the recovered openings came back lowercase and unpunctuated (`manna
+for may 20th a peculiar people...`), and 0520 doubles one word (`a A
+peculiar`): the words are right, the look is not.
+
+**Now 1.19% (682/57516)**, 144 files word-perfect, none over 10%, and the
+four runs of four or more missing are the reader's.
+
+**What the 1.19% is** (each differing stretch given one kind, at 1.22%):
+
+| Kind | Share of words | |
+|---|---|---|
+| Other | 0.61% | below |
+| Small words | 0.22% | `or` added 24 times, `the` and `a` dropped |
+| Spacing | 0.20% | `every one`→`everyone` ×8, `corner stone`, `co operation` |
+| Spelling | 0.11% | `fulfil`, `offence`, `acknowledgment`, `alway` |
+| Runs missing | 0.08% | now the reader's only |
+
+Without spacing, spelling and small words, **0.70%**, and "other" is mostly
+not mishearing either: `text again` and spoken references the scorer did not
+strip, the book's own words read another way (`viz` read "namely", `diaglott`,
+the book's typo `mattthew`), and King James forms (`shewed`, `stablish`).
+**One real thing in it: "Thank you" at the end of six transcripts**,
+Whisper's text on the closing silence. The scripts are in a session
+scratchpad.
 
 ## 2026-10-26 — Hebrew, measured the way Chinese was
 
