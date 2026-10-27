@@ -573,6 +573,40 @@ REFILL_MIN_WORDS = 3
 REFILL_GAP_SECONDS = 1.5
 REFILL_SLACK_SECONDS = 1.0
 
+# **Segments far too long for their words.** The other way Whisper loses
+# speech: a segment whose timestamps swallow what it does not write. Across
+# all 375 English Manna recordings, scored against the book (2026-10-27),
+# `The text again` ran 60.2-90.2 s in an 83.8 s file with the verse after it
+# gone (0421, 0428), and opening segments of 13-18 s held one sentence, the
+# title and verse before it gone (0513, 0725, 0730...). Reading runs at about
+# READING_WORDS_PER_SECOND; 13 segments in the 375 files ran under
+# SLOW_WORDS_PER_SECOND for SLOW_SEGMENT_SECONDS or more, every one in a file
+# missing a verse or more. Decoding the segment's span again, and the parts
+# before and after what its text accounts for, brought back the missing speech
+# in 12 of the 13. The decode with the most words replaces the segment when it
+# adds REFILL_MIN_WORDS or more.
+SLOW_SEGMENT_SECONDS = 6.0
+SLOW_WORDS_PER_SECOND = 1.0
+READING_WORDS_PER_SECOND = 2.5
+
+
+def _repeats(text: str, of: str) -> float:
+    """How much of `text`, by words, is words of `of`."""
+    said = {w.strip(".,;:!?\"'").lower() for w in of.split()}
+    words = [w.strip(".,;:!?\"'").lower() for w in text.split()]
+    return sum(w in said for w in words) / len(words) if words else 1.0
+
+
+def _slow(segments, duration):
+    """Segments that run SLOW_SEGMENT_SECONDS or more at too few words a second."""
+    out = []
+    for segment in segments:
+        end = min(segment.end, duration) if duration else segment.end
+        span = end - segment.start
+        if span >= SLOW_SEGMENT_SECONDS and len(segment.text.split()) / span < SLOW_WORDS_PER_SECOND:
+            out.append(segment)
+    return out
+
 
 def _gaps(segments, duration) -> list[tuple[float, float]]:
     """Stretches longer than REFILL_GAP_SECONDS with no segment in them."""
@@ -764,6 +798,47 @@ class WhisperTranscriber:
                         take(segment)
             except Exception:  # pragma: no cover - a refill must never cost the transcript
                 log.debug("could not decode a gap again", exc_info=True)
+        slow = _slow(segments, audio_seconds) if language in REFILL_LANGUAGES else []
+        for old in slow:
+            try:
+                start = old.start
+                end = min(old.end, audio_seconds) if audio_seconds else old.end
+                said = len(old.text.split()) / READING_WORDS_PER_SECOND
+                # The whole span decoded again, or the part before what the
+                # text accounts for, or the part after - the old text kept on
+                # its side, said in the time it takes to say: an opening
+                # segment swallowed the title and verse before it (0513), `The
+                # text again` the verse after it (0421).
+                kept_last = Segment(start=end - said, end=end, text=old.text)
+                kept_first = Segment(start=start, end=start + said, text=old.text)
+                best: list = []
+                for a, b, keep in ((start, end, None), (start, end - said, kept_last),
+                                   (start + said, end, kept_first)):
+                    if b - a < REFILL_GAP_SECONDS:
+                        continue
+                    found, _ = run(language, clip_timestamps=[a, b])
+                    found = [f for f in found if f.end <= b + REFILL_SLACK_SECONDS]
+                    if keep is not None:
+                        # `said` is an estimate, so the old text may come
+                        # back in what was decoded (0728, 0828). A piece
+                        # mostly made of the old text's words is that.
+                        found = [f for f in found if _repeats(f.text, old.text) < 0.6]
+                        if not found:
+                            continue
+                        found = [*found, keep] if keep is kept_last else [keep, *found]
+                    if sum(len(f.text.split()) for f in found) > sum(len(f.text.split()) for f in best):
+                        best = found
+                gained = sum(len(f.text.split()) for f in best) - len(old.text.split())
+                if gained < REFILL_MIN_WORDS:
+                    continue
+                log.info("decoded %.1f-%.1f s again: %s", start, end,
+                         " ".join(f.text.strip() for f in best))
+                segments.remove(old)
+                words[:] = [w for w in words if not (start <= w.start < end)]
+                for segment in best:
+                    take(segment)
+            except Exception:  # pragma: no cover - a refill must never cost the transcript
+                log.debug("could not decode a slow segment again", exc_info=True)
         segments.sort(key=lambda s: s.start)
         words.sort(key=lambda w: w.start)
         return TranscriptionResult(

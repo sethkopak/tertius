@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**795 tests, all passing** on Windows locally (one skips, a librosa path).
+**799 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -138,6 +138,53 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-27 — English transcription against the book: 1.61% to 1.22%
+
+All 375 Manna recordings transcribed with the app's settings and scored
+against the book (366 have a page): the verse, the comment and the verse
+again, both sides without scripture references, the title and "The text
+again" (worded differently on purpose), the comments' source codes
+(`Z.'95-107 R1807:4`) taken out wherever they are, digits spelled. Word
+error rate. Every figure here is Whisper's against the printed text, so a
+reader departing from the book counts as an error too.
+
+**Before: 1.61% (928/57516)**, median file 0.7%, 142 files word-perfect,
+19 runs of four or more book words missing. Most of those were whole verses,
+the gap refill already on. They went a second way: **a segment whose
+timestamps swallow what it does not write.** `The text again` ran 60.2-90.2 s
+in an 83.8 s file, the verse after it gone (0421, 0428); opening segments of
+13-18 s held one sentence, the title and verse before it gone (0513, 0725,
+0730). No gap, so the refill never looked.
+
+**Fixed: a segment of 6 s or more at under one word a second is decoded
+again** (`transcribe._slow`; reading runs about 2.5 a second). 13 segments in
+the 375 files, every one in a file missing text. Three decodes are tried -
+the whole span, the part before what its text accounts for (at 2.5 words a
+second), the part after - and the one with the most words replaces the
+segment if it adds three or more. A partial decode keeps the old text on its
+side, and drops pieces mostly made of the old text's words, since the
+estimate can be short (0728 and 0828 came back doubled before that). Per
+file, errors before and after:
+
+| | 0409 | 0421 | 0424 | 0428 | 0504 | 0513 | 0628 | 0725 | 0728 | 0730 | 0819 | 0828 | 0908 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Before | 23 | 53 | 14 | 42 | 21 | 15 | 10 | 19 | 13 | 12 | 12 | 10 | 27 |
+| After | 3 | 2 | 1 | 2 | 4 | 0 | 0 | 1 | 4 | 1 | 13 | 4 | 8 |
+
+**After: 1.22% (700/57516)**, 144 files word-perfect, none over 10%, seven
+runs of four or more missing. None of the seven has a gap or a slow segment
+near it (0520, 0805, 0827, 1208 twice, 1213): likely the reading differs from
+the book; not checked. Hebrew and English only, like the refill; the thirty
+Hebrew readings scored exactly as before (567 letters) - it never fired
+there. 3 tests.
+
+What the remaining errors are, from the 1.22% run's most common pairs:
+much of it is the book's spelling (`every one`/`everyone`, `fulfil`,
+`offence`, `co operation`, `stablish`), the King James forms the reader
+modernizes or Whisper does (`shewed`/`showed`, `received`/`receiveth`), and
+single function words (`a`/`the`, `in`/`and`). Not yet sorted by count.
+The scoring script is in a session scratchpad.
 
 ## 2026-10-26 — Hebrew, measured the way Chinese was
 

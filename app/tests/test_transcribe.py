@@ -322,6 +322,11 @@ def test_other_languages_get_no_hint_and_one_pass(options_language):
     assert "hotwords" not in model.calls[0]
 
 
+# Two segments read at a normal pace, about 2.5 words a second.
+A = " ".join(["a"] * 25)
+C = " ".join(["c"] * 15)
+
+
 class SkippingModel:
     """Skips 10-14 s, as faster-whisper does at a window's end; decodes the
     gap when asked for it alone with `refill`."""
@@ -338,8 +343,8 @@ class SkippingModel:
         info = S(language=self.language, duration=20.0)
         if "clip_timestamps" in kwargs:
             return iter([S(start=a, end=b, text=t, words=None) for a, b, t in self.refill]), info
-        return iter([S(start=0.0, end=10.0, text="a", words=None),
-                     S(start=14.0, end=20.0, text="c", words=None)]), info
+        return iter([S(start=0.0, end=10.0, text=A, words=None),
+                     S(start=14.0, end=20.0, text=C, words=None)]), info
 
 
 def _transcriber_skipping(refill, language="he"):
@@ -355,7 +360,7 @@ def test_speech_jumped_over_is_decoded_again_and_put_in_place():
     transcriber = _transcriber_skipping([(10.2, 13.6, "let every one of us")])
     result = transcriber.transcribe("reading.wav")
 
-    assert [s.text for s in result.segments] == ["a", "let every one of us", "c"]
+    assert [s.text for s in result.segments] == [A, "let every one of us", C]
     assert transcriber._model.calls[1]["clip_timestamps"] == [10.0, 14.0]
 
 
@@ -364,7 +369,7 @@ def test_a_thank_you_on_silence_is_not_put_in():
     transcriber = _transcriber_skipping([(10.0, 40.0, "תודה רבה.")])
     result = transcriber.transcribe("reading.wav")
 
-    assert [s.text for s in result.segments] == ["a", "c"]
+    assert [s.text for s in result.segments] == [A, C]
 
 
 def test_short_pauses_are_not_decoded_again():
@@ -381,7 +386,7 @@ def test_a_word_or_two_in_a_gap_is_not_put_in(words):
     transcriber = _transcriber_skipping([(10.2, 13.6, words)])
     result = transcriber.transcribe("reading.wav")
 
-    assert [s.text for s in result.segments] == ["a", "c"]
+    assert [s.text for s in result.segments] == [A, C]
 
 
 @pytest.mark.parametrize("language", ["zh", "fr"])
@@ -390,5 +395,89 @@ def test_only_measured_languages_are_decoded_again(language):
     transcriber = _transcriber_skipping([(10.2, 13.6, "let every one of us")], language)
     result = transcriber.transcribe("reading.wav")
 
-    assert [s.text for s in result.segments] == ["a", "c"]
+    assert [s.text for s in result.segments] == [A, C]
     assert all("clip_timestamps" not in call for call in transcriber._model.calls)
+
+
+class SwallowingModel:
+    """`The text again` stretched over 30 s, the verse after it unwritten, as
+    0421 came out (2026-10-27); decodes the verse when asked for after it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio, **kwargs):
+        from types import SimpleNamespace as S
+
+        self.calls.append(kwargs)
+        info = S(language="en", duration=84.0)
+        clip = kwargs.get("clip_timestamps")
+        if clip is None:
+            return iter([S(start=0.0, end=60.0, text=" ".join(["w"] * 150), words=None),
+                         S(start=60.2, end=90.2, text="The text again.", words=None)]), info
+        if clip[0] > 61.0:
+            return iter([S(start=61.5, end=70.0, text="We have not an high priest which cannot", words=None)]), info
+        return iter([S(start=60.2, end=61.4, text="The text again.", words=None)]), info
+
+
+def test_a_segment_that_swallows_speech_is_decoded_again():
+    from tertius.transcribe import WhisperTranscriber
+
+    transcriber = WhisperTranscriber(TranscriptionOptions(language="en"))
+    transcriber._model = SwallowingModel()
+    result = transcriber.transcribe("0421.mp3")
+
+    assert [s.text for s in result.segments[-2:]] == [
+        "The text again.", "We have not an high priest which cannot"
+    ]
+    assert result.segments[-2].end < 62.0
+
+
+def test_a_normal_pace_is_not_decoded_again():
+    from tertius.transcribe import _slow
+    from types import SimpleNamespace as S
+
+    segments = [S(start=0.0, end=9.0, text=" ".join(["w"] * 20)),   # 2.2 a second
+                S(start=9.0, end=14.0, text="A short pause."),       # under 6 s
+                S(start=14.0, end=29.0, text="It is like a plant.")]  # 0.3 a second
+    assert [s.start for s in _slow(segments, 30.0)] == [14.0]
+
+
+def test_the_old_text_decoded_again_is_not_put_in_twice():
+    """0728: decoded after the old text's estimated end, the old text came back."""
+    from tertius.transcribe import _repeats
+
+    old = "It is only when we are hated because of our loyalty to truth"
+    assert _repeats("It is only when we are hated because of our loyalty to truth,", old) > 0.9
+    assert _repeats("If ye suffer for righteousness' sake, happy are ye.", old) < 0.6
+
+
+class OpeningModel:
+    """An opening segment of 15 s holding one sentence, the title and verse
+    before it unwritten, as 0513 came out (2026-10-27)."""
+
+    def transcribe(self, audio, **kwargs):
+        from types import SimpleNamespace as S
+
+        info = S(language="en", duration=40.0)
+        clip = kwargs.get("clip_timestamps")
+        comment = "Our Heavenly Father wishes us to be very attentive to His Word"
+        if clip is None:
+            return iter([S(start=0.3, end=15.4, text=comment, words=None),
+                         S(start=15.4, end=40.0, text=" ".join(["w"] * 60), words=None)]), info
+        if clip[0] < 1.0 and clip[1] < 12.0:
+            return iter([S(start=0.3, end=9.0, text="Manna for May 13th. Behold, to obey is better than sacrifice", words=None)]), info
+        return iter([S(start=0.3, end=15.0, text=comment, words=None)]), info
+
+
+def test_what_an_opening_segment_swallowed_goes_before_it():
+    from tertius.transcribe import WhisperTranscriber
+
+    transcriber = WhisperTranscriber(TranscriptionOptions(language="en"))
+    transcriber._model = OpeningModel()
+    result = transcriber.transcribe("0513.mp3")
+
+    assert [s.text for s in result.segments[:2]] == [
+        "Manna for May 13th. Behold, to obey is better than sacrifice",
+        "Our Heavenly Father wishes us to be very attentive to His Word",
+    ]
