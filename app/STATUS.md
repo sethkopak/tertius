@@ -457,6 +457,36 @@ run (the narrower listener download and the hint's removal touch only what
 is fetched and how Whisper listens), so this run stands as the final one
 with every change in; it was not read again.
 
+**What the 3.9% is** (the listen-back run, madlad, no hint: 640 of 16,512
+letters). Aligned word by word as the scorer normalizes, each differing
+stretch given one cause by how it sounds - letters modern Hebrew says alike
+(א/ע/ה, ח/כ, ט/ת, ק/כ, ב/ו, ס/ש) and ו/י written or not count as the same
+sound. Word alignment counts 662 letters, against the scorer's 640:
+
+| Cause | Letters | Share | |
+|---|---|---|---|
+| Same sound, other spelling | 258 | 39% | `האיגרת`→`ההיגרת` ×14, `הכוס`→`הקוס` ×8, `מתמלאת`→`מתמלט` ×6. Read right; Whisper's spelling, not a listener's error. |
+| Near sound | 226 | 34% | `פרק`→`ברק` ×5, `האיגרת`→`ההיגלת`, `הכחיש`→`הכיש`, `הטקסט`→`הטקס` |
+| Different sound | 90 | 14% | the title `מָן` as `מעל` ×4, `בואו`→`פה` |
+| Left out | 82 | 12% | two stretches; one Whisper's (below) |
+| Added | 6 | 1% | |
+
+- **ר heard as ל** is the one common swap of letters that sound different:
+  21 of the 771 ר read (`העברים`→`העבלים`, `פטרוס`→`פטלוס`, `יקרי`→`יקלה`);
+  the other common swaps are same-sound spellings (כ→ק 27, א→ה 22, ת→ט 14,
+  ע→א 13). Whether Chatterbox's ר is wrong or Whisper mishears it is for a
+  Hebrew speaker; no spelling can change how a ר is said.
+- **Without the same-sound spellings, about 2.4%** (404 of 662 letters
+  remain, scaled to the scorer's 640) - nearer what a listener would get
+  wrong, as the Chinese 2.1% was once its same-sound 21 were set aside.
+- **Left out:** 0403 take 1's stretch is Whisper's: the reading is 40.0 s
+  like its other takes (39.9, 40.9), and Whisper large missed it with and
+  without a hint. 0510 take 2's is a real drop - 42.6 s against 45.8 and
+  45.6 - and listening back (`small`) did not catch it.
+- The title still costs: `מָן` heard `מעל` ("above") four times, `מענ` five
+  (same sound, scored as spelling).
+The script is in a session scratchpad.
+
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 
 The five candidates below, tried the way 白昼 was: every chunk holding one,
