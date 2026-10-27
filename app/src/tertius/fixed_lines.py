@@ -12,8 +12,8 @@ text again" into the verse (`Manna for june 16th, no chastening, ...`,
 `The text again: thou anointest my head ...`), so what follows is handed back
 to be translated as usual, and the rendered words are put in front of it.
 
-English into Chinese, and back: Chinese into English, for what Whisper hears
-of a Chinese reading (2026-10-23). There the title kept its place in 21 of 30
+English into Chinese and Hebrew (2026-10-26), and back: Chinese into
+English, for what Whisper hears of a Chinese reading (2026-10-23). There the title kept its place in 21 of 30
 readings left to madlad, and in fewer once the reference beside it was
 protected: with a placeholder in the sentence, madlad dropped `4月3日的玛纳`
 outright. Every other pair is left to the model exactly as before.
@@ -50,11 +50,25 @@ _AGAIN = re.compile(
 # How each line is said, per target language. `吗哪` is the Chinese Union
 # Version's word for manna, and the one `speech.SPOKEN_AS` already knows how to
 # have read aloud. 再读一遍经文 is Google's rendering of "The text again".
-_TITLES = {"zh": "{month}月{day}日的吗哪"}
-_AGAINS = {"zh": "再读一遍经文"}
+#
+# Hebrew is Google's too (2026-10-26): `מן ל-20 בינואר.`, `הטקסט שוב:`.
+# madlad wrote the title as `מנה` ("portion", "serving") in all ten harness
+# files, and "The text again" four ways, once as invented Biblical Hebrew in
+# its place (1005). The day stays a digit, as Google writes it; how it is
+# said is `numbers.spell`'s business.
+_TITLES = {"zh": "{month}月{day}日的吗哪", "he": "מן ל-{day} ב{month_name}"}
+_AGAINS = {"zh": "再读一遍经文", "he": "הטקסט שוב"}
 # The stop after a title on its own, and the colon before what follows a line.
-_ALONE = {"zh": "。"}
-_BEFORE_REST = {"zh": "："}
+_ALONE = {"zh": "。", "he": "."}
+_BEFORE_REST = {"zh": "：", "he": ": "}
+# Month names after ב: six as Google wrote them (January, March, June,
+# September, October, December), six as madlad did in the harness files.
+_MONTH_NAMES_BY_LANGUAGE = {
+    "he": dict(enumerate(
+        "ינואר פברואר מרץ אפריל מאי יוני יולי אוגוסט ספטמבר אוקטובר נובמבר דצמבר".split(),
+        start=1,
+    )),
+}
 
 # "The text again" opens the reading's last section, the verse read once more.
 # A reading starts a new chunk there (`speech._pack`): left at the end of a
@@ -122,8 +136,11 @@ def split(
         day = int(title.group("day"))
         if not 1 <= day <= 31:
             return None
+        month = _MONTHS[title.group("month").lower()]
         words = _TITLES[target_language].format(
-            month=_MONTHS[title.group("month").lower()], day=day
+            month=month,
+            day=day,
+            month_name=_MONTH_NAMES_BY_LANGUAGE.get(target_language, {}).get(month, ""),
         )
         rest = title.group("rest").strip()
         end = _BEFORE_REST[target_language] if rest else _ALONE[target_language]
@@ -132,4 +149,6 @@ def split(
     if not again:
         return None
     # Always a colon: on its own line it introduces the verse on the next.
-    return _AGAINS[target_language] + _BEFORE_REST[target_language], again.group("rest").strip()
+    rest = again.group("rest").strip()
+    words = _AGAINS[target_language] + _BEFORE_REST[target_language]
+    return (words if rest else words.rstrip()), rest

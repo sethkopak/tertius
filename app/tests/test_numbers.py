@@ -194,3 +194,38 @@ def test_a_dotted_reference_in_either_script_is_read_as_one(text):
 
 def test_a_decimal_that_follows_no_book_is_not_a_reference():
     assert spell("价格是 4.5 元", "zh") == "价格是 四.五 元"
+
+
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        ("מן ל-20 בינואר.", "מן לעשרים בינואר."),
+        ("מן ל-3 ביוני.", "מן לשלושה ביוני."),
+        # Google: "first" as an ordinal, לראשון ביוני.
+        ("מן ל-1 במרץ.", "מן לראשון במרץ."),
+    ],
+)
+def test_a_hebrew_date_is_said_as_google_writes_it(text, spoken):
+    """Not `ל-אחת בינואר`, the feminine counting form after a hyphen."""
+    assert spell(text, "he") == spoken
+
+
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        ("האיגרת אל העברים 12:7.", "האיגרת אל העברים, פרק שנים עשר, פסוק שבעה."),
+        ("איגרת יעקב 4:3", "איגרת יעקב, פרק ארבעה, פסוק שלושה"),
+        # A joined prefix, with the article absorbed (`scripture.restore`).
+        ("באיגרת אל העברים 12:11 ועוד", "באיגרת אל העברים, פרק שנים עשר, פסוק אחד עשר ועוד"),
+        ("בתהילים 66:8,9.", "בתהילים, פרק שישים ושישה, פסוקים שמונה ותשעה."),
+    ],
+)
+def test_a_hebrew_reference_is_read_as_chapter_and_verse(text, spoken):
+    """`שתים עשרה:שבע` has no word for the colon."""
+    assert spell(text, "he") == spoken
+
+
+def test_a_hebrew_range_and_a_clock_time_are_left_as_they_were():
+    """Google kept a range's digits, so there is no wording to copy."""
+    assert spell("האיגרת השנייה אל התסלוניקים 2:10-12.", "he").endswith("שתיים:עשר-שתים עשרה.")
+    assert spell("בשעה 10:30 בבוקר", "he") == "בשעה עשר:שלושים בבוקר"

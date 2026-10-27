@@ -114,3 +114,23 @@ def test_the_speaker_diacritizes_hebrew_and_leaves_everything_else_alone():
     speaker.speak(SpokenChunk(text="Psalm 66", style="neutral",
                               params=chunk.params), "en")
     assert seen == [], "only Hebrew should be diacritized"
+
+
+def test_the_title_s_manna_is_pointed_as_manna():
+    """The model points the title's `מן` as `מִן`, "from"; it is `מָן`."""
+    from tertius.hebrew import set_points
+
+    plain = "מן לעשרים בינואר. אם תסבול את הענישה."
+    # As the model returned it: `מִן`, and `תסבול` with its ו dropped.
+    pointed = "מִן לְעֶשְׂרִים בְּיָנוּאָר. אִם תִּסְבֹּל אֶת הָעֲנִישָׁה."
+    assert set_points(plain, pointed) == (
+        "מָן לְעֶשְׂרִים בְּיָנוּאָר. אִם תִּסְבֹּל אֶת הָעֲנִישָׁה."
+    )
+
+
+def test_from_is_left_as_from():
+    from tertius.hebrew import set_points
+
+    plain = "יצאו מן הבית בינואר"
+    pointed = "יָצְאוּ מִן הַבַּיִת בְּיָנוּאָר"
+    assert set_points(plain, pointed) == pointed

@@ -103,3 +103,25 @@ def test_only_the_pairs_measured():
     assert split("Manna for January 20th.", "zh", source_language="de") is None
     # No source given means English, as in `Translator.translate`.
     assert split("The text again.", "zh", source_language=None) is not None
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Manna for January 20th.", ("מן ל-20 בינואר.", "")),
+        ("Manna for October 5th.", ("מן ל-5 באוקטובר.", "")),
+        (
+            "Manna for june 16th, no chastening, for the present seemeth to be joyous but grievous.",
+            ("מן ל-16 ביוני: ", "no chastening, for the present seemeth to be joyous but grievous."),
+        ),
+        ("The text again.", ("הטקסט שוב:", "")),
+        (
+            "The text again, Consider him who endured such contradiction of sinners against himself.",
+            ("הטקסט שוב: ", "Consider him who endured such contradiction of sinners against himself."),
+        ),
+    ],
+)
+def test_the_hebrew_lines_are_googles(text, expected):
+    """madlad wrote `מנה` ("portion") for the title in all ten harness files,
+    and in 1005 put invented Biblical Hebrew where "The text again" was."""
+    assert split(text, "he") == expected

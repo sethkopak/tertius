@@ -154,6 +154,78 @@ def _chinese_references(text: str) -> str:
     return _CHAPTER_VERSE.sub(say, text)
 
 
+@functools.lru_cache(maxsize=1)
+def _hebrew_book_names() -> tuple[str, ...]:
+    """The Hebrew names of the 66 books, from the table scripture.py uses.
+
+    With ב, כ or ל in front, `scripture.restore` writes `באיגרת` for
+    `בהאיגרת`, so the two article words count without their ה as well.
+    """
+    from .scripture import _table
+
+    names = {entry.get("labels", {}).get("he") for entry in _table().values()}
+    names.discard(None)
+    names |= {name[1:] for name in names if name.startswith(("האיגרת", "הבשורה"))}
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _hebrew_masculine(value: int) -> str:
+    from num2words import num2words
+
+    return num2words(value, lang="he", gender="m")
+
+
+# `ל-20 בינואר`: the day of a date, as `fixed_lines` and madlad write it.
+_HEBREW_DATE = re.compile(
+    r"(?<![א-ת])ל-(?P<day>\d{1,2})(?=\s+ב(?:ינואר|פברואר|מרץ|אפריל|מאי|"
+    r"יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר))"
+)
+
+
+def _hebrew_dates_and_references(text: str) -> str:
+    """Say a date and a reference the way Google writes them out in Hebrew.
+
+    `num2words` alone reads `ל-1 בינואר` as `ל-אחת בינואר` - the feminine
+    counting form, after a hyphen - and `עברים 12:7` as `שתים עשרה:שבע`, two
+    numbers with no word for the colon, the shape Chinese heard back as
+    `6689` until it was said as chapter and verse.
+
+    Asked to write them in words (2026-10-26), Google gave `מן לשלושה ביוני`
+    and `לראשון ביוני` for a date - masculine, "first" as an ordinal - and
+    `האיגרת אל העברים, פרק י"ב, פסוק י"א` and `תהילים, פרק ס"ו, פסוקים ח'
+    ו-ט'` for references. The numbers here are masculine words, not letters:
+    no measure yet says Chatterbox reads Hebrew letter numerals. A range is
+    left as it was; Google kept its digits, so there is no wording to copy.
+    """
+    def date(match: "re.Match") -> str:
+        day = int(match.group("day"))
+        return "לראשון" if day == 1 else "ל" + _hebrew_masculine(day)
+
+    text = _HEBREW_DATE.sub(date, text)
+    books = _hebrew_book_names()
+
+    def reference(match: "re.Match") -> str:
+        before = text[: match.start()].rstrip()
+        if not before.endswith(books):
+            return match.group(0)
+        parts = _VERSE_JOINER.split(match.group("verses"))
+        if any(part in "-–—~～" for part in parts[1::2]):
+            return match.group(0)
+        verses = [int(part) for part in parts[::2]]
+        chapter = _hebrew_masculine(int(match.group("chapter")))
+        if len(verses) == 1:
+            said = f"פסוק {_hebrew_masculine(verses[0])}"
+        else:
+            words = [_hebrew_masculine(v) for v in verses]
+            said = "פסוקים " + " ".join(words[:-1]) + " ו" + words[-1]
+        return f", פרק {chapter}, {said}"
+
+    text = _CHAPTER_VERSE.sub(reference, text)
+    # `before.rstrip()` above leaves the space between the name and the
+    # reference, which now sits in front of the comma.
+    return re.sub(r"\s+, פרק ", ", פרק ", text)
+
+
 @functools.lru_cache(maxsize=32)
 def _supported(language: str) -> bool:
     """Does `num2words` know this language? Asked once per language.
@@ -188,6 +260,8 @@ def spell(text: str, language: str) -> str:
         return text
     if language == "zh":
         text = _chinese_references(text)
+    elif language == "he":
+        text = _hebrew_dates_and_references(text)
 
     def say(match: "re.Match") -> str:
         value = int(match.group(0))

@@ -61,6 +61,47 @@ _NIQQUD = re.compile(r"[ְ-ׇֽׁׂ]")
 _MATRES = frozenset("אוי")
 
 
+# Words the model points wrong, pointed right after it runs: a pattern over the
+# unpointed text, and the pointed word to put in its place. The model ignores
+# points it is given (`מָן` in, `מִן` out), so this cannot be done before it.
+#
+# `מן` in the title (`fixed_lines`: `מן ל-20 בינואר.`) is manna, `מָן`; the
+# model points it `מִן`, "from", every time, and Whisper heard `מין` in 21 of
+# 30 titles and `מן` in 6 (2026-10-26).
+_MONTHS = "ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר"
+POINTED_AS = (
+    (re.compile(rf"(?<![א-ת])מן(?= ל[^.:,]{{1,30}}? ב(?:{_MONTHS}))"), "מָן"),
+)
+
+
+def set_points(plain: str, pointed: str) -> str:
+    """`pointed`, with every `POINTED_AS` word in `plain` pointed as listed.
+
+    The model sometimes drops a vowel letter as it points (`תסבול` comes back
+    `תִּסְבֹּל`), so a word is found by aligning the letters, and left alone
+    unless it came through letter for letter.
+    """
+    import difflib
+
+    # Each letter of `pointed`, and where it sits.
+    positions = [i for i, ch in enumerate(pointed) if not _NIQQUD.match(ch)]
+    letters = "".join(pointed[i] for i in positions)
+    blocks = difflib.SequenceMatcher(None, plain, letters, autojunk=False).get_matching_blocks()
+    edits = []
+    for pattern, word in POINTED_AS:
+        for match in pattern.finditer(plain):
+            for a, b, size in blocks:
+                if a <= match.start() and match.end() <= a + size:
+                    first = b + match.start() - a
+                    last = b + match.end() - a
+                    stop = positions[last] if last < len(positions) else len(pointed)
+                    edits.append((positions[first], stop, word))
+                    break
+    for begin, stop, word in sorted(edits, reverse=True):
+        pointed = pointed[:begin] + word + pointed[stop:]
+    return pointed
+
+
 def has_hebrew(text: str) -> bool:
     return any(_ALEF <= ord(ch) <= _TAV for ch in text or "")
 
@@ -207,7 +248,8 @@ class Diacritizer:
             return text
         try:
             self.load()
-            return self._run(strip_niqqud(text))
+            plain = strip_niqqud(text)
+            return set_points(plain, self._run(plain))
         except Exception:
             log.warning("could not add niqqud; speaking the text as it is",
                         exc_info=True)
