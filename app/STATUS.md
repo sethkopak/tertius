@@ -273,11 +273,18 @@ each measured on all 375 recordings:
 runs of four or more missing are the reader's (0805, 1208). Hebrew's thirty
 readings: 3.4% of letters, 1.9% by sound, as before.
 
-**Whisper's main pass is not repeatable between runs.** 0317's verse was
-heard in one full run of the 375 and skipped in the next, same code and
-settings; and one full run against the next, unchanged files scored the
-same except where a change touched them. Figures here are single full runs;
-a difference of a few errors in one file is within that.
+**Transcription repeats exactly.** Whisper's main pass, run on all 375
+recordings in two separate processes, gave identical segments - text and
+timestamps - in every file, with no fallback to sampling anywhere. The whole
+transcription, refills included, run twice on the 32 files the refills change,
+was identical both times and identical to the 1.16% run. So a difference
+between two runs is the change being measured, not noise.
+
+> Corrected 2026-10-27 (later). This said the main pass was not repeatable:
+> that 0317's verse was heard in one full run and skipped in the next, same
+> code and settings. The code was not the same - the second run had the
+> refill prompt, which was what lost the verse (above). Measured as above,
+> nothing varies.
 
 ## 2026-10-26 — Hebrew, measured the way Chinese was
 
