@@ -566,8 +566,10 @@ PUNCTUATION_HINTS = {
 #
 # **Not Chinese.** The thirty Chinese readings went 2.0% to 2.8%: every gap
 # decoded again came back invented, inside the gap and long - the YouTube
-# outro (`请不吝点赞 订阅 转发...`), `语言语言语言...`. Other languages are
-# unmeasured.
+# outro (`请不吝点赞 订阅 转发...`), `语言语言语言...`. With the loudness gate
+# below (2026-10-27) the same thirty were unchanged at 2.0%: 30 of their 31
+# gaps were 0-9% speech-loud, and none of the readings lost speech, so there
+# was nothing to bring back. Other languages are unmeasured.
 REFILL_LANGUAGES = frozenset({"he", "en"})
 REFILL_MIN_WORDS = 3
 REFILL_GAP_SECONDS = 1.5

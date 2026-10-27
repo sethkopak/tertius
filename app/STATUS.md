@@ -139,6 +139,25 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-27 (later) — the gated refill on Chinese: nothing to refill
+
+Chinese was left out of the refill when it took 2.0% to 2.8% with invented
+text in the gaps. Tried again with the loudness gate, on the same thirty
+readings (`h_spoken3`, `--takes 3`), gap refill only - the slow-segment pass
+and the three-word floor count words by spaces, which Chinese does not have:
+
+- The main pass came back **byte-identical** to the 2.0% run in all thirty.
+- It left 31 gaps. 30 were 0-9% speech-loud, so the gate skipped them; one,
+  0723 take 1 at 27.4-32.7 s, was 44%, and its decode brought back nothing
+  inside the gap.
+- **2.0% (152/7569)**, as before, and no stretch of six or more characters
+  lost in any file. Whisper is not skipping speech in these readings, so
+  there is nothing for the refill to bring back.
+
+So the gate would make the refill harmless for Chinese, but there's no
+evidence that it helps. `REFILL_LANGUAGES` stays Hebrew and English. Whisper's
+figures, not a listener's.
+
 ## 2026-10-27 — English transcription against the book: 1.61% to 1.16%
 
 > **PyAV capped below 19** (`requirements.txt`, `pyproject.toml`). CI went red
