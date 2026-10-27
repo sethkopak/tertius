@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**787 tests, all passing** on Windows locally (one skips, a librosa path).
+**792 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -524,6 +524,38 @@ of `מן`, `מען`, `מאן`:
 No difference: the points are not what is misheard; a lone short syllable
 opening the reading is. Nothing changed. The script is in a session
 scratchpad.
+
+**Speech Whisper jumped over, decoded again** (`transcribe.py`, Hebrew only).
+Both stretches the 3.9% run lost were cut at the end of Whisper's first
+30-second window: a segment ended at 26.0 s and the next began at 30.0 s
+(0403), 26.1 and 32.2 s (0510). faster-whisper starts each window where the
+last one ended when the model closes it early, so the speech between is
+never decoded. On those two readings, with the app's settings changed one
+at a time: VAD off, timestamps off, word timestamps - all still skipped;
+beam 1 heard both (and 0723's skip under a hint, not the app's case now,
+survived everything).
+
+So every gap of more than 1.5 s between segments is decoded again on its
+own (`clip_timestamps`). On real silence Whisper writes `תודה רבה.` - four
+times in the thirty, VAD on or off - with timestamps running a full 30 s
+past the gap, where both real recoveries ended inside it (26.0-29.1,
+26.1-32.3); so a refilled segment is kept only if it ends within the gap
+plus a second. The thirty readings, heard by the app's own code:
+
+| | Letters | Sound | Stretches lost |
+|---|---|---|---|
+| Before | 3.88% (640/16512) | 2.41% | 2 |
+| Refill | **3.43%** (567/16512) | **1.92%** | 0 |
+| (beam 1, for comparison) | 3.50% | 2.02% | 0 |
+
+The only text it put in was the two lost clauses. Beam 1 did as well, but
+changes how every language is decoded; the refill touches only gaps.
+
+**Not Chinese.** The 2.0% Chinese run heard the same way went to 2.8%
+(215/7569): every Chinese gap decoded again came back invented, and inside
+the gap - Whisper's YouTube outro (`请不吝点赞 订阅 转发 打赏支持明镜与点点栏目`),
+`语言语言语言...`. So it runs for Hebrew only (`REFILL_LANGUAGES`); English
+is unmeasured and unchanged. 5 tests.
 
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 

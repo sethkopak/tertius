@@ -545,6 +545,39 @@ PUNCTUATION_HINTS = {
 }
 
 
+# **Speech Whisper jumps over.** faster-whisper decodes 30 s windows; when the
+# model ends a window early, the next starts where the window ended, and the
+# speech in between is never decoded. Measured on thirty Hebrew readings
+# (2026-10-27): two clauses were lost that way, 26.0-30.0 s and 26.1-32.2 s,
+# with VAD on or off, timestamps on or off. So every gap of more than
+# REFILL_GAP_SECONDS between segments is decoded again on its own. A real
+# recovery ends inside its gap; on silence Whisper writes a "thank you"
+# (`תודה רבה.`, four times there) whose timestamps run a full 30 s past it,
+# so a refilled segment is kept only if it ends within the gap. Hebrew
+# then: 640 to 567 letters misheard of 16,512, nothing lost, nothing invented.
+#
+# **Hebrew only.** The same thirty Chinese readings went 2.0% to 2.8%: every
+# gap decoded again came back invented, and inside the gap - the YouTube
+# outro (`请不吝点赞 订阅 转发...`), `语言语言语言...`. Other languages are
+# unmeasured.
+REFILL_LANGUAGES = frozenset({"he"})
+REFILL_GAP_SECONDS = 1.5
+REFILL_SLACK_SECONDS = 1.0
+
+
+def _gaps(segments, duration) -> list[tuple[float, float]]:
+    """Stretches longer than REFILL_GAP_SECONDS with no segment in them."""
+    out = []
+    edge = 0.0
+    for segment in sorted(segments, key=lambda s: s.start):
+        if segment.start - edge > REFILL_GAP_SECONDS:
+            out.append((edge, segment.start))
+        edge = max(edge, segment.end)
+    if duration and duration - edge > REFILL_GAP_SECONDS:
+        out.append((edge, duration))
+    return out
+
+
 class WhisperTranscriber:
     """Lazily loads a faster-whisper model and reuses it across the batch."""
 
@@ -664,7 +697,7 @@ class WhisperTranscriber:
         a caller can report progress through a long file. `audio_seconds` is the
         length faster-whisper measured, and is known before the first segment.
         """
-        def run(language: str | None):
+        def run(language: str | None, **extra):
             hint = PUNCTUATION_HINTS.get(language or "")
             return self.model.transcribe(
                 str(path),
@@ -674,6 +707,7 @@ class WhisperTranscriber:
                 condition_on_previous_text=self.options.condition_on_previous_text,
                 word_timestamps=word_timestamps,
                 **({"hotwords": hint} if hint else {}),
+                **extra,
             )
 
         segments_iter, info = run(self.options.language)
@@ -688,7 +722,8 @@ class WhisperTranscriber:
         # faster-whisper returns a generator; consuming it is what does the work.
         segments = []
         words: list[TimedWord] = []
-        for segment in segments_iter:
+
+        def take(segment) -> None:
             done = Segment(start=segment.start, end=segment.end, text=segment.text)
             segments.append(done)
             if on_segment is not None:
@@ -703,6 +738,22 @@ class WhisperTranscriber:
                         word=word.word, start=word.start, end=word.end
                     )
                 )
+
+        for segment in segments_iter:
+            take(segment)
+        language = getattr(info, "language", None)
+        gaps = _gaps(segments, audio_seconds) if language in REFILL_LANGUAGES else []
+        for start, end in gaps:
+            try:
+                found, _ = run(language, clip_timestamps=[start, end])
+                for segment in found:
+                    if segment.text.strip() and segment.end <= end + REFILL_SLACK_SECONDS:
+                        log.info("decoded %.1f-%.1f s again: %s", start, end, segment.text.strip())
+                        take(segment)
+            except Exception:  # pragma: no cover - a refill must never cost the transcript
+                log.debug("could not decode a gap again", exc_info=True)
+        segments.sort(key=lambda s: s.start)
+        words.sort(key=lambda w: w.start)
         return TranscriptionResult(
             segments=segments,
             language=getattr(info, "language", None),

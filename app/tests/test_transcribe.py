@@ -320,3 +320,66 @@ def test_other_languages_get_no_hint_and_one_pass(options_language):
 
     assert len(model.calls) == 1
     assert "hotwords" not in model.calls[0]
+
+
+class SkippingModel:
+    """Skips 10-14 s, as faster-whisper does at a window's end; decodes the
+    gap when asked for it alone with `refill`."""
+
+    def __init__(self, refill, language="he"):
+        self.refill = refill
+        self.language = language
+        self.calls = []
+
+    def transcribe(self, audio, **kwargs):
+        from types import SimpleNamespace as S
+
+        self.calls.append(kwargs)
+        info = S(language=self.language, duration=20.0)
+        if "clip_timestamps" in kwargs:
+            return iter([S(start=a, end=b, text=t, words=None) for a, b, t in self.refill]), info
+        return iter([S(start=0.0, end=10.0, text="a", words=None),
+                     S(start=14.0, end=20.0, text="c", words=None)]), info
+
+
+def _transcriber_skipping(refill, language="he"):
+    from tertius.transcribe import WhisperTranscriber
+
+    transcriber = WhisperTranscriber(TranscriptionOptions(language=language))
+    transcriber._model = SkippingModel(refill, language)
+    return transcriber
+
+
+def test_speech_jumped_over_is_decoded_again_and_put_in_place():
+    """0403 and 0510 lost a clause each this way, 26-30 s (2026-10-27)."""
+    transcriber = _transcriber_skipping([(10.2, 13.6, "b")])
+    result = transcriber.transcribe("reading.wav")
+
+    assert [s.text for s in result.segments] == ["a", "b", "c"]
+    assert transcriber._model.calls[1]["clip_timestamps"] == [10.0, 14.0]
+
+
+def test_a_thank_you_on_silence_is_not_put_in():
+    """Whisper's text for a silent gap ran a full 30 s past it, every time."""
+    transcriber = _transcriber_skipping([(10.0, 40.0, "תודה רבה.")])
+    result = transcriber.transcribe("reading.wav")
+
+    assert [s.text for s in result.segments] == ["a", "c"]
+
+
+def test_short_pauses_are_not_decoded_again():
+    from tertius.transcribe import _gaps
+    from types import SimpleNamespace as S
+
+    segments = [S(start=0.0, end=5.0), S(start=6.0, end=9.0), S(start=11.0, end=15.0)]
+    assert _gaps(segments, 15.5) == [(9.0, 11.0)]
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_only_hebrew_is_decoded_again(language):
+    """Chinese gaps came back invented, inside the gap; English is unmeasured."""
+    transcriber = _transcriber_skipping([(10.2, 13.6, "b")], language)
+    result = transcriber.transcribe("reading.wav")
+
+    assert [s.text for s in result.segments] == ["a", "c"]
+    assert all("clip_timestamps" not in call for call in transcriber._model.calls)
