@@ -379,6 +379,15 @@ the ordinary abrupt-ending retakes. Heard four ways:
   included. A Hebrew listener is not hinted, so the listening score should
   not be either; the unhinted letter rates average 3.95% against 4.0% for
   the app's hint, no gain on that measure.
+
+> Corrected 2026-10-27: **the hint is out of the app.** The skip is not the
+> hint's wording. 0723 and 0829 heard again with the app's hint, with its
+> words alone and with just `פרק, פסוק.`: every one lost the same three
+> sentences of 0723's second take (31.5%), exactly as before - it is
+> deterministic - and `פרק, פסוק.` also lost 0829's title. Only no hint
+> heard them. With references now found (below), the hint's gain back to
+> English is chrF 50.6 to 52.6 and 51 to 53 references; sentences silently
+> gone from a transcript cost more than that.
 - The first nine readings of this run (0120-0510) had no retakes at all,
   where earlier runs had about one a reading, which looked like listening
   back interfering. From 0616 on they came at the usual rate; one thing found on the way: running faster-whisper
@@ -432,14 +441,21 @@ madlad translating back):
 |---|---|---|
 | Letters misheard, no hint | **3.9%** (640/16512) | 4.0% (649/16074) |
 | Letters misheard, app's hint | 4.6% | 4.1% |
-| Back: chrF / references / title month | 52.6 / 53 / 11 | 53.1 / 45 / 12 |
+| Back: chrF / references / title month, app's hint | 52.6 / 53 / 11 | 53.1 / 45 / 12 |
+| **Back, no hint (the app now)** | **50.6 / 51 / 9** | 50.6 / 42 / 11 |
 
-For a listener the two are level: 3.9% and 4.0% unhinted, inside the noise,
-and m2m100 lost nothing. Its Hebrew keeps more of the English (chrF 55.1
-against 52.1 on text), and its readings come back with fewer references
-right (45 against 53). Listening back fired on one chunk of 0510 (`וגם
-השמחה תתפוצץ` left out, two takes in a row). **Not decided; the translator
-is still the user's choice in the app.**
+**madlad stays.** For a listener the two are level, 3.9% and 4.0%, inside
+the noise, and m2m100 lost nothing; back to English they tie on chrF, and
+m2m100's readings bring back fewer references right (42 against 51). Its
+Hebrew keeps more of the English on text (chrF 55.1 against 52.1), which the
+reading does not carry through. Listening back fired on one chunk of 0510
+(`וגם השמחה תתפוצץ` left out, two takes in a row). The translator stays the
+user's choice; nothing in the app routes Hebrew to a model of its own.
+
+Readings are seeded, and nothing that makes a reading has changed since this
+run (the narrower listener download and the hint's removal touch only what
+is fetched and how Whisper listens), so this run stands as the final one
+with every change in; it was not read again.
 
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 

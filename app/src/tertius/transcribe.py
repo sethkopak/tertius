@@ -532,20 +532,16 @@ def register_cuda_dll_directories() -> list[str]:
 # words are Bible vocabulary because that is what this app reads; outside it
 # they are rare enough not to be heard where they were not said.
 #
-# **Hebrew** (2026-10-26): Whisper wrote Tertius's Hebrew readings with two or
-# three full stops a file, so a translation back to English got a whole
-# reading as one sentence. The opening is Google's "The following are
-# sentences in Hebrew."; the words are the ones every Manna reading has, and
-# deliberately no book of the ten test files. Two sets of thirty readings,
-# heard by large-v3-turbo, back to English: chrF 46.6 to 49.1 and 48.1 to
-# 50.2, scripture references right 3 to 7 and 6 to 10 of 60. Letters misheard
-# moved both ways (4.0% to 3.4%, 3.9% to 4.6%), and part of the first is
-# Whisper writing a hint word it half heard. **It can skip speech**: one
-# reading in sixty lost three sentences with it that were heard without it,
-# as the Chinese hint's first version did. Kept for the gain back to English.
+# **No Hebrew hint** (tried 2026-10-26/27). One gave Whisper's Hebrew full
+# stops - 0120 had two without it, eight with - and back to English chrF 50.6
+# to 52.6, but
+# **any hint skipped speech**: 0723's second take lost three sentences that
+# are in the audio, with `להלן משפטים בעברית. מן, הטקסט שוב, האיגרת, תהילים,
+# פרק, פסוק.`, with the sentence alone, with the words alone and with just
+# `פרק, פסוק.`, the same stretch every time; without a hint it was heard.
+# Silently losing sentences costs more than the punctuation gains.
 PUNCTUATION_HINTS = {
     "zh": "以下是普通话的句子。吗哪,众民,称颂,经文,诗篇,希伯来书,雅各书,帖撒罗尼迦后书。",
-    "he": "להלן משפטים בעברית. מן, הטקסט שוב, האיגרת, תהילים, פרק, פסוק.",
 }
 
 
