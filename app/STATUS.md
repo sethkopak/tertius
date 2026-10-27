@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**792 tests, all passing** on Windows locally (one skips, a librosa path).
+**795 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -556,6 +556,34 @@ changes how every language is decoded; the refill touches only gaps.
 the gap - Whisper's YouTube outro (`请不吝点赞 订阅 转发 打赏支持明镜与点点栏目`),
 `语言语言语言...`. So it runs for Hebrew only (`REFILL_LANGUAGES`); English
 is unmeasured and unchanged. 5 tests.
+
+**English too, with a three-word floor** (2026-10-27). The Manna book itself
+is in the Bible_Study vault (`07 Books/Other/Devotional/Daily Heavenly
+Manna`, one file a day), so English can be checked against what was read:
+the verse, the comment, the verse again. Every sixth recording, 62 in all,
+transcribed with the app's settings, runs of four or more book words
+missing from the transcript:
+
+| | Missing stretches | Words |
+|---|---|---|
+| Before | 7 | 104 |
+| With the refill | **2** | **17** |
+
+- **What was lost was whole verses.** 0113, 0424 and 1114 lost the verse
+  repeated after "The text again", at 55-60 s - the end of Whisper's second
+  window - and 0828 lost its opening title and verse (0-10 s). Decoding the
+  gaps again brought each back word for word, and 0623's title (`Madna for
+  June 23rd`), skipped too.
+- It also wrote `for.` and `19. 19.` into two gaps, both inside them. So a
+  refill is kept only at three words or more (`REFILL_MIN_WORDS`), which
+  also stops Hebrew's `תודה רבה`; every real recovery, English or Hebrew,
+  was four words or more. Hebrew's result above is unchanged by it.
+- The two stretches left are both 1208, with no gap near either: not a
+  window skip; likely the reading differs from the book there. Not checked.
+- The 62-file run with the app's code counted what was missing, not what
+  was added; that nothing invented gets in rests on the earlier run, whose
+  gap decodes are the same calls.
+`REFILL_LANGUAGES` is Hebrew and English; Chinese stays out. 3 tests more.
 
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 

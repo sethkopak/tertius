@@ -556,11 +556,20 @@ PUNCTUATION_HINTS = {
 # so a refilled segment is kept only if it ends within the gap. Hebrew
 # then: 640 to 567 letters misheard of 16,512, nothing lost, nothing invented.
 #
-# **Hebrew only.** The same thirty Chinese readings went 2.0% to 2.8%: every
-# gap decoded again came back invented, and inside the gap - the YouTube
+# **English too** (2026-10-27). Of 62 Manna recordings, Whisper lost the whole
+# repeated verse in three (at 55-60 s, the end of its second window) and the
+# opening title and verse in one; decoding the gaps again brought back all
+# four, word for word against the book, and a skipped title. It also wrote
+# `for.` and `19. 19.` - so a refill is kept only if it is REFILL_MIN_WORDS
+# or more words. That also takes out Hebrew's `תודה רבה`; every real
+# recovery in either language was four words or more.
+#
+# **Not Chinese.** The thirty Chinese readings went 2.0% to 2.8%: every gap
+# decoded again came back invented, inside the gap and long - the YouTube
 # outro (`请不吝点赞 订阅 转发...`), `语言语言语言...`. Other languages are
 # unmeasured.
-REFILL_LANGUAGES = frozenset({"he"})
+REFILL_LANGUAGES = frozenset({"he", "en"})
+REFILL_MIN_WORDS = 3
 REFILL_GAP_SECONDS = 1.5
 REFILL_SLACK_SECONDS = 1.0
 
@@ -747,7 +756,10 @@ class WhisperTranscriber:
             try:
                 found, _ = run(language, clip_timestamps=[start, end])
                 for segment in found:
-                    if segment.text.strip() and segment.end <= end + REFILL_SLACK_SECONDS:
+                    if (
+                        len(segment.text.split()) >= REFILL_MIN_WORDS
+                        and segment.end <= end + REFILL_SLACK_SECONDS
+                    ):
                         log.info("decoded %.1f-%.1f s again: %s", start, end, segment.text.strip())
                         take(segment)
             except Exception:  # pragma: no cover - a refill must never cost the transcript

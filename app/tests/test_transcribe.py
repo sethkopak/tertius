@@ -352,10 +352,10 @@ def _transcriber_skipping(refill, language="he"):
 
 def test_speech_jumped_over_is_decoded_again_and_put_in_place():
     """0403 and 0510 lost a clause each this way, 26-30 s (2026-10-27)."""
-    transcriber = _transcriber_skipping([(10.2, 13.6, "b")])
+    transcriber = _transcriber_skipping([(10.2, 13.6, "let every one of us")])
     result = transcriber.transcribe("reading.wav")
 
-    assert [s.text for s in result.segments] == ["a", "b", "c"]
+    assert [s.text for s in result.segments] == ["a", "let every one of us", "c"]
     assert transcriber._model.calls[1]["clip_timestamps"] == [10.0, 14.0]
 
 
@@ -375,10 +375,19 @@ def test_short_pauses_are_not_decoded_again():
     assert _gaps(segments, 15.5) == [(9.0, 11.0)]
 
 
-@pytest.mark.parametrize("language", ["zh", "en"])
-def test_only_hebrew_is_decoded_again(language):
-    """Chinese gaps came back invented, inside the gap; English is unmeasured."""
-    transcriber = _transcriber_skipping([(10.2, 13.6, "b")], language)
+@pytest.mark.parametrize("words", ["for.", "19. 19.", "תודה רבה."])
+def test_a_word_or_two_in_a_gap_is_not_put_in(words):
+    """What Whisper wrote in English and Hebrew gaps that held no speech."""
+    transcriber = _transcriber_skipping([(10.2, 13.6, words)])
+    result = transcriber.transcribe("reading.wav")
+
+    assert [s.text for s in result.segments] == ["a", "c"]
+
+
+@pytest.mark.parametrize("language", ["zh", "fr"])
+def test_only_measured_languages_are_decoded_again(language):
+    """Chinese gaps came back invented; other languages are unmeasured."""
+    transcriber = _transcriber_skipping([(10.2, 13.6, "let every one of us")], language)
     result = transcriber.transcribe("reading.wav")
 
     assert [s.text for s in result.segments] == ["a", "c"]
