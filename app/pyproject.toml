@@ -18,6 +18,9 @@ requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "faster-whisper>=1.0",
+    # faster-whisper 1.2.1 opens audio with an argument PyAV 19 removed
+    # (`metadata_errors`), and every transcription fails; see requirements.txt.
+    "av>=11,<19",
 ]
 
 [project.optional-dependencies]

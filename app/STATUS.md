@@ -141,6 +141,14 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
 
 ## 2026-10-27 — English transcription against the book: 1.61% to 1.16%
 
+> **PyAV capped below 19** (`requirements.txt`, `pyproject.toml`). CI went red
+> on the four Python 3.13/3.14 jobs at `e256419`: they installed PyAV 19.0.2,
+> and faster-whisper 1.2.1 - the latest - opens every file with
+> `av.open(..., metadata_errors="ignore")`, an argument PyAV 19 removed. So a
+> fresh install today could not transcribe anything; the suite mocks Whisper
+> and never noticed until the loudness test below decoded real audio. The
+> 3.11 jobs got PyAV 18.1.0 and passed; this machine has 18.0.0.
+
 All 375 Manna recordings transcribed with the app's settings and scored
 against the book (366 have a page): the verse, the comment and the verse
 again, both sides without scripture references, the title and "The text

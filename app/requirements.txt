@@ -1,5 +1,9 @@
 flask>=3.0
 faster-whisper>=1.0
+# faster-whisper 1.2.1 (the latest) decodes audio with av.open(...,
+# metadata_errors=...), which PyAV 19 removed: every transcription fails.
+# Found 2026-10-27 when CI installed av 19.0.2.
+av>=11,<19
 
 # dev
 pytest>=8.0
