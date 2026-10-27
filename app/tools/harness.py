@@ -49,6 +49,11 @@ writes Hebrew unpointed and none of that is heard. Three figures per file:
 - **skeleton** - the same with every ו and י dropped except at the start of a
   word, so full and defective spellings (תהילים / תהלים) match. It also merges
   words a listener tells apart (הוא / היא), so it is shown, not used to decide.
+- **sound** - the skeleton with letters modern Hebrew says alike made one
+  (א/ע/ה, ח/כ, ט/ת, ק/כ, ב/ו, ס/ש) and א dropped like ו and י. Closest to
+  what a listener gets wrong (2026-10-27): 39% of the misheard letters of the
+  3.9% run were these spellings. Unpointed Hebrew cannot tell every vowel
+  apart (`מן` is "man" and "min"), so it misses some real mishearings.
 - **words** - word error rate, for reading; prefixes make it harsh.
 A run of three or more reference words heard not at all is listed as lost.
 Not counted, unless `--raw`: a trailing `תודה רבה`, Whisper's text after the
@@ -267,6 +272,12 @@ _NOT_HEBREW = re.compile(r"[^א-ת ]+")
 
 HEBREW_HALLUCINATION = ["תודה", "רבה"]
 
+# Letters modern Hebrew says alike, mapped together for the `sound` figure.
+# Of the 3.9% run's misheard letters, 39% were these and ו/י/א written or not:
+# read right, spelled Whisper's way (2026-10-27).
+_SAME_SOUND = str.maketrans({"ע": "א", "ה": "א", "ח": "כ", "ט": "ת", "ק": "כ",
+                             "ב": "ו", "ס": "ש"})
+
 # A number's gender, folded: `שנים עשר` and `שתים עשרה` are both twelve.
 # Whisper writes most numbers it hears as digits, which are spelled back here
 # in `num2words`' default feminine, while a reference may be read masculine
@@ -310,9 +321,13 @@ def hebrew_scorer(args):
         # spelling convention; at the start of a word they are a consonant or
         # the prefix "and".
         skeleton = "".join(w[0] + re.sub("[וי]", "", w[1:]) for w in words)
-        return {"letters": "".join(words), "skeleton": skeleton, "words": words}
+        sound = "".join(
+            w[0] + re.sub("[ויא]", "", w[1:]) for w in (w.translate(_SAME_SOUND) for w in words)
+        )
+        return {"letters": "".join(words), "skeleton": skeleton, "sound": sound,
+                "words": words}
 
-    return norm, {"letters": 10**9, "skeleton": 10**9, "words": 3}
+    return norm, {"letters": 10**9, "skeleton": 10**9, "sound": 10**9, "words": 3}
 
 
 SCORERS = {"zh": chinese_scorer, "he": hebrew_scorer}

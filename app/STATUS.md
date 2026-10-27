@@ -479,13 +479,51 @@ sound. Word alignment counts 662 letters, against the scorer's 640:
 - **Without the same-sound spellings, about 2.4%** (404 of 662 letters
   remain, scaled to the scorer's 640) - nearer what a listener would get
   wrong, as the Chinese 2.1% was once its same-sound 21 were set aside.
-- **Left out:** 0403 take 1's stretch is Whisper's: the reading is 40.0 s
-  like its other takes (39.9, 40.9), and Whisper large missed it with and
-  without a hint. 0510 take 2's is a real drop - 42.6 s against 45.8 and
-  45.6 - and listening back (`small`) did not catch it.
+- **Left out: both stretches are Whisper's, not drops.** 0403 take 1 is
+  40.0 s like its other takes (39.9, 40.9), and Whisper large missed the
+  stretch with and without a hint. 0510 take 2 is 45.6 s like take 1
+  (45.8), and the same audio heard with either hint has the clause
+  (`ומכאן אנו מסוגלים...`); only the unhinted listen skipped it. So
+  listening back was right not to fire, and Whisper large skips speech
+  without a hint too, if less often.
+
+> Corrected 2026-10-27: this first said 0510 take 2 was a real drop that
+> `small` missed, from its being 42.6 s. That length is take 3's (`.t2`),
+> which lost nothing.
 - The title still costs: `מָן` heard `מעל` ("above") four times, `מענ` five
   (same sound, scored as spelling).
 The script is in a session scratchpad.
+
+**A sound figure in the harness** (`tools/harness.py`, Hebrew): the
+skeleton, with the letters above that sound alike made one and א dropped
+like ו and י. It leaves out Whisper's spelling, so it is closer to what a
+listener gets wrong; it also cannot tell `מן` "man" from "min", which
+unpointed Hebrew does not show. Every run, letters and sound:
+
+| Run | Letters | Sound |
+|---|---|---|
+| Baseline (scored with its own code) | 4.5% | 2.7% (289/10722) |
+| Fix A | 4.2% | 2.8% |
+| Fix B | 4.0% | 2.5% |
+| Now: madlad, listening back, no hint | 3.9% | **2.4%** (268/11100) |
+| m2m100-1.2B | 4.0% | 2.5% |
+
+By sound the fixes gain less than by letters: much of the letter gain was
+the title and "The text again" now spelled as Whisper spells them.
+
+**The title said three ways.** First chunk of each file, three takes each,
+seeds 700+, no retakes, Whisper large, the first word heard. "man" is any
+of `מן`, `מען`, `מאן`:
+
+| | "man" | |
+|---|---|---|
+| `מָן` (as now) | 16/30 | `מן` 12 - as in the first A/B - `מען` 4, `מה` 3, `זמן` 2 |
+| `מַן` | 17/30 | `מן` 12, `מען` 5, `מנה` 3, `מעל` 3 |
+| `מָאן` | 16/30 | `מן` 11, `מען` 4, `מה` 3, `מעל` 3 |
+
+No difference: the points are not what is misheard; a lone short syllable
+opening the reading is. Nothing changed. The script is in a session
+scratchpad.
 
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 
