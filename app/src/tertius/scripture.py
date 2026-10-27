@@ -545,9 +545,18 @@ _HE_FINALS = str.maketrans("ךםןףץ", "כמנפצ")
 # `פסוק` and `פסוקים`, and how Whisper also wrote it: `פסוג`, `בסוק`, `פסופ`,
 # `עסוק`.
 _HE_VERSE = re.compile(r"^[פבע]סו[קגפכ](?:ימ)?$")
+# `פרק`, and how Whisper also wrote it: `ברק` (four of the nine references
+# lost in 30 readings, 2026-10-27), `פרץ`.
+_HE_CHAPTER = re.compile(r"^[פב]ר[קצ]$")
 _HE_BOOK_SURE = 0.85
 _HE_BOOK_LIKENESS = 0.65
 _HE_BOOK_MARGIN = 0.1
+# Book names are compared with letters modern Hebrew says alike made one
+# (א/ע/ה, ח/כ/ק, ט/ת, ס/ש, ב/ו): `אבדימוטיוס` is then clearly 1 Timothy. Over
+# every Hebrew harness reading on hand (20 runs, 1,056 references), 875 found
+# as spelled, 901 alike, the same 8 wrong either way (2026-10-27). Dropping
+# א/ה/ע/ו/י as well found fewer and got 53-63 wrong.
+_HE_SOUND = str.maketrans("עהחקטשו", "אאככתסב")
 
 
 def _he_letters(word: str) -> str:
@@ -560,6 +569,10 @@ def _he_number(words: list[str]) -> tuple[int, int] | None:
         return None
     first = re.sub(r"[^\d]", "", words[0])
     if first and first == re.sub(r"[.,:;?!]", "", words[0]):
+        # `3 עשר`: thirteen, half in digits.
+        if (0 < int(first) < 10 and words[0][-1:] not in ".,:;?!" and len(words) > 1
+                and re.sub(r"[.,:;?!]", "", words[1]) in ("עשר", "עשרה")):
+            return int(first) + 10, 2
         return int(first), 1
     value, used = 0, 0
     for word in words[:4]:
@@ -583,7 +596,7 @@ def _he_number(words: list[str]) -> tuple[int, int] | None:
 @functools.lru_cache(maxsize=1)
 def _he_labels() -> tuple[tuple[str, str], ...]:
     return tuple(
-        (_he_letters(entry["labels"]["he"].replace(" ", "")), book)
+        (_he_letters(entry["labels"]["he"].replace(" ", "")).translate(_HE_SOUND), book)
         for book, entry in _table().items()
         if entry.get("labels", {}).get("he")
     )
@@ -595,7 +608,7 @@ def _he_book(words: list[str]) -> tuple[str, int] | None:
 
     tries = []
     for length in range(1, min(len(words), 5) + 1):
-        heard = "".join(_he_letters(w) for w in words[-length:])
+        heard = "".join(_he_letters(w) for w in words[-length:]).translate(_HE_SOUND)
         if not heard:
             continue
         scores = sorted(
@@ -624,13 +637,13 @@ def hebrew_references(text: str) -> list[tuple[int, int, str]]:
     `(start, end, "Hebrews 12:3")`, found by `פרק` and `פסוק` with a number
     after each and a book named before them. Empty when there are none.
     """
-    if not text or "פרק" not in text:
+    if not text or not re.search("[פב]ר[קץצ]", text):
         return []
     tokens = list(re.finditer(r"\S+", text))
     words = [t.group() for t in tokens]
     found = []
     for i, word in enumerate(words):
-        if _he_letters(word) != "פרק":
+        if not _HE_CHAPTER.match(_he_letters(word)):
             continue
         chapter = _he_number(words[i + 1:])
         if not chapter:

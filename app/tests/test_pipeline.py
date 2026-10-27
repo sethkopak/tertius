@@ -376,6 +376,9 @@ def test_every_script_tertius_can_speak_splits_into_sentences():
         "ru": "Благослови Бога. Пусть его хвала будет услышана. Это оживляет душу.",
         "el": "Ευλογείτε τον Θεό. Ας ακουστεί ο έπαινός. Αυτό κρατά ζωντανή.",
         "zh": "每日天堂曼娜。祝福上帝。讓他的讚美被聽到。",
+        # A full stop and a space, and no case at all.
+        "he": "ברכו את אלוהינו. השמיעו את קול תהילתו. הוא שם נפשנו בחיים.",
+        "ar": "باركوا إلهنا. أسمعوا صوت تسبيحه. هو الذي يحيي نفوسنا.",
     }
     for code, text in three_sentences.items():
         assert len(split_sentences(text)) == 3, (code, split_sentences(text))

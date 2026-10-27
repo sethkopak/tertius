@@ -76,12 +76,18 @@ def _opens_a_sentence(match: "re.Match") -> bool:
     `str.isupper()` rather than a character class, because `re` has no
     Unicode-aware uppercase class and the ASCII one silently excluded every
     cased script that is not Latin.
+
+    A letter with no case at all opens one too: Hebrew and Arabic end
+    sentences with an ordinary full stop and have no capitals, so a whole
+    Hebrew transcript went to the translator as one 100-170 word "sentence"
+    (all 30 harness readings, 2026-10-27).
     """
     opener = match.group("opener")
     # The caseless alternation matched: the terminator is the whole story.
     if opener is None:
         return True
-    return opener.isupper() or opener.isdigit()
+    caseless = opener.isalpha() and opener.upper() == opener.lower()
+    return opener.isupper() or opener.isdigit() or caseless
 
 
 _ABBREVIATIONS = (

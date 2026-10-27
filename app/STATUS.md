@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**804 tests, all passing** on Windows locally (one skips, a librosa path).
+**809 tests, all passing** on Windows locally (one skips, a librosa path).
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -138,6 +138,41 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-27 (evening) — Hebrew back to English: sentences, and references by sound
+
+The thirty Hebrew readings as the app now hears them (3.4%), translated back
+with madlad. **Whisper's figures and chrF, not a person's.**
+
+| | chrF | References right | Title month kept |
+|---|---|---|---|
+| Before | 51.1 | 51/60 | 9/30 |
+| References read by sound | 51.2 | **57/60** | 9/30 |
+| + Hebrew split into sentences | **53.9** | 56/60 | **30/30** |
+
+- **Hebrew was never split into sentences.** `split_sentences` broke after a
+  full stop only before a capital or a digit, and Hebrew has no capitals:
+  every reading went to madlad as one 98-167 word "sentence", and madlad
+  dropped what it could not fit - 0226's title, verse and first sentence
+  were simply gone. Now a letter with no case opens a sentence too (Hebrew,
+  Arabic): 4-10 sentences a reading, median 13 words. This was the app's
+  bug, not only the harness's: a Hebrew transcript's `.txt` was one line and
+  its translation one call. The reading aloud is unaffected - it is chunked
+  from the translation's own lines.
+- **`פרק` heard as `ברק` or `פרץ`** cost four of the nine references, and
+  `3 עשר` (thirteen, half in digits) one. Both are read now.
+- **Book names compared by sound** (א/ע/ה, ח/כ/ק, ט/ת, ס/ש, ב/ו made one):
+  `ההיגרת הלשונה אבדימוטיוס` is 1 Timothy. Checked without the GPU over
+  every Hebrew reading on hand, 20 runs and 1,056 references: 804 found
+  before, 875 with `ברק`, 901 with the sound fold, and the same 8 wrong
+  throughout - mostly Whisper's own (`פסוק 2` for 12, `תהילים` heard).
+  Folds that also dropped א/ה/ע/ו/י got 53-63 wrong; not used.
+- The one reference lost to the split (0616, take 1) was never read by the
+  reference reader; madlad had translated it unaided inside the long block.
+  The three left: `פרק הבאה` for ארבע (0829), and two book names still
+  under the margin (`ההגלת אל העבלים`, `ההגרת אלייברים`).
+
+809 tests pass (one skips).
 
 ## 2026-10-27 (later) — the gated refill on Chinese: nothing to refill
 

@@ -27,6 +27,13 @@ from tertius.scripture import hebrew_references, mask, restore
         # `פסוק` misheard.
         ("מאניש. היגרת אל העברים, פרק 12, פסוג 7.", "Hebrews 12:7"),
         ("בתהילים, פרק שישים ושישה, פסוקים שמונה ותשעה.", "Psalm 66:8,9"),
+        # `פרק` misheard (2026-10-27).
+        ("מבקשים לא נכון הגרת יעקב, ברק 4, פסוק 3", "James 4:3"),
+        ("שלי מתמלט תהילים ברק עשרים ושלושה פסוק חמישה", "Psalm 23:5"),
+        # ...and thirteen half in digits.
+        ("יעשה לי. ההיגרת אל העברים, פרץ 3 עשר, פסוק 6", "Hebrews 13:6"),
+        # Only close to 1 Timothy with alike letters made one.
+        ("יותר מכופר. ההיגרת הלשונה אבדימוטיוס, פרק 5, פסוק 8", "1 Timothy 5:8"),
     ],
 )
 def test_a_heard_reference_is_named_in_english(heard, citation):
@@ -40,6 +47,8 @@ def test_a_heard_reference_is_named_in_english(heard, citation):
         "לא נכון. איגרת יעקב, פרק הבאה, פסוק שלושה.",
         # No book before it.
         "זה פרק 12, פסוק 7 של הסיפור.",
+        # `ברק` is lightning, too.
+        "ראינו ברק 3 פעמים בלילה.",
         "אין כאן שום הפניה.",
     ],
 )
