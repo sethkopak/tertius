@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-24
+Last updated: 2026-10-27
 
 ## Where it stands
 
@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**749 tests, all passing** on Windows locally (one skips, a librosa path).
+**780 tests, all passing** on Windows locally (one skips, a librosa path).
+The Hebrew work of 2026-10-26/27 is not yet committed or run in CI.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
@@ -136,6 +137,306 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-26 — Hebrew, measured the way Chinese was
+
+Goal: Hebrew listeners understand the Hebrew reading of an English Manna, and
+the Hebrew translates back to English well. There is no Hebrew speaker, so
+**every figure here is Whisper's (large-v3-turbo, as the app runs it), not a
+person's.**
+
+**The harness is now `tools/harness.py --lang zh|he`**; `zh_harness.py` is a
+wrapper so the commands above still run. Rescored through it, the Chinese
+runs come out exactly as recorded: 152/7569, 188/7569, 77/2523 raw. A new
+`back` stage translates what Whisper heard into English with the app's
+translator and scores it against the English transcript: chrF, scripture
+references right, and whether the title's month survived.
+
+**Hebrew scoring.** The reference is the translation in spoken form
+(`numbers.spell`), as for Chinese. Both sides lose vowel points,
+cantillation, geresh, punctuation and Latin, and final letters are folded
+(ך→כ ...), since Whisper writes unpointed Hebrew and none of that is heard;
+digits Whisper writes are spelled the same way the reading spells them.
+- **letters**: letters heard wrong, spaces ignored, so a prefix written apart
+  (`ב תהילים`) or joined is not an error. Decisions rest on this one.
+- **skeleton**: also drops ו and י except word-initially, so full and short
+  spellings (תהילים / תהלים) match. It merges הוא and היא too, so it is
+  shown, not used to decide.
+- **words**: word error rate, for reading; prefixes make it harsh.
+- Three or more reference words heard not at all are listed as lost.
+- Not counted: `תודה רבה` ("thank you very much") at the very end, Whisper's
+  text after the last reference in 3 of 30 baseline readings; and the gender
+  of a number word (`שנים עשר` / `שתים עשרה`, both twelve). Whisper writes
+  most numbers as digits, which the scorer spells back feminine, so a chapter
+  read masculine and heard exactly (`פרק 12`) was scored as two errors -
+  that alone made the next run look worse (5.1%) than the baseline. `--raw`
+  counts both.
+
+**Baseline** (madlad, the code as of `430c726`, the ten files' transcripts
+reused from the Chinese runs, three takes): **4.5% of letters misheard**
+(729/16146; raw 4.6%, 752/16203), skeleton 4.6%, words 12.4%. Whisper detected Hebrew in
+all 30.
+
+| File | Letters | Take 1 | Take 2 | Take 3 |
+|---|---|---|---|---|
+| 0120 | 4.0% | 4.7% | 4.3% | 2.8% |
+| 0226 | 3.0% | 3.4% | 2.2% | 3.6% |
+| 0403 | 2.9% | 2.9% | 3.1% | 2.7% |
+| 0510 | 4.7% | 4.0% | 4.8% | 5.3% |
+| 0616 | 5.3% | 5.2% | 5.0% | 5.9% |
+| 0723 | 8.4% | 4.1% | 3.7% | 17.5% |
+| 0829 | 2.7% | 0.5% | 6.0% | 1.6% |
+| 1005 | 4.1% | 3.5% | 4.5% | 4.3% |
+| 1111 | 4.0% | 3.6% | 4.1% | 4.3% |
+| 1218 | 4.1% | 3.4% | 3.8% | 5.0% |
+| **All** | **4.5%** | 3.6% | 4.1% | 5.8% |
+
+- **Two takes left text out.** 0723 take 3 dropped its opening reference and
+  the whole sentence after it; 0829 take 2 dropped its closing
+  `איגרת יעקב 4:3`. Listening back is Chinese only, so nothing retook them.
+- **madlad's title is `מנה`** ("portion", "serving") in all ten files; Google
+  writes `מן`. Heard as `מנה` 24 times, `מנע` 4.
+- **"The text again"** came out four ways (`ההודעה שוב`, "the message
+  again", in five files), and in 1005 madlad put **invented Biblical Hebrew**
+  in its place: `חז"ל מסבירים את הפסוק כך: "וַיְהִי הָאֱלֹהִים אֲשֶׁר לֹא
+  יָדַעְתִּי אֶת הַשָּׁמַיִם..."` - the Psalm 66 failure recorded on 2026-10-19,
+  on another file.
+- **`האיגרת`** ("the epistle") was heard as `ההיגרת`, `הגרת`, `היגרת` - the
+  same sounds - and often as `ההגלת` ("the exile"). 0510's Psalm 23:5, spoken
+  `עשרים ושלוש:חמש`, was heard `20 ו-35` and `20 ל-35`: the colon problem
+  Chinese had.
+- 0723's `אנחנו חוזרים מיד` ("We'll be right back") is in the English
+  transcript, not invented by madlad.
+- Retakes: 33 for an abrupt ending, 3 chunks still abrupt after three;
+  Chatterbox forced EOS on token repetition 123 times.
+
+**Back to English: chrF 45.4, references right 0 of 60, title month kept 5
+of 30.** Whisper writes Hebrew here with almost no punctuation (there is no
+Hebrew hint), so madlad gets a whole reading as one sentence; and it heard
+`האיגרת אל העברים 12:7` as `ההגלת היא לעברין 12-7`, which came back as "The
+exile is for transgressors 12-7". The title came back "Appointment for
+January 20".
+
+The readings are in a session scratchpad and are not kept.
+
+**Fix A: dates and references read as Google writes them** (`numbers.py`).
+`num2words` read `ל-1 בינואר` as `ל-אחת בינואר`, the feminine counting form
+after a hyphen, and `העברים 12:7` as `שתים עשרה:שבע`, two numbers and no word
+for the colon. Google, asked to write them in words, gave `לשלושה ביוני`,
+`לראשון ביוני` (masculine; "first" as an ordinal) and `האיגרת אל העברים, פרק
+י"ב, פסוק י"א`. So a date is now `לעשרים בינואר`, and a reference after a
+book name from the table is `האיגרת אל העברים, פרק שנים עשר, פסוק שבעה` (a
+list `פסוקים שמונה ותשעה`), numbers in masculine words, not Google's letter
+numerals. A range keeps its old reading: Google kept its digits. 7 tests.
+
+Read again from the baseline's own translations, same seeds, three takes:
+
+| | Baseline | Fix A |
+|---|---|---|
+| Letters misheard | 4.5% (729/16146) | **4.2%** (700/16566) |
+| Per take | 3.6 / 4.1 / 5.8% | 3.9 / 4.3 / 4.5% |
+| References heard with the right chapter and verse | 41/60 | **47/60** |
+| References left out | 2 | 2 |
+| Back to English: chrF | 45.4 | 48.2 |
+| Back: references right | 0/60 | 6/60 |
+| Back: title month kept | 5/30 | 3/30 |
+
+- **The references are the gain.** Whisper heard them as Google writes them,
+  `ההיגרת אל העברים, פרק 12, פסוק 7`; 0510's Psalm 23:5, heard `20 ו-35` in
+  the baseline, was right in 6 of 6. (Counted as chapter, then verse, in
+  digits within a few characters; 1111's 1:5 is heard as words, `אחת חמש`,
+  and is undercounted the same in both.)
+- 0.3 points of letters is inside take-to-take noise. Six files improved,
+  0510 was level, 0226 (3.0% to 4.1%) and 0616 (5.3% to 5.5%) did worse, and
+  **1218 went 4.1% to 10.9%**: Chatterbox left out its opening reference in
+  two takes and a sentence in the third, with no retake (nothing listens back
+  to Hebrew). The baseline lost two references the same way, in 0723 and
+  0829. The third 1218 take read the reference.
+- Dates moved both ways: 0403's `לשלושה באפריל` was heard right 3 of 3
+  (the baseline's `לשלוש` heard the month wrong twice, `באפלין`, `באפרין`);
+  0510's `לעשרה במאי` was heard `להסערה` ("to the storm") once.
+
+Kept.
+
+**Fix B: the title and "The text again" from Google** (`fixed_lines.py`):
+`מן ל-20 בינואר.` and `הטקסט שוב:`, the way the Chinese lines are done, so
+madlad sees only the rest of the sentence. Month names after ב: six as Google
+wrote them, six as madlad did. "The text again" now starts a Hebrew chunk too
+(`STARTS_A_CHUNK`). 5 tests. Translated again, with fix A, three takes:
+
+| | Baseline | Fix A | Fix A + B |
+|---|---|---|---|
+| Letters misheard | 4.5% | 4.2% | **4.0%** (661/16512) |
+| Per take | 3.6 / 4.1 / 5.8% | 3.9 / 4.3 / 4.5% | 3.5 / 4.3 / 4.2% |
+| References, chapter and verse heard | 41/60 | 47/60 | 43/60 |
+| `הטקסט שוב` heard | - | - | 29/30 |
+| Back: chrF / references / title month | 45.4 / 0 / 5 | 48.2 / 6 / 3 | 46.6 / 3 / 5 |
+
+- **1005's invented Biblical Hebrew is gone**: madlad got only the verse,
+  and translated it. Apart from the fixed lines, one other line of the ten
+  translations changed (0226, a long sentence reworded; same English).
+- Text was left out again: 0616 takes 2 and 3 each have one of its two
+  references, and 0723 take 2 lost "The text again" with the start of its
+  verse. References are worded the same in A and B, so 47/60 to 43/60 is
+  drops and take-to-take noise, not the change.
+- **The title is now heard as `מין`** ("kind", "sex") in 21 of 30, `מן` in 6.
+  The diacritizer points it `מִן`, "from", and ignores points it is given
+  (`מָן` in, `מִן` out). madlad's `מנה` ("portion") was at least heard as
+  itself, 24 of 30. Fixed below.
+
+Kept.
+
+**The title's `מן` pointed as manna** (`hebrew.POINTED_AS`, `set_points`).
+After the model runs, `מן` before `ל<day> ב<month>` is set to `מָן`; any
+other `מן` ("from") is left as the model points it. The model sometimes drops
+a vowel letter as it points (`תסבול` → `תִּסְבֹּל`), so the word is found by
+aligning letters. The first chunk of each of the ten files, three takes each
+way, same voice and seeds (700+), no retakes, Whisper large, first word heard:
+
+| | `מן` | `מין` | Other |
+|---|---|---|---|
+| `מִן` (the model's) | 5/30 | 15/30 | `מי` 4, `מלעשרים` 2, ... |
+| `מָן` | **12/30** | **0/30** | `מען` 4, `מה` 3, `זמן` 2, `מענה` 2, ... |
+
+Most of the rest of `מָן` is a "man" sound written another way; "min" is
+gone. 2 tests. The test script is in a session scratchpad. Not yet in a
+ten-file run.
+
+**A Hebrew hint for Whisper** (`transcribe.PUNCTUATION_HINTS["he"]`):
+`להלן משפטים בעברית.` (Google's "The following are sentences in Hebrew.")
+and the words every Manna reading has - `מן, הטקסט שוב, האיגרת, תהילים, פרק,
+פסוק.` - and no book of the ten test files. Whisper had written 0120 with
+two full stops; with the hint, eight. Fix B's thirty readings heard again,
+nothing else changed:
+
+| | Without | With the hint |
+|---|---|---|
+| Letters misheard | 4.0% (661/16512) | **3.4%** (560/16512) |
+| Back: chrF | 46.6 | **49.1** |
+| Back: references right | 3/60 | 7/60 |
+| Back: title month kept | 5/30 | 8/30 |
+
+- **Part of the gain is Whisper writing a hint word it half heard.** The
+  title, read `מִן` in these readings, was written `מן` 19 times in 30 with
+  the hint, 6 without. No hint word was heard more often than it was said
+  (`מן` as a word: 30 said, 19 heard; `הטקסט שוב` 30/30; `פרק`, `פסוק` 59 of
+  60 each).
+- **Two apparent drops were Whisper's.** With the hint, 0723 take 2's
+  `הטקסט שוב` and both of 0616 take 2's references were heard; without it,
+  one reference had come back `פרק שני מסר` and the line not at all. So fix
+  B's real drops were two: 0120 take 1 (`בהתחלה זה מאוד רך`) and 0616 take 3
+  (a reference).
+- References still come back wrong in English because the book names do:
+  `ההגלת אל הרומאים` ("the exile") became "Emigrate to the Romans",
+  "First Migration to Timothy". The English forms themselves (`Psalms,
+  chapter 23, verse 5`) are read correctly by the reference finder.
+
+**Listening back, for Hebrew** (`listen_back.py`). Whisper `base` and
+`small` on the CPU over the same thirty whole readings, a stretch of 12 or
+more letters unheard counting as left out:
+
+| Listener | Letters misheard | Real drops found | False alarms | Time |
+|---|---|---|---|---|
+| `base` | 12-27% | 2 of 2 | 3 | 4 min |
+| `small` | 6-18% | 2 of 2 | 1 | 12 min |
+
+(Plus two takes where `base` lost its place in the whole file, which a
+chunk does not do.) **Hebrew uses `small`**, Chinese keeps `base`; the
+listener is per language now, and both are fetched at job start (`small`
+is 464 MB on disk). Text is compared with points stripped, digits spelled and
+final letters folded; a left-out `פרק` or `פסוק` earns the extra reference
+takes. A `פרק`/`פסוק` count like Chinese's chapter check is not used: `small`
+missed them in readings that had them all. 4 tests changed or added.
+
+**Ten files with `מָן` and listening back** (fix B's translations, read
+again). Listening back fired three times in thirty readings: 0616's
+`האיגרת אל העברים, פרק שנים עשר, פסוק אחד עשר` left out (five takes, as a
+reference earns) and a clause of 1005 (`ואז יחשבו שההתנהגות שלהם`), plus
+the ordinary abrupt-ending retakes. Heard four ways:
+
+| Heard by large-v3-turbo | Fix B readings | These readings |
+|---|---|---|
+| No hint | 4.0% | **3.9%** (640/16512) |
+| Bare sentence `להלן משפטים בעברית.` | 3.9% | 4.7% |
+| Sentence + words (the app's hint) | 3.4% | 4.6% |
+| Back: chrF / refs / month, no hint | 46.6 / 3 / 5 | 48.1 / 6 / 5 |
+| Back: chrF / refs / month, app's hint | 49.1 / 7 / 8 | **50.2 / 10 / 7** |
+
+- **Unhinted, `מָן` and listening back together are level** with fix B
+  (3.9% against 4.0%); what each does was measured directly (the title A/B
+  above; the two catches here).
+- **Any hint sometimes makes Whisper skip speech.** 0723 take 2 scored
+  31.5% with either hint: three sentences gone from what was heard, though
+  the reading is 67.4 s like its other takes (68.0, 68.7) and the unhinted
+  listen heard them. The bare sentence also lost 0829's title once. The
+  Chinese hint's first version did the same (2026-10-21).
+- **Decided: the hint stays in the app; goal 1 is scored unhinted from
+  here.** The hint only matters when Tertius transcribes Hebrew audio - the
+  way back to English - and there it won on both sets, the skipped take
+  included. A Hebrew listener is not hinted, so the listening score should
+  not be either; the unhinted letter rates average 3.95% against 4.0% for
+  the app's hint, no gain on that measure.
+- The first nine readings of this run (0120-0510) had no retakes at all,
+  where earlier runs had about one a reading, which looked like listening
+  back interfering. From 0616 on they came at the usual rate; one thing found on the way: running faster-whisper
+  drops torch's CPU threads from 6 to 4 for the rest of the process. Not
+  shown to change a reading.
+
+**Hebrew references found in what Whisper heard** (`scripture.hebrew_references`,
+for goal 2, as `chinese_references` is for Chinese). Tertius now reads a
+reference `<book>, פרק <n>, פסוק <n>`, so that is what to look for: `פרק`, a
+number (digits or words of either gender), `פסוק` (or `פסוג`, `בסוק`, `פסופ`,
+`עסוק`, as Whisper also wrote it), a number. The book is whichever table name
+is most like the last one to five words before `פרק`, letter for letter
+(`ההגלת אל הרומאים` is Romans, `הגר את פטרוס השנייה` 2 Peter): it must score
+0.85, or 0.65 and 0.1 ahead of the next book. The span is masked, and the
+English citation goes back in after madlad. Over all 210 readings with the
+new reference wording, **341 of 420 references found, 5 wrong** - the five are
+`פרק 13, פסוק שני`, Whisper's "verse two" for twelve, kept as heard. Most
+misses are a misheard number (`שלושה הסל`, `שני מסר`). The spellings it was
+fitted to are Whisper's from these same readings, as the Chinese ones were.
+14 tests.
+
+Back to English, the listen-back run's thirty readings:
+
+| | Without | With references found |
+|---|---|---|
+| App's hint: chrF / references / title month | 50.2 / 10 / 7 | **52.6 / 53 / 11** |
+| No hint | 48.1 / 6 / 5 | 50.6 / 51 / 9 |
+
+The miss that led to five words, not four: 0723's `ההיגרת הראשונה אל תימות
+יוס` (Timothy split in two) was left to madlad, which wrote "Hosea 5:8".
+
+**madlad against m2m100-1.2B, English into Hebrew, on text** (the comparison
+2026-10-19 said had never been made). Both translated the ten transcripts
+with every fix above; each Hebrew text was then translated straight back to
+English by madlad - no reading, no listening - and scored by chrF:
+
+| | chrF | Files ahead |
+|---|---|---|
+| madlad | 52.1 | 3 (0120, 0616, 1218) |
+| **m2m100-1.2B** | **55.1** | 7 |
+
+The judge is madlad, which if anything favors its own Hebrew. m2m100 looped
+nowhere (no three words more than twice in a file, the second time being
+"The text again") and wrote nothing like 1005's invented verse; that was
+checked by the round trip, not by a reader.
+
+**m2m100's Hebrew read and listened to** (every fix above, three takes,
+madlad translating back):
+
+| | madlad (listen-back run) | m2m100-1.2B |
+|---|---|---|
+| Letters misheard, no hint | **3.9%** (640/16512) | 4.0% (649/16074) |
+| Letters misheard, app's hint | 4.6% | 4.1% |
+| Back: chrF / references / title month | 52.6 / 53 / 11 | 53.1 / 45 / 12 |
+
+For a listener the two are level: 3.9% and 4.0% unhinted, inside the noise,
+and m2m100 lost nothing. Its Hebrew keeps more of the English (chrF 55.1
+against 52.1 on text), and its readings come back with fewer references
+right (45 against 53). Listening back fired on one chunk of 0510 (`וגם
+השמחה תתפוצץ` left out, two takes in a row). **Not decided; the translator
+is still the user's choice in the app.**
 
 ## 2026-10-24 — three more same-sound spellings, and 得着 left alone
 
