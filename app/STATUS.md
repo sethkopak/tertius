@@ -10,8 +10,9 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**780 tests, all passing** on Windows locally (one skips, a librosa path).
-The Hebrew work of 2026-10-26/27 is not yet committed or run in CI.
+**787 tests, all passing** on Windows locally (one skips, a librosa path).
+The Hebrew work of 2026-10-26/27 (`0d8c778`..`fa1ff86`) passed CI on all
+eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
 all eight jobs.
@@ -343,7 +344,9 @@ more letters unheard counting as left out:
 (Plus two takes where `base` lost its place in the whole file, which a
 chunk does not do.) **Hebrew uses `small`**, Chinese keeps `base`; the
 listener is per language now, and both are fetched at job start (`small`
-is 464 MB on disk). Text is compared with points stripped, digits spelled and
+is 464 MB on disk; since 2026-10-27 only the listeners a job's reading
+languages need are fetched, every one when the job does not say). Text is
+compared with points stripped, digits spelled and
 final letters folded; a left-out `פרק` or `פסוק` earns the extra reference
 takes. A `פרק`/`פסוק` count like Chinese's chapter check is not used: `small`
 missed them in readings that had them all. 4 tests changed or added.

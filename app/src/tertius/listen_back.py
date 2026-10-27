@@ -219,15 +219,20 @@ class Listener:
         self._models = {}
 
 
-def ensure_model(on_progress=None) -> None:
+def ensure_model(on_progress=None, languages=None) -> None:
     """Fetch the listeners at job start. Not fatal: no listener, no check.
 
-    Every language's, since the speech model is loaded before the reading
-    says which language it is in.
+    Only those `languages` need, when the job says which it will read: `small`
+    is 464 MB, and a job reading only Chinese has no use for it. Every
+    language's when it does not, since the reading may then be in any.
     """
     from .transcribe import ensure_model_downloaded
 
-    for name in dict.fromkeys(LISTENER_MODELS.values()):
+    wanted = LISTENER_MODELS if languages is None else {
+        language: LISTENER_MODELS[language]
+        for language in languages if language in LISTENER_MODELS
+    }
+    for name in dict.fromkeys(wanted.values()):
         try:
             ensure_model_downloaded(name, on_progress)
         except Exception as exc:

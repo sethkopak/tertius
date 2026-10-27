@@ -858,10 +858,14 @@ class JobManager:
                 self._download["expected_bytes"] = entry.get("download_bytes")
             self._free_gpu(transcriber, translator, purpose="to load the voice model")
             try:
+                extra = {}
+                if options.speech_languages and _accepts(self._speaker_factory, "languages"):
+                    extra["languages"] = options.speech_languages
                 speaker = self._speaker_factory(
                     options.speech_model,
                     device=options.device,
                     on_download_progress=self._note_download_progress,
+                    **extra,
                 )
                 load = getattr(speaker, "load", None)
                 if callable(load):

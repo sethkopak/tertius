@@ -992,12 +992,17 @@ class Speaker:
         model_key: str = DEFAULT_SPEECH_MODEL,
         device: str = "auto",
         on_download_progress: Callable[[int, int], None] | None = None,
+        languages: Sequence[str] | None = None,
     ):
         if model_key not in SPEECH_MODELS:
             raise ValueError(f"unknown speech model: {model_key!r}")
         self.model_key = model_key
         self.requested_device = device
         self.on_download_progress = on_download_progress
+        # The languages this speaker will read, when known in advance: only
+        # their listen-back models are fetched at load. None means not known,
+        # and every one is fetched.
+        self.languages = list(languages) if languages else None
         self._diacritizer = None
         self._listener = None
         self._model = None
@@ -1125,7 +1130,7 @@ class Speaker:
             # The listen-back model, fetched now so a reading never waits on it.
             from .listen_back import ensure_model
 
-            ensure_model(self.on_download_progress)
+            ensure_model(self.on_download_progress, self.languages)
         self._model = model
         self.active_device = device
 

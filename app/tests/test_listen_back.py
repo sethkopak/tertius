@@ -6,6 +6,8 @@ the real one found on real readings is recorded in listen_back.py.
 
 from __future__ import annotations
 
+import pytest
+
 from tertius.listen_back import added_text, missing_text
 
 SPOKEN = "经文又说,你们要思想那忍受罪人这样反对他的,恐怕你们心里疲乏乏力。希伯來書 第十二章第三节."
@@ -326,3 +328,34 @@ def test_hebrew_is_heard_by_its_own_listener(monkeypatch):
     listener._models = {"small": _Model()}
     missing, _ = listener.check(HE_SPOKEN, [0.0] * 16000, 16000, "he")
     assert asked == ["he"] and missing
+
+
+@pytest.mark.parametrize(
+    "languages, fetched",
+    [
+        (["zh"], ["base"]),
+        (["he"], ["small"]),
+        (["ru"], []),
+        (["zh", "he"], ["base", "small"]),
+        # Not known in advance: every listener.
+        (None, ["base", "small"]),
+    ],
+)
+def test_only_the_listeners_a_job_needs_are_fetched(monkeypatch, languages, fetched):
+    """`small` is 464 MB; a job reading only Chinese has no use for it."""
+    import tertius.listen_back as L
+    import tertius.transcribe as T
+
+    got = []
+    monkeypatch.setattr(T, "ensure_model_downloaded", lambda name, progress=None: got.append(name))
+    L.ensure_model(None, languages)
+    assert got == fetched
+
+
+def test_the_job_can_tell_the_speaker_its_languages():
+    from tertius.jobs import _accepts
+    from tertius.speech import Speaker
+
+    assert _accepts(Speaker, "languages")
+    assert Speaker("chatterbox-multilingual", device="cpu", languages=["he"]).languages == ["he"]
+    assert Speaker("chatterbox-multilingual", device="cpu").languages is None
