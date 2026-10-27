@@ -11,7 +11,7 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **787 tests, all passing** on Windows locally (one skips, a librosa path).
-The Hebrew work of 2026-10-26/27 (`0d8c778`..`fa1ff86`) passed CI on all
+The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
 The 2026-10-21 evening changes (`642fe18`, `ef27871`, `ce33f3e`) passed CI on
