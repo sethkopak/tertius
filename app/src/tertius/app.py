@@ -29,6 +29,7 @@ from .config import (
     SPEECH_MODELS,
     SPEECH_STYLE_ALIASES,
     SPEECH_STYLE_NAMES,
+    TEXT_EXTENSIONS,
     TRANSLATION_MODEL_SIZES,
     TRANSLATION_MODELS,
     UPLOAD_DIRNAME,
@@ -542,6 +543,15 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             "yes",
             "on",
         )
+        # `kind="text"` is the same choice /api/scan takes: with the source set
+        # to text, a dropped `.txt` *is* the source and is queued, the way a
+        # scanned one is. Without it every dropped `.txt` was filed away as a
+        # transcript to pair with audio, nothing reached the queue, and Begin
+        # stayed greyed out with nothing pending - choosing a voice clip could
+        # not change that. Audio is turned away in that mode for the same
+        # reason the text scan ignores it: the stages on screen are the text
+        # ones.
+        text_source = (request.form.get("kind") or "media").strip().lower() == "text"
         saved: list[str] = []
         texts: list[str] = []
         rejected: list[str] = []
@@ -551,9 +561,12 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
                 continue
             target = upload_dir() / name
             item.save(str(target))
-            if is_media_file(target):
+            is_text = target.suffix.lower() in TEXT_EXTENSIONS
+            if text_source and is_text:
                 saved.append(str(target))
-            elif target.suffix.lower() == ".txt":
+            elif not text_source and is_media_file(target):
+                saved.append(str(target))
+            elif not text_source and is_text:
                 texts.append(str(target))
             else:
                 rejected.append(name)

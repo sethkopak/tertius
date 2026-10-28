@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 
 ## Where it stands
 
@@ -10,7 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**810 tests, all passing** on Windows locally (one skips, a librosa path).
+**816 tests, all passing** on Windows locally (one skips: Windows has no
+executable bit). The 2026-10-28 fixes have not been through CI.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -138,6 +139,65 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
+
+Two bugs Seth reported, both fixed. **Neither has been run in the real app
+yet** - the tests below are all there is.
+
+### `nano=` broke every Turbo load, and took CUDA down with it (`speech.py`)
+
+Choosing chatterbox-turbo failed at 07:43:09 with `ChatterboxTurboTTS.from_pretrained()
+got an unexpected keyword argument 'nano'`, and the next transcription loaded
+on the CPU. `Speaker.load` passed `nano=self.model_key == "chatterbox-nano"`
+on every Turbo-family load. The installed chatterbox-tts 0.1.7 has
+`from_pretrained(cls, device)` - no `nano` - and 0.1.7 is the newest on PyPI
+(`pip index versions`, checked today), so upgrading does not help. This path
+had never run, because Turbo and Nano had never been downloaded (this file
+already said so, under the first reading's *Not verified*).
+
+The GPU part: the `except` after the load ran `mark_cuda_broken` for *any*
+exception on CUDA, so a TypeError disabled the GPU for the rest of the
+process - on a card that had loaded large-v3-turbo at 07:42:31.
+
+- **Turbo** now calls `from_pretrained(device=device)` and nothing else.
+- **Nano** is loaded through `ChatterboxTurboTTS.from_pretrained(device, nano=True)`.
+  That is what the model card says, and chatterbox's GitHub master has that
+  signature (smaller GPT2 backbone, `t3_nano_v1.safetensors`,
+  `ResembleAI/chatterbox-nano`). **No release has it.** So Nano now stops
+  with a `SpeechUnavailableError` that names the package, says it is not the
+  GPU, and suggests Turbo or multilingual. It stops before the 3 GB download,
+  in Prepare as well as at job start. Whether `from_pretrained` takes `nano`
+  is checked with `inspect.signature` rather than by version number, so a
+  release that adds it turns Nano on with no code change. Not built: a copy
+  of master's unreleased `from_local` inside Tertius.
+- **The CUDA mark is narrowed** (`_is_cuda_failure`): torch's
+  `OutOfMemoryError`, or an exception whose message names CUDA, cuDNN, cuBLAS
+  and the like. TypeError, AttributeError, NameError, KeyError and ValueError
+  never count, whatever their message says. A real CUDA failure still marks
+  the GPU broken for the process, because a retry can hang. `transcribe.py`
+  and `translate.py` still mark on any exception; their `try` blocks wrap
+  only the device build, so they were left alone.
+
+### A dropped `.txt` with the source set to Text queued nothing (`app.py`, `app.js`)
+
+`/api/upload` filed every `.txt` as a transcript to pair with audio,
+whatever the source was set to. With Text chosen, nothing reached the queue, so Begin
+stayed disabled ("Nothing is pending"). Picking a voice clip could not change
+that. Scanning a folder worked, because `/api/scan` already took `kind`. The
+upload now takes the same `kind`. With `text`, a `.txt` is queued as a
+source (`MODE_TEXT`), and audio is turned away as `Skipped:`, the same as
+the text scan ignores it. Text matching is never asked for in that mode.
+The *Choose files* button uses the same upload, so it is fixed too.
+
+**Tertius Online not touched.** Its vendored `app/` and its second
+`index.html`/`app.js` need the same drop fix if it has the same upload path.
+Not checked.
+
+Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
+broken; a real CUDA error still does; Nano refuses without blaming the GPU;
+dropped text in Text mode is queued). **815 passed, 1 skipped** (Windows has
+no executable bit), on this machine. CI not run.
 
 ## 2026-10-27 (night) — madlad's Hebrew mistranslations, found; nothing changed
 

@@ -734,8 +734,11 @@ async function uploadFiles(files) {
   if (!files.length) return;
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
-  // .txt files upload alongside the audio and are paired by name.
-  form.append('match_reference_text', $('opt-use-text').checked ? '1' : '0');
+  // .txt files upload alongside the audio and are paired by name - unless the
+  // source is text, when they are the source and the server queues them.
+  form.append('kind', sourceKind);
+  form.append('match_reference_text',
+    $('opt-use-text').checked && sourceKind !== 'text' ? '1' : '0');
   note('add-note', `Copying ${plural(files.length, 'file', 'files')} in…`);
   try {
     const res = await api('/api/upload', { method: 'POST', body: form });
@@ -754,8 +757,8 @@ async function uploadFiles(files) {
 }
 
 // --- drag & drop -----------------------------------------------------------
-// The whole window takes audio. Folders cannot be read from a drop, so those
-// still go through Browse.
+// The whole window takes audio, or .txt files when the source is text.
+// Folders cannot be read from a drop, so those still go through Browse.
 
 let dragDepth = 0;
 

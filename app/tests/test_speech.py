@@ -591,6 +591,105 @@ def test_a_speech_model_that_will_not_load_stops_before_anything_is_written(
     assert api.manager.store.get(source)["status"] == "pending"
 
 
+# ----------------------------------------------------------- loading the model
+#
+# Reported 2026-10-28: every Turbo load passed `nano=` to a `from_pretrained`
+# that has no such parameter, and the TypeError was taken for a GPU failure -
+# which disables CUDA for the rest of the process. These swap in a stand-in
+# `chatterbox.tts_turbo` with the installed 0.1.7 signature, so nothing is
+# downloaded and nothing touches a device.
+
+
+def _turbo_signature_0_1_7(monkeypatch, behaviour=None):
+    """Install a fake ChatterboxTurboTTS whose `from_pretrained(device)` takes
+    exactly what 0.1.7's does, and record each call."""
+    import sys
+    import types
+
+    from tertius import speech, transcribe
+
+    calls = []
+
+    class FakeTurbo:
+        @classmethod
+        def from_pretrained(cls, device):
+            calls.append(device)
+            if behaviour is not None:
+                raise behaviour
+            return object()
+
+    module = types.ModuleType("chatterbox.tts_turbo")
+    module.ChatterboxTurboTTS = FakeTurbo
+    monkeypatch.setitem(sys.modules, "chatterbox.tts_turbo", module)
+    monkeypatch.setattr(speech, "missing_requirements", lambda: [])
+    monkeypatch.setattr(speech.Speaker, "download", lambda self: None)
+    monkeypatch.setattr(speech.Speaker, "_resolve_device", lambda self: "cuda")
+    transcribe.reset_cuda_state()
+    return calls
+
+
+def test_turbo_loads_without_a_nano_argument(monkeypatch):
+    from tertius.speech import Speaker
+    from tertius.transcribe import cuda_known_broken
+
+    calls = _turbo_signature_0_1_7(monkeypatch)
+
+    speaker = Speaker(TURBO)
+    speaker.load()  # a stray `nano=` would be a TypeError against this fake
+
+    assert calls == ["cuda"]
+    assert speaker.active_device == "cuda"
+    assert cuda_known_broken() is None
+
+
+def test_a_bug_while_loading_does_not_mark_the_gpu_broken(monkeypatch):
+    """The side effect that cost every later job its GPU."""
+    from tertius.speech import Speaker
+    from tertius.transcribe import cuda_known_broken
+
+    _turbo_signature_0_1_7(
+        monkeypatch, TypeError("from_pretrained() got an unexpected keyword argument 'nano'")
+    )
+
+    with pytest.raises(TypeError):
+        Speaker(TURBO).load()
+    assert cuda_known_broken() is None
+
+
+def test_a_real_cuda_failure_while_loading_still_marks_the_gpu_broken(monkeypatch):
+    """The protection being narrowed, not removed: a retry after this can hang."""
+    from tertius.speech import Speaker, SpeechUnavailableError
+    from tertius.transcribe import cuda_known_broken, reset_cuda_state
+
+    _turbo_signature_0_1_7(
+        monkeypatch, RuntimeError("CUDA error: an illegal memory access was encountered")
+    )
+
+    try:
+        with pytest.raises(SpeechUnavailableError, match="on the GPU"):
+            Speaker(TURBO).load()
+        assert "speech model failed to load on CUDA" in (cuda_known_broken() or "")
+    finally:
+        reset_cuda_state()
+
+
+def test_nano_says_the_package_cannot_load_it_rather_than_blaming_the_gpu(
+    monkeypatch,
+):
+    from tertius.speech import Speaker, SpeechUnavailableError
+    from tertius.transcribe import cuda_known_broken
+
+    calls = _turbo_signature_0_1_7(monkeypatch)
+
+    with pytest.raises(SpeechUnavailableError) as raised:
+        Speaker("chatterbox-nano").load()
+
+    assert "chatterbox-tts" in str(raised.value)
+    assert "GPU" not in str(raised.value)
+    assert calls == []  # refused before anything was loaded
+    assert cuda_known_broken() is None
+
+
 def test_preparing_a_speech_model_reports_when_it_is_ready(api):
     api.manager.prepare_speech("chatterbox-nano")
     wait_until(lambda: not api.manager.is_running(), description="prepare to finish")

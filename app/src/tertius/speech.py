@@ -845,6 +845,55 @@ def is_downloaded(model_key: str) -> bool:
         return False
 
 
+def _turbo_loader_takes_nano() -> bool:
+    """Does the installed chatterbox know how to load Nano at all?
+
+    Nano is loaded through `ChatterboxTurboTTS.from_pretrained(device, nano=True)`
+    - the model card says so, and chatterbox's GitHub master has exactly that
+    signature, which swaps in the smaller GPT2 backbone and `t3_nano_v1`. But
+    no release carries it: 0.1.7 is the newest on PyPI (checked 2026-10-28)
+    and its `from_pretrained(cls, device)` takes no `nano`, hard-codes the Turbo
+    repository and checkpoint, and has no other way in. Asked rather than
+    assumed from a version number, so the day a release adds the argument Nano
+    simply starts working.
+    """
+    import inspect
+
+    from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+    return "nano" in inspect.signature(ChatterboxTurboTTS.from_pretrained).parameters
+
+
+# torch reports nearly every GPU failure as a RuntimeError naming the library
+# underneath - "CUDA error: ...", "cuDNN error: ...", "CUBLAS_STATUS_...",
+# "CUDA out of memory" - and a missing runtime DLL as an OSError naming the
+# file. That name is the only thing that tells them apart from an ordinary bug.
+_CUDA_FAILURE = re.compile(r"cuda|cudnn|cublas|cufft|curand|cusolver|cusparse|nvrtc|nccl", re.I)
+
+
+def _is_cuda_failure(exc: BaseException) -> bool:
+    """Is this the GPU failing, or is it just our code (or the library's)?
+
+    Only the first is allowed to mark CUDA broken for the process. On
+    2026-10-28 a TypeError - `from_pretrained` refusing an argument - was
+    taken for a GPU failure, and every job after it ran on the CPU for the
+    rest of the session, on a card that had loaded Whisper a minute earlier.
+    A programming error says nothing about the device, whatever words it
+    happens to contain, so those types are ruled out before the message is
+    read at all.
+    """
+    if isinstance(exc, (TypeError, AttributeError, NameError, KeyError, ValueError)):
+        return False
+    try:
+        import torch
+
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+    except (ImportError, AttributeError):
+        pass
+    return bool(_CUDA_FAILURE.search(f"{type(exc).__name__} {exc}"))
+
+
 def speech_language_choices(model_key: str = DEFAULT_SPEECH_MODEL) -> tuple[str, ...]:
     """Codes this model will accept, read from the package where possible.
 
@@ -1083,7 +1132,23 @@ class Speaker:
         person just pressed a button asking for exactly this.
         """
         install_requirements(on_line)
+        self._refuse_unloadable_nano()
         self.download()
+
+    def _refuse_unloadable_nano(self) -> None:
+        """Say plainly that Nano cannot load, before three gigabytes of it are
+        downloaded for nothing. It is the package that is missing, not the GPU,
+        and saying so stops it being reported as - or turning into - a device
+        problem."""
+        if self.model_key != "chatterbox-nano" or _turbo_loader_takes_nano():
+            return
+        raise SpeechUnavailableError(
+            "chatterbox-nano cannot be loaded by the installed chatterbox-tts. "
+            "Nano needs `ChatterboxTurboTTS.from_pretrained(..., nano=True)`, "
+            "which is on chatterbox's GitHub but in no release yet (0.1.7 is "
+            "the newest on PyPI and does not have it). Choose chatterbox-turbo "
+            "or chatterbox-multilingual instead."
+        )
 
     def load(self) -> None:
         """Download if needed, then load the model onto a device.
@@ -1102,6 +1167,7 @@ class Speaker:
                 "    pip install -e app[speak]\n"
             )
 
+        self._refuse_unloadable_nano()
         self.download()
         device = self._resolve_device()
         log.info("loading speech model %s on %s", self.model_key, device)
@@ -1110,14 +1176,21 @@ class Speaker:
                 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
                 model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-            else:
+            elif self.model_key == "chatterbox-nano":
                 from chatterbox.tts_turbo import ChatterboxTurboTTS
 
-                model = ChatterboxTurboTTS.from_pretrained(
-                    device=device, nano=self.model_key == "chatterbox-nano"
-                )
+                model = ChatterboxTurboTTS.from_pretrained(device=device, nano=True)
+            else:
+                # No `nano=False` for Turbo: 0.1.7 has no such parameter, and
+                # passing it anyway was a TypeError on every Turbo load.
+                from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+                model = ChatterboxTurboTTS.from_pretrained(device=device)
         except Exception as exc:
-            if device == "cuda":
+            # Only a failure of the GPU itself may mark it broken: that mark
+            # holds for the life of the process (a retry can hang), so a plain
+            # bug taken for one costs every later job its GPU.
+            if device == "cuda" and _is_cuda_failure(exc):
                 from .transcribe import mark_cuda_broken
 
                 mark_cuda_broken(f"speech model failed to load on CUDA: {exc}")

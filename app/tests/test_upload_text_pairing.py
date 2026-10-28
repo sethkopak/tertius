@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from tertius.state import (
     MODE_ALIGN,
+    MODE_TEXT,
     MODE_TRANSCRIBE,
     MODE_UNDECIDED,
     StateStore,
@@ -99,6 +100,30 @@ def test_upload_without_the_feature_on_still_just_transcribes(api):
 def test_a_real_junk_file_is_still_rejected(api):
     result = upload(api, [(io.BytesIO(b"nope"), "notes.pdf")])
     assert result["rejected"] == ["notes.pdf"]
+
+
+def test_a_text_file_dropped_with_the_source_set_to_text_is_queued(api):
+    """Reported 2026-10-28: dropping a `.txt` with Text chosen as the source
+    queued nothing, so Begin stayed disabled. It was filed away as a transcript
+    to pair with audio, the same as when the source is audio."""
+    result = api.client.post(
+        "/api/upload",
+        data={
+            "files": [
+                (io.BytesIO("Words to read aloud.".encode()), "letter.txt"),
+                (io.BytesIO(b"\x00fake"), "talk.mp3"),
+            ],
+            "kind": "text",
+            "match_reference_text": "0",
+        },
+        content_type="multipart/form-data",
+    ).get_json()
+
+    assert [Path(p).name for p in result["saved"]] == ["letter.txt"]
+    assert result["texts"] == []
+    assert result["rejected"] == ["talk.mp3"]
+    assert result["status"]["summary"]["pending"] == 1
+    assert result["status"]["files"][0]["mode"] == MODE_TEXT
 
 
 def test_toggling_the_option_re_evaluates_what_is_already_queued(tmp_path):
