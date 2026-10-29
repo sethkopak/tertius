@@ -56,6 +56,10 @@ TOKENIZER_FILES = [
     "tokenizer_config.json",
 ]
 LANGUAGES = frozenset({"ar"})
+# What the page calls it while it downloads, and the pinned files' sizes on
+# the Hub (model.safetensors is 1,109,839,340 of it).
+MODEL_LABEL = "Arabic sentence model"
+DOWNLOAD_BYTES = 1_124_006_716
 
 # `wtpsplit`'s defaults for a "-sm" model.
 THRESHOLD = 0.25

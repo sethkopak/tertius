@@ -833,9 +833,20 @@ class JobManager:
                 # Arabic's sentence model (segment.py), now for the same
                 # reason, when the recording is said to be Arabic. Left to
                 # auto-detect, it comes with the first Arabic transcript.
-                from .segment import LANGUAGES as SEGMENTED, ensure_model
+                from .segment import (
+                    DOWNLOAD_BYTES,
+                    LANGUAGES as SEGMENTED,
+                    MODEL_LABEL,
+                    ensure_model,
+                )
 
                 if (options.language or "").lower() in SEGMENTED:
+                    # Under its own name and size: left under madlad's, its
+                    # 1.1 GB showed as "madlad400-3B · of about 11.8 GB".
+                    with self._lock:
+                        self._download = self._empty_download()
+                        self._download["model"] = MODEL_LABEL
+                        self._download["expected_bytes"] = DOWNLOAD_BYTES
                     ensure_model(self._note_download_progress)
             except Exception as exc:
                 log.exception("translation model failed to load")

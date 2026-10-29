@@ -85,3 +85,23 @@ def test_punctuated_or_empty_text_never_reaches_the_model(monkeypatch, text):
 
     monkeypatch.setattr(segment, "_breaks", refuse)
     assert restore([text], "ar") == [text]
+
+
+def test_its_download_is_shown_under_its_own_name(api, tmp_path, monkeypatch):
+    """Not as madlad: the page said "madlad400-3B · of about 11.8 GB" (2026-10-29)."""
+    from .fakes import make_audio
+
+    seen = []
+    monkeypatch.setattr(
+        segment, "ensure_model", lambda on_progress: seen.append(api.manager.status()["download"])
+    )
+    api.manager.attach(api.output_dir)
+    api.manager.store.add_files(make_audio(tmp_path / "audio", "talk.mp3"))
+    api.manager.start(
+        output_dir=api.output_dir,
+        options={"language": "ar", "translate": True, "target_languages": ["en"]},
+    )
+    api.wait_done()
+
+    assert seen[0]["model"] == segment.MODEL_LABEL
+    assert seen[0]["expected_bytes"] == segment.DOWNLOAD_BYTES

@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**872 tests, all passing** on Windows locally (one skips: Windows has no
+**873 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -296,8 +296,27 @@ through the app's own `translate.sentences_of`, and gave the same: **chrF
 56.8, references 60/60, title month 30/30**. The model (1.1 GB, plus
 XLM-RoBERTa's tokenizer, both pinned) downloads at job start when the
 recording's language is set to Arabic, and with the first Arabic transcript
-when it is auto-detected. **Not yet run in the real app** - the harness and
-the tests are all there is.
+when it is auto-detected.
+
+**Run in the real app, 2026-10-29**, on `4ad31f0`, through its own API
+(`/api/queue`, `/api/job/start`): 0510's Arabic take from the harness,
+language Arabic, translate to English with madlad400-3B. The cached SaT and
+tokenizer were moved aside first so the job had to fetch them: 1,124,010,832
+bytes on disk afterward, the pinned files' size on the Hub. Done in 876 s,
+most of it that download (~1.3 MB/s). The log shows `found 6 sentence ends in
+113 unpunctuated words`. The `.txt` transcript is Whisper's words unchanged;
+the `.en.txt` has the title (`Manna for May 10.`) and both references
+(Psalm 23:5, once appended where madlad dropped the placeholder). Harness
+chrF on it: **48.5**, against 49.4 for the harness's own take of the same
+file. Both still read `ومرة أخرى أقول ابتهج النص مجددا` as "Once again, the
+text was rejoiced." SaT puts no end before `النص مجددا`, so its fixed line
+never applies. Whisper's figures only.
+
+**Found on the way: the download was labeled as madlad's.** While SaT
+downloaded, the page read "madlad400-3B · N% of about 11.8 GB". It now
+shows "Arabic sentence model" and 1.1 GB (`segment.MODEL_LABEL`,
+`DOWNLOAD_BYTES`). There is a test, but the new label has not been seen on
+the page.
 
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 
