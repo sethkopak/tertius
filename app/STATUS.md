@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**816 tests, all passing** on Windows locally (one skips: Windows has no
+**829 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -140,6 +140,66 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-28 (later) — Arabic, measured the way Hebrew was
+
+Every figure here is **Whisper's**, not a listener's: Whisper large-v3-turbo
+hears Chatterbox's Arabic reading of madlad's translation, and madlad puts
+that back into English. Ten harness files, three takes each. Nobody who speaks
+Arabic has heard any of it.
+
+| | baseline (`ar_base`) | with the changes below (`ar_fix`) |
+|---|---|---|
+| letters misheard | 1.2% (205/17,784) | 1.8% (332/18,405) |
+| words misheard | 6.6% (268/4,050) | 6.5% (266/4,095) |
+| back to English, chrF | 51.5 | 53.6 |
+| references right in the English | 24/60 | 30/60 |
+| title month kept | 20/30 | 20/30 |
+
+The letters rose because two single takes dropped a sentence while speaking,
+not from the translation: 0829 take 2 (11.9% on its own; "let us learn to
+pray rightly...") and 0723 take 2 (5.9%; one of the repeats described below).
+Every other file is within its baseline's spread.
+
+### What changed
+
+- **Scorer** (`tools/harness.py`): NFKC first, which unfolds the lām-alif
+  ligatures (ﻻ) madlad's Arabic sometimes carries; Arabic-Indic digits to
+  ASCII and both sides spelled; harakat stripped; alef forms, ى→ي and ة→ه
+  folded.
+- **Fixed lines** (`fixed_lines.py`), Google's wording: `المنّ ليوم 5 يناير.`,
+  `النص مجددًا:`, all twelve months. madlad wrote the title `منّا`. "Text
+  again." without "The" (5 of the first 42 English transcripts) now matches
+  too; madlad made it "send a second text". "Daily Heavenly Manna" is named
+  `المنّ السماوي اليومي`; madlad made it "the Riyadh daily newspaper" every
+  way it was asked.
+- **References** (`numbers.py`): `، الإصحاح 5، الآية 8`; two verses
+  `الآيتان 8 و9`, more `الآيات ...`. A range is left as written, and nothing is
+  read as a reference unless it follows a book name, so clock times are not.
+- **Invented sentences** (`translate.py`, `CHECKED_BACK_TARGETS`): given King
+  James English, madlad sometimes writes something else into Arabic. In the
+  first 42 transcripts: three Qur'an verses with their sura citations, a
+  hadith, "obey his messenger Muhammad" over and over. Each Arabic sentence is
+  now put back into English; under chrF 20 against its source, it is
+  translated again with beam 8 and clause by clause, and whichever comes back
+  closest is kept. All ten harness translations are now free of Islamic
+  insertions. The guard replaced 0616 (19.9 → 25.0) and 1218 (11.4 → 55.9).
+
+### Still wrong
+
+- **0723's verse.** "If any provide not for his own, he hath denied the
+  faith, and is worse than an unbeliever" (1 Tim 5:8) comes out
+  `فمن لم يكن له دين فهو كافر` ("whoever has no religion is an infidel") three
+  or four times over, in the baseline and now. The guard flags it (18.6) and
+  cannot fix it: beam 8 gives "whoever does not do so is an infidel" ×4
+  (18.1), and clause by clause turns "he hath denied the faith" into
+  `وكذب بالحسنى`, Qur'an 92:9 (9.8 whole). "unbeliever" → "infidel" in the
+  English gives a correct translation (35.3); not done, being a rewrite of
+  what was said.
+- The title's day is read as a cardinal (`ليوم واحد يونيو`).
+- No reader for Arabic references in the back stage: a reference counts
+  only if madlad's English for it is right.
+- No Arabic listen-back from a native speaker.
+
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 
 Two bugs Seth reported, both fixed. **Neither has been run in the real app
@@ -193,6 +253,19 @@ The *Choose files* button uses the same upload, so it is fixed too.
 **Tertius Online not touched.** Its vendored `app/` and its second
 `index.html`/`app.js` need the same drop fix if it has the same upload path.
 Not checked.
+
+**Run in the real app, 2026-10-29.** The app running since 2026-10-28 07:33
+(the process that hit the bug, GPU still marked broken) was restarted on
+`d65d5db`. Driven through the page: source Text, Translate off, Read aloud
+on, chatterbox-multilingual, English, a 10 s voice clip cut from `V1_00.mp3`,
+and a three-paragraph `.txt` with `[solemn]` and `[bright]` added through
+*Choose files*. It queued as `text` with Begin enabled, the fixed path. The
+model loaded on CUDA. Done in 67 s: `read-aloud-test.en.spoken.wav`, 3
+chunks, 13.7 s. All three chunks ended on Chatterbox's own "forcing EOS"
+guard, so the WAV was put back through large-v3-turbo: all four sentences
+came back word for word, in order, nothing cut. **Not checked:** whether it
+sounds like the voice clip, or whether the two styles sound different -
+nobody has listened. Turbo was not tried (never downloaded, 4 GB).
 
 Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
 broken; a real CUDA error still does; Nano refuses without blaming the GPU;
