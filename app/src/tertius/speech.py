@@ -1028,6 +1028,35 @@ def _segment_chinese(model) -> bool:
     return True
 
 
+def _keep_reference_float32(model) -> bool:
+    """Stop Turbo's loudness step turning the voice clip into float64.
+
+    Turbo (and Nano, which shares its class) normalizes the reference clip's
+    loudness before reading it, as the multilingual model does not:
+    `wav * gain`, where the gain comes from pyloudnorm as a NumPy float64.
+    Under NumPy 2 a float64 *scalar* promotes a float32 array, so the clip
+    leaves as float64 and the mel filter bank, which is float32, refuses it:
+    "expected scalar type Float but found Double". Every Turbo reading with a
+    voice clip failed that way on 2026-10-29 (numpy 2.5.1, chatterbox-tts
+    0.1.7) - the first time Turbo was ever run. Without a clip it never calls
+    this, which is why the bundled voice would not have shown it.
+
+    Casting back is the whole fix; the loudness itself is left as Chatterbox
+    computes it. Returns whether it acted.
+    """
+    original = getattr(model, "norm_loudness", None)
+    if original is None:
+        return False
+
+    def norm_loudness(wav, sr, *args, **kwargs):
+        import numpy
+
+        return numpy.asarray(original(wav, sr, *args, **kwargs), dtype=numpy.float32)
+
+    model.norm_loudness = norm_loudness
+    return True
+
+
 class Speaker:
     """A loaded speech model, reused across a batch.
 
@@ -1198,6 +1227,8 @@ class Speaker:
                     f"the speech model could not be loaded on the GPU: {exc}"
                 ) from exc
             raise
+        if self.family == "chatterbox-turbo":
+            _keep_reference_float32(model)
         if self.family == "chatterbox-mtl":
             _segment_chinese(model)
             # The listen-back model, fetched now so a reading never waits on it.

@@ -265,7 +265,36 @@ chunks, 13.7 s. All three chunks ended on Chatterbox's own "forcing EOS"
 guard, so the WAV was put back through large-v3-turbo: all four sentences
 came back word for word, in order, nothing cut. **Not checked:** whether it
 sounds like the voice clip, or whether the two styles sound different -
-nobody has listened. Turbo was not tried (never downloaded, 4 GB).
+nobody has listened.
+
+**Turbo, downloaded and run the same day - and broken with a voice clip.**
+Downloaded through Prepare: 10 files, 4.044 GB on disk, which is the
+config's `download_bytes`. It loaded on CUDA, then the first reading failed
+inside chatterbox: `RuntimeError: expected scalar type Float but found
+Double` in the S3 tokenizer's mel filter bank. Turbo, unlike the
+multilingual model, normalizes the clip's loudness first, as `wav * gain`.
+pyloudnorm returns a NumPy float64, and under NumPy 2 (2.5.1 here) a float64
+scalar promotes the float32 clip. Reproduced in the venv: float32 in,
+float64 out. That is chatterbox 0.1.7's bug, hit on every Turbo reading
+with a clip. The bundled voice skips that step. **Fixed in Tertius** the way
+Chinese segmentation is: `_keep_reference_float32` wraps the loaded model's
+`norm_loudness` to hand back float32, applied to the Turbo family only. The
+loudness it computes is untouched. Tested with a stand-in that reproduces the
+promotion.
+
+Re-run after the fix with the same clip, and `[solemn]`, `[bright]` and
+`[laugh]` in the script. Done in 52 s: `turbo-test.en.spoken.wav` (17.9 s)
+and `.srt`, 3 chunks. One chunk "ended abruptly" on all three attempts, and
+the least bad take was kept. Whisper heard every sentence back in order. The
+`.srt`'s three cues are the three paragraphs. **Not checked:** whether
+`[laugh]` produced a laugh. There is a 0.7 s gap where it sits, and Whisper
+does not write laughs down, so it needs a listen.
+
+This run was driven through the app's own API, not the page. The browser
+extension started refusing script access to the page with "Cannot access a
+chrome-extension:// URL of different extension", even in fresh tabs. The
+requests were the page's own: `/api/upload` with `kind=text`, then
+`/api/job/retry-failed` and `/api/job/start` with the page's options.
 
 Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
 broken; a real CUDA error still does; Nano refuses without blaming the GPU;

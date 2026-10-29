@@ -690,6 +690,27 @@ def test_nano_says_the_package_cannot_load_it_rather_than_blaming_the_gpu(
     assert cuda_known_broken() is None
 
 
+def test_turbo_s_loudness_step_hands_back_float32():
+    """Reported 2026-10-29, the first real Turbo run: with a voice clip, the
+    loudness step returned float64 (a NumPy float64 gain promoting the clip
+    under NumPy 2) and the float32 mel filter bank refused it."""
+    numpy = pytest.importorskip("numpy")
+    from tertius.speech import _keep_reference_float32
+
+    class FakeTurbo:
+        def norm_loudness(self, wav, sr, target_lufs=-27):
+            return wav * numpy.float64(1.5)  # what pyloudnorm's gain does
+
+    model = FakeTurbo()
+    clip = numpy.ones(4, dtype=numpy.float32)
+    assert model.norm_loudness(clip, 24000).dtype == numpy.float64  # the bug
+
+    assert _keep_reference_float32(model)
+    out = model.norm_loudness(clip, 24000)
+    assert out.dtype == numpy.float32
+    assert out.tolist() == [1.5] * 4  # the loudness itself is untouched
+
+
 def test_preparing_a_speech_model_reports_when_it_is_ready(api):
     api.manager.prepare_speech("chatterbox-nano")
     wait_until(lambda: not api.manager.is_running(), description="prepare to finish")
