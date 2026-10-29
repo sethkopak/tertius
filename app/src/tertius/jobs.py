@@ -830,6 +830,13 @@ class JobManager:
                 load = getattr(translator, "load", None)
                 if callable(load):
                     load()
+                # Arabic's sentence model (segment.py), now for the same
+                # reason, when the recording is said to be Arabic. Left to
+                # auto-detect, it comes with the first Arabic transcript.
+                from .segment import LANGUAGES as SEGMENTED, ensure_model
+
+                if (options.language or "").lower() in SEGMENTED:
+                    ensure_model(self._note_download_progress)
             except Exception as exc:
                 log.exception("translation model failed to load")
                 with self._lock:

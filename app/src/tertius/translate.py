@@ -1147,15 +1147,22 @@ def prose_sentences(result) -> list[str]:
     Split out so a caller can count the work before paying for it - the queue
     needs to know how many sentences there are to report progress against.
     """
-    from .alignment import split_sentences
-    from .punctuate import restore
-
-    # Whisper sometimes writes a whole window with no stops at all, which made
-    # one 150-word "sentence" for the translator. See punctuate.py.
-    texts = restore(
+    return sentences_of(
         [segment.text.strip() for segment in result.segments if segment.text],
         getattr(result, "language", None),
     )
+
+
+def sentences_of(texts: Sequence[str], language: str | None) -> list[str]:
+    """Whisper's texts as sentences, with the stops it left out put back."""
+    from .alignment import split_sentences
+    from .punctuate import restore
+    from .segment import restore as restore_sentence_ends
+
+    # Whisper sometimes writes a whole window with no stops at all, which made
+    # one 150-word "sentence" for the translator - and Arabic it writes with
+    # none anywhere. See punctuate.py and segment.py.
+    texts = restore_sentence_ends(restore(texts, language), language)
     text = " ".join(t for t in texts if t and t.strip())
     return split_sentences(text) if text else []
 

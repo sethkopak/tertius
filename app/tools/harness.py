@@ -443,8 +443,7 @@ def references(text):
 
 def back(out, source, files, args):
     """What was heard, into English with the app's translator, then scored."""
-    from tertius.alignment import split_sentences
-    from tertius.translate import Translator, prose_sentences
+    from tertius.translate import Translator, prose_sentences, sentences_of
 
     t = None
     for stem in files:
@@ -456,7 +455,8 @@ def back(out, source, files, args):
             if t is None:
                 t = Translator(args.back_translator or args.translator, device="cuda")
             text = heard.read_text(encoding="utf-8").strip()
-            en = t.translate(split_sentences(text), "en", source_language=args.lang)
+            # As the app would have it: stops Whisper left out are put back.
+            en = t.translate(sentences_of([text], args.lang), "en", source_language=args.lang)
             p.write_text("\n".join(x.strip() for x in en if x.strip()) + "\n",
                          encoding="utf-8")
             print("back", stem, tag or "take 1", flush=True)

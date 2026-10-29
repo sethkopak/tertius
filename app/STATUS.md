@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**863 tests, all passing** on Windows locally (one skips: Windows has no
+**872 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -261,6 +261,43 @@ wrote: `الأبرانيين`, `صفر المزامير`, `بترسي`, `تيم�
 `ar_fix2` it found all 120 references and named every one right. Back into
 English from `ar_fix`'s audio: references right **33/60 → 60/60**, chrF
 53.0 → 53.5, title month 30/30.
+
+**Splitting Whisper's Arabic into sentences (`segment.py`, 2026-10-29).**
+Whisper's Arabic of the 30 `ar_fix` readings
+is 32 sentences; the English it came from is 324. Three splitters were run
+over the heard text, on the CPU, and the result put back into English:
+
+| splitter | sentences | back chrF | references right | lowest take |
+|---|---|---|---|---|
+| none (the app now) | 32 | 53.5 | 60/60 | 39.4 |
+| `segment-any-text/sat-12l-sm` | 269 | **56.8** | 57/60 | 42.4 |
+| the same, no break inside a reference | 262 | **56.8** | **60/60** | 42.4 |
+| `segment-any-text/sat-3l-sm` | 234 | 56.6 | 46/60 | 42.4 |
+| `makdadTaleb/arabic-punctuation-arabert` | 138 | 55.3 | 59/60 | 45.3 |
+
+Title month 30/30 in every row. SaT (MIT, 85 languages, ~1.1 GB, through
+`wtpsplit` 2.2.2, MIT) split 7 references (`الآية. خمسة.`); found in the
+unsplit text first by `arabic_references` and kept whole, all 60 came back.
+The 3-layer SaT cut references so that madlad named Hebrews as Psalms; the
+AraBERT model (MIT, 71 downloads, no published scores) wrote mostly commas,
+and one 2 Peter came back Ecclesiastes. SaT ran in a separate venv:
+`wtpsplit` brings scikit-learn, pandas, skops, mosestokenizer and
+onnxruntime, none of which the app has.
+
+In the app, **with no new dependency**: with no lookahead, SaT is plain
+XLM-RoBERTa token classification, so `segment.py` loads its safetensors with
+`transformers` and `torch` (both already in the `translate` extra) and does
+`wtpsplit`'s windowing itself. Its splits were identical to `wtpsplit`'s on
+all 30 readings, 5.5 s for the 30 on the CPU. Like `punctuate.py` it only
+touches stretches Whisper left unpunctuated (40+ words, Arabic's `،` and `؛`
+counted), so it differs from the run above in one reading of 30 (0120, whose
+first 21 words Whisper ended with `؟`). The harness's back stage now goes
+through the app's own `translate.sentences_of`, and gave the same: **chrF
+56.8, references 60/60, title month 30/30**. The model (1.1 GB, plus
+XLM-RoBERTa's tokenizer, both pinned) downloads at job start when the
+recording's language is set to Arabic, and with the first Arabic transcript
+when it is auto-detected. **Not yet run in the real app** - the harness and
+the tests are all there is.
 
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 
