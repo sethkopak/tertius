@@ -318,6 +318,23 @@ shows "Arabic sentence model" and 1.1 GB (`segment.MODEL_LABEL`,
 `DOWNLOAD_BYTES`). There is a test, but the new label has not been seen on
 the page.
 
+**SaT for Hebrew: measured, not kept (2026-10-29).** The listen-back run's
+30 heard readings (no hint, as the app is), put back into English by the
+harness on the current code, then again with `segment.LANGUAGES` holding
+`he` and Hebrew references kept whole (`scratchpad/he_sat_run.py`):
+
+| | chrF | References right | Title month |
+|---|---|---|---|
+| As the app is | 53.7 | 56/60 | 30/30 |
+| With SaT | 53.8 | 56/60 | 30/30 |
+
+It fired on 4 of 30 takes (42 to 92 words): 0616 +1.5, 0723 +2.1, 1218
++0.7, 1005 -0.9. Whisper's Hebrew is punctuated: in these 30 takes, 23
+sentences run over 40 words and every one has commas, so none counts as
+unpunctuated. A
+1.1 GB download for every Hebrew job is not worth 0.1. Whisper's figures
+only.
+
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 
 Two bugs Seth reported, both fixed. **Neither has been run in the real app
