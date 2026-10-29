@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**842 tests, all passing** on Windows locally (one skips: Windows has no
+**863 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -197,8 +197,8 @@ Every other file is within its baseline's spread.
   what was said.
 - The title's day is read as a cardinal (`ليوم واحد يونيو`). Tried as an
   ordinal and **rejected** (2026-10-29), below.
-- No reader for Arabic references in the back stage: a reference counts
-  only if madlad's English for it is right.
+- ~~No reader for Arabic references in the back stage~~: done 2026-10-29,
+  below.
 - No Arabic listen-back from a native speaker.
 
 ### 2026-10-29: the title back into English, kept; the day as an ordinal, not
@@ -251,6 +251,16 @@ talk about sin" - so the score would have picked it. On 0723's verse it
 invented too: beam 4 "if a person does not reflect on himself" ×2 (17.6),
 beam 8 "believe in God and the Last Day" ×3 (20.6), which beats madlad's
 18.6 and would have been kept. 0723 stays as it is.
+
+**Arabic references heard back, read by sound (`scripture.arabic_references`).**
+As for Hebrew: `الإصحاح` and `الآية` with a number after each, and the
+words before them compared with the table's Arabic book names, letters said
+alike made one (ع/أ/إ/آ as ا, ص/س, خ/ح, ط/ت). That covers what Whisper
+wrote: `الأبرانيين`, `صفر المزامير`, `بترسي`, `تيمو ثاوس`, `الإسحاحي`,
+`الإصحاق`, `أذي صحاح`, `آية`. Over the 60 heard readings of `ar_fix` and
+`ar_fix2` it found all 120 references and named every one right. Back into
+English from `ar_fix`'s audio: references right **33/60 → 60/60**, chrF
+53.0 → 53.5, title month 30/30.
 
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 

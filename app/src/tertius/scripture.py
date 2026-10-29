@@ -678,6 +678,163 @@ def hebrew_references(text: str) -> list[tuple[int, int, str]]:
     return [(a, b, c) for a, b, c, _ in found]
 
 
+# Arabic references as Whisper writes Tertius's Arabic readings, which say
+# them `<book>، الإصحاح <n>، الآية <n>` (numbers.py): unpunctuated, the numbers
+# as digits or words, and the book and the words around it misheard -
+# `الأبرانيين` for العبرانيين, `صفر المزامير` for سفر, `بترس` for بطرس, `الإسحاح`,
+# `الإصحاحة`, `آية` without the article (2026-10-28/29, 60 readings). Left to
+# madlad, 30 of 60 came back to English as the reference.
+_AR_SOUND = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ع": "ا", "ة": "ه", "ى": "ي",
+    "ص": "س", "خ": "ح", "ط": "ت",
+})
+_AR_MARKS = re.compile(r"[ً-ْـ]")
+_AR_LETTERS = re.compile(r"[^ء-ي]")
+# `الإصحاح`, `الإسحاح`, `الإصحاحة`, `الإسحاحي`, `صحاح`, `الإصحاق`, folded.
+_AR_CHAPTER = re.compile(r"^(?:ال)?ا?سحا[حك]?[حق][هي]?$")
+# `الآية`, `آية`, `الآيتان`, `الآيات`, folded.
+_AR_VERSE = re.compile(r"^(?:ال)?اي(?:ه|تان|تين|ات)$")
+_AR_UNITS = {
+    word.translate(_AR_SOUND): value
+    for words, value in (
+        ("واحد واحدة أحد إحدى", 1), ("اثنان اثنين اثنا اثني", 2), ("ثلاثة", 3),
+        ("أربعة", 4), ("خمسة", 5), ("ستة", 6), ("سبعة", 7), ("ثمانية", 8),
+        ("تسعة", 9), ("عشرة", 10),
+    )
+    for word in words.split()
+}
+_AR_TENS = {
+    (stem + ending).translate(_AR_SOUND): value
+    for stem, value in (("عشر", 20), ("ثلاث", 30), ("أربع", 40), ("خمس", 50),
+                        ("ست", 60), ("سبع", 70), ("ثمان", 80), ("تسع", 90))
+    for ending in ("ون", "ين")
+}
+_AR_TEEN = {"عشر".translate(_AR_SOUND), "عشرة".translate(_AR_SOUND)}
+_AR_HUNDRED = {w.translate(_AR_SOUND) for w in ("مئة", "مائة")}
+_AR_BOOK_SURE = 0.85
+_AR_BOOK_LIKENESS = 0.65
+_AR_BOOK_MARGIN = 0.1
+
+
+def _ar_sound(word: str) -> str:
+    return _AR_LETTERS.sub("", _AR_MARKS.sub("", word)).translate(_AR_SOUND)
+
+
+def _ar_number_word(word: str) -> int | None:
+    if word in _AR_UNITS:
+        return _AR_UNITS[word]
+    if word in _AR_TENS:
+        return _AR_TENS[word]
+    if word in _AR_HUNDRED:
+        return 100
+    if word.startswith("ال") and len(word) > 4:
+        return _ar_number_word(word[2:])
+    return None
+
+
+def _ar_number(words: list[str]) -> tuple[int, int] | None:
+    """`(value, words used)` for a number at the start of `words`."""
+    if not words:
+        return None
+    first = re.sub(r"[.,:;?!،؛]", "", words[0])
+    if first.isdigit():
+        return int(first), 1
+    value = _ar_number_word(_ar_sound(first))
+    if value is None:
+        return None
+    used = 1
+    while used < len(words) and words[used - 1][-1:] not in ".,:;?!،؛":
+        word = _ar_sound(words[used])
+        if word in _AR_TEEN and 0 < value % 100 < 10:
+            value, used = value + 10, used + 1
+            continue
+        step = 1
+        if word == "و" and used + 1 < len(words):
+            word, step = _ar_sound(words[used + 1]), 2
+        elif word.startswith("و"):
+            word = word[1:]
+        else:
+            break
+        more = _ar_number_word(word)
+        if more is None:
+            break
+        value, used = value + more, used + step
+    return value, used
+
+
+@functools.lru_cache(maxsize=1)
+def _ar_labels() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (_ar_sound(entry["labels"]["ar"]), book)
+        for book, entry in _table().items()
+        if entry.get("labels", {}).get("ar")
+    )
+
+
+def _ar_book(words: list[str]) -> tuple[str, int] | None:
+    """The book the last one to six of `words` name, and how many name it."""
+    import difflib
+
+    tries = []
+    for length in range(1, min(len(words), 6) + 1):
+        heard = "".join(_ar_sound(w) for w in words[-length:])
+        if not heard:
+            continue
+        scores = sorted(
+            ((difflib.SequenceMatcher(None, heard, label).ratio(), book)
+             for label, book in _ar_labels()),
+            reverse=True,
+        )
+        (score, book), (second, _) = scores[0], scores[1]
+        tries.append((score, book, length, score >= _AR_BOOK_SURE or (
+            score >= _AR_BOOK_LIKENESS and score - second >= _AR_BOOK_MARGIN)))
+    if not tries:
+        return None
+    book = max(tries)[1]
+    clear = [t for t in tries if t[1] == book and t[3]]
+    if not clear:
+        return None
+    return book, max(clear)[2]
+
+
+def arabic_references(text: str) -> list[tuple[int, int, str]]:
+    """Spans of `text` that are references written in Arabic, as English.
+
+    `(start, end, "Hebrews 12:3")`, found by `الإصحاح` and `الآية` with a
+    number after each and a book named before them. Empty when there are none.
+    """
+    if not text or not re.search("[ء-ي]", text):
+        return []
+    tokens = list(re.finditer(r"\S+", text))
+    words = [t.group() for t in tokens]
+    found = []
+    for i, word in enumerate(words):
+        if not _AR_CHAPTER.match(_ar_sound(word)):
+            continue
+        chapter = _ar_number(words[i + 1:])
+        if not chapter:
+            continue
+        j = i + 1 + chapter[1]
+        if j >= len(words) or not _AR_VERSE.match(_ar_sound(words[j])):
+            continue
+        verse = _ar_number(words[j + 1:])
+        if not verse:
+            continue
+        verses, end = str(verse[0]), j + verse[1]
+        start_word = max(0, i - 6)
+        if found:
+            start_word = max(start_word, found[-1][3] + 1)
+        book = _ar_book(words[start_word:i])
+        if not book:
+            continue
+        name, length = book
+        name = "Psalm" if name == "Psalms" else name
+        first = i - length
+        stop = tokens[end].end() - len(re.search(r"[.,:;?!،؛]*$", words[end]).group())
+        found.append((tokens[first].start(), stop, f"{name} {chapter[0]}:{verses}", end))
+    return [(a, b, c) for a, b, c, _ in found]
+
+
 def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     """Replace whole scripture references with placeholders.
 
@@ -688,7 +845,7 @@ def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     `chinese_references`), which is what goes back in.
     """
     spans = [(start, end, text[start:end]) for start, end in find_references(text)]
-    for written in (chinese_references, hebrew_references):
+    for written in (chinese_references, hebrew_references, arabic_references):
         spans += [
             found for found in written(text)
             if not any(found[0] < end and start < found[1] for start, end, _ in spans)
