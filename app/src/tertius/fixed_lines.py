@@ -13,7 +13,8 @@ text again" into the verse (`Manna for june 16th, no chastening, ...`,
 to be translated as usual, and the rendered words are put in front of it.
 
 English into Chinese, Hebrew (2026-10-26) and Arabic (2026-10-28), and back: Chinese into
-English, for what Whisper hears of a Chinese reading (2026-10-23). There the title kept its place in 21 of 30
+English, for what Whisper hears of a Chinese reading (2026-10-23), and Arabic
+into English (2026-10-29). There the title kept its place in 21 of 30
 readings left to madlad, and in fewer once the reference beside it was
 protected: with a placeholder in the sentence, madlad dropped `4月3日的玛纳`
 outright. Every other pair is left to the model exactly as before.
@@ -140,6 +141,72 @@ def _split_chinese(text: str) -> tuple[str, str] | None:
     return "The text again:" + (" " if rest else ""), rest
 
 
+# The same two lines as Whisper writes them from an Arabic reading, unpunctuated
+# and run into the verse. Over 30 readings (2026-10-28) the title was
+# `المن`, `ألمن`, `المنى`, `المنو` or `المني`, then `ليوم`, `اليوم` or
+# `ليومي`, and the day as digits or words (`تسعة وعشرون`, `الستة وعشرون`);
+# madlad, left with it, dropped the title from 10 of 30 back into English
+# and wrote "Man for" or "The wish for" in others. `النص مجددا` came back
+# every time. Compared folded: alef forms as ا, ة as ه, no harakat.
+_AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه", "ى": "ي"})
+_AR_MARKS = re.compile(r"[ً-ْـ]")
+_AR_STOPS = ".,:;!،؛"
+_AR_MANNA = re.compile(r"^المن[يو]?$")
+_AR_DAY_WORD = re.compile(r"^(?:ل|ال)يوم[ي]?$")
+_AR_UNITS = {
+    "واحد": 1, "احد": 1, "اثنان": 2, "اثنين": 2, "اثنا": 2, "اثني": 2,
+    "ثلاثه": 3, "اربعه": 4, "خمسه": 5, "سته": 6, "سبعه": 7, "ثمانيه": 8,
+    "تسعه": 9,
+}
+_AR_TENS = {"عشره": 10, "عشرون": 20, "عشرين": 20, "ثلاثون": 30, "ثلاثين": 30}
+_AR_MONTHS = {
+    name.translate(_AR_FOLD): number
+    for number, name in _MONTH_NAMES_BY_LANGUAGE["ar"].items()
+}
+
+
+def _ar_fold(word: str) -> str:
+    return _AR_MARKS.sub("", word).translate(_AR_FOLD).strip(_AR_STOPS)
+
+
+def _ar_day(words: list[str]) -> int | None:
+    """The day in `words` (folded), which are all of it, or None."""
+    if len(words) == 1 and words[0].isdigit():
+        return int(words[0])
+    words = [w[2:] if w.startswith("ال") and len(w) > 4 else w for w in words]
+    if len(words) == 1:
+        return _AR_UNITS.get(words[0]) or _AR_TENS.get(words[0])
+    if len(words) == 2 and words[1] == "عشر":
+        return 10 + _AR_UNITS[words[0]] if words[0] in _AR_UNITS else None
+    if len(words) == 2 and words[1].startswith("و"):
+        tens = words[1][1:]
+        tens = tens[2:] if tens.startswith("ال") else tens
+        if words[0] in _AR_UNITS and _AR_TENS.get(tens, 0) >= 20:
+            return _AR_TENS[tens] + _AR_UNITS[words[0]]
+    return None
+
+
+def _split_arabic(text: str) -> tuple[str, str] | None:
+    """`split` for an Arabic source and an English target."""
+    words = (text or "").split()
+    folded = [_ar_fold(w) for w in words]
+    if len(folded) >= 2 and folded[:2] == ["النص", "مجددا"]:
+        rest = " ".join(words[2:])
+        return "The text again:" + (" " if rest else ""), rest
+    if len(folded) < 4 or not (_AR_MANNA.match(folded[0]) and _AR_DAY_WORD.match(folded[1])):
+        return None
+    for end in range(3, min(len(folded), 5)):
+        month = _AR_MONTHS.get(folded[end])
+        if month is None:
+            continue
+        day = _ar_day(folded[2:end])
+        if day is None or not 1 <= day <= 31:
+            return None
+        rest = " ".join(words[end + 1:])
+        return f"Manna for {_MONTH_NAMES[month]} {day}." + (" " if rest else ""), rest
+    return None
+
+
 def split(
     text: str, target_language: str, source_language: str | None = "en"
 ) -> tuple[str, str] | None:
@@ -151,6 +218,8 @@ def split(
     """
     if source_language == "zh" and target_language == "en":
         return _split_chinese(text)
+    if source_language == "ar" and target_language == "en":
+        return _split_arabic(text)
     if (source_language or "en") != "en" or target_language not in _TITLES:
         return None
     series = _SERIES.match(text or "")

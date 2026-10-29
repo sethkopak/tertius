@@ -95,6 +95,31 @@ def test_other_chinese_is_left_to_the_model(heard):
     assert split(heard, "en", source_language="zh") is None
 
 
+@pytest.mark.parametrize(
+    "heard, expected",
+    [
+        ("المن ليوم 20 يناير إذا صبرتم", ("Manna for January 20. ", "إذا صبرتم")),
+        ("ألمن ليوم تسعة وعشرون أغسطس فأنتم", ("Manna for August 29. ", "فأنتم")),
+        ("المن اليوم الستة وعشرون فبراير فرحوا", ("Manna for February 26. ", "فرحوا")),
+        ("المنو ليوم عشرة مايو أنت", ("Manna for May 10. ", "أنت")),
+        ("المني اليوم 18 ديسمبر", ("Manna for December 18.", "")),
+        ("المنّ ليوم خمسة أكتوبر.", ("Manna for October 5.", "")),
+        ("النص مجدداً فتذكروا الله", ("The text again: ", "فتذكروا الله")),
+    ],
+)
+def test_the_arabic_lines_come_back_into_english(heard, expected):
+    """As Whisper wrote them from an Arabic reading, 2026-10-28."""
+    assert split(heard, "en", source_language="ar") == expected
+
+
+@pytest.mark.parametrize(
+    "heard",
+    ["المن ليوم 40 يناير", "المن ليوم كثير يناير", "الرب هو مساعدي ولن أخشى", "المن ليوم"],
+)
+def test_other_arabic_is_left_to_the_model(heard):
+    assert split(heard, "en", source_language="ar") is None
+
+
 def test_only_the_pairs_measured():
     """English into Chinese and back. Everything else is unchanged."""
     assert split("1月20日的玛娜。", "es", source_language="zh") is None

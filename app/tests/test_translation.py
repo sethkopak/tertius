@@ -1428,6 +1428,16 @@ def _canned_translator(answers):
     return translator, asked
 
 
+def test_html_entities_from_the_model_are_unescaped():
+    """madlad wrote `it &apos;s` and `&quot; &quot;` into English (2026-10-29)."""
+    translator, _ = _canned_translator(
+        {"他说": "&quot;It &apos;s here,&quot; he said &amp; went."}
+    )
+    [english] = translator.translate(["他说"], "en", source_language="zh")
+
+    assert english == "\"It 's here,\" he said & went."
+
+
 DROPPED = "他通过这些任命使我们不至于跌倒,"
 REST = "又有经文说众民要称颂我们的神。"
 

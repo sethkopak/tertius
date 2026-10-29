@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**829 tests, all passing** on Windows locally (one skips: Windows has no
+**842 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -195,10 +195,62 @@ Every other file is within its baseline's spread.
   `وكذب بالحسنى`, Qur'an 92:9 (9.8 whole). "unbeliever" → "infidel" in the
   English gives a correct translation (35.3); not done, being a rewrite of
   what was said.
-- The title's day is read as a cardinal (`ليوم واحد يونيو`).
+- The title's day is read as a cardinal (`ليوم واحد يونيو`). Tried as an
+  ordinal and **rejected** (2026-10-29), below.
 - No reader for Arabic references in the back stage: a reference counts
   only if madlad's English for it is right.
 - No Arabic listen-back from a native speaker.
+
+### 2026-10-29: the title back into English, kept; the day as an ordinal, not
+
+Whisper's Arabic is unpunctuated, so a whole reading reaches madlad as one
+sentence, and madlad dropped or garbled the title from it ("Man for", "The
+wish for") in 10 of 30. `fixed_lines` now reads the title and
+`النص مجددا` from Arabic into English from a table, as for Chinese; it read
+all 30 titles as heard in `ar_fix`. Re-translated from the same audio:
+
+| | before | after |
+|---|---|---|
+| title month kept | 20/30 | 30/30 |
+| references right | 30/60 | 33/60 |
+| back chrF | 53.6 | 53.0 |
+
+chrF fell because madlad, handed the verse without the title in front of
+it, put `" "` around fragments in 4 files (0510, 0616, 0723, 0829: 186
+quote marks, none before). Removing them after the fact gave 53.4; not done
+in the app, being a patch on madlad's handling of 150-word sentences, which
+is the real fault - see below.
+
+**HTML entities, fixed.** madlad writes punctuation into English as
+`&quot;` and `&apos;` - 22 in the Arabic baseline's back-translations, 186
+in the run above, some in Hebrew's. Nothing unescaped them, so the app's own
+English output carried them. `html.unescape` on every decoded translation now.
+
+**The day as an ordinal, rejected.** Google writes the day out as an ordinal
+(`ليوم الأول من يونيو`, `الحادي والعشرين من`, all forms asked), and
+`numbers.spell` said it that way in `ar_fix2`. Whisper heard the day right in
+30 of 30 takes said as a cardinal, 25 of 30 as an ordinal: `الحادي عشر` came
+back `الحالي` ("current") in all three takes of 1111, `العشرين` as `الأشرين`
+in two others. Reverted. Letters and words misheard were 1.4% and 6.0%
+there, against 1.8%/6.5% and the baseline's 1.2%/6.6%: within the spread of
+takes.
+
+**What makes the back numbers noisy.** One reading is one 150-word sentence
+to madlad, and it is unstable on that: in `ar_fix2` 0510 went into a loop
+(`my cup` forty times; chrF 17.0 and 7.8 for two takes), and 0120 dropped
+its title and verse outright. English had the same fault and got
+`punctuate.py`, but its model knows English, German, French and Italian
+only. Splitting Arabic before translating it would need another model.
+
+**m2m100-1.2B as a third try for an invented sentence, rejected.** Over the
+first 42 transcripts with the guard on, no invented sentence is left: the 5
+still under chrF 20 are right translations that score low (three bare
+references, `Vision of John 3:5`, and two short lines). m2m100 scored higher
+on two of them and was wrong on both - "Speak evil of no man" as "don't
+talk about sin" - so the score would have picked it. On 0723's verse it
+invented too: beam 4 "if a person does not reflect on himself" ×2 (17.6),
+beam 8 "believe in God and the Last Day" ×3 (20.6), which beats madlad's
+18.6 and would have been kept. 0723 stays as it is.
 
 ## 2026-10-28 — Turbo would not load, the GPU went with it, and dropped text queued nothing
 

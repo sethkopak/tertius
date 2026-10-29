@@ -35,6 +35,7 @@ tokens it builds.
 from __future__ import annotations
 
 import functools
+import html
 import json
 import logging
 import re
@@ -903,7 +904,10 @@ class Translator:
             for offset, (index, result) in enumerate(
                 zip(wanted[start : start + BATCH_SIZE], results)
             ):
-                rendered = adapter.decode(result.hypotheses[0]).strip()
+                # madlad writes some punctuation as HTML entities, `it &apos;s`
+                # and `&quot; &quot;` - 186 of them in 30 Arabic readings put
+                # back into English (2026-10-29), and in Hebrew ones too.
+                rendered = html.unescape(adapter.decode(result.hypotheses[0])).strip()
                 if references is not None:
                     rendered = unprotect(
                         [rendered],
