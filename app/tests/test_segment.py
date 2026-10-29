@@ -105,3 +105,29 @@ def test_its_download_is_shown_under_its_own_name(api, tmp_path, monkeypatch):
 
     assert seen[0]["model"] == segment.MODEL_LABEL
     assert seen[0]["expected_bytes"] == segment.DOWNLOAD_BYTES
+
+
+@pytest.mark.parametrize(
+    "heard, expected",
+    [
+        # 0510 as heard back: punctuated, so SaT is never asked.
+        (
+            "ومرة أخرى أقول ابتهج النص مجددا. أنت تضع زيت على رأسي",
+            "ومرة أخرى أقول ابتهج. النص مجددا. أنت تضع زيت على رأسي",
+        ),
+        ("من خلال المعنى، النص مجدداً إن", "من خلال المعنى. النص مجدداً إن"),
+        # Already a sentence of its own.
+        ("بأشد سطوع. النص مجددا. أنت", "بأشد سطوع. النص مجددا. أنت"),
+    ],
+)
+def test_the_text_again_starts_a_sentence(monkeypatch, heard, expected):
+    monkeypatch.setattr(segment, "_breaks", lambda words: None)
+    assert restore([heard], "ar") == [expected]
+
+
+def test_the_text_again_is_translated_as_its_fixed_line(monkeypatch):
+    from tertius.fixed_lines import split
+
+    monkeypatch.setattr(segment, "_breaks", lambda words: None)
+    sentences = sentences_of(["ومرة أخرى أقول ابتهج النص مجددا أنت تضع زيت على رأسي"], "ar")
+    assert split(sentences[1], "en", source_language="ar")[0] == "The text again: "

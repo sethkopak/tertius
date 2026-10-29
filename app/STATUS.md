@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**873 tests, all passing** on Windows locally (one skips: Windows has no
+**877 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -317,6 +317,24 @@ downloaded, the page read "madlad400-3B · N% of about 11.8 GB". It now
 shows "Arabic sentence model" and 1.1 GB (`segment.MODEL_LABEL`,
 `DOWNLOAD_BYTES`). There is a test, but the new label has not been seen on
 the page.
+
+**`النص مجددا` always starts a sentence (2026-10-29, `segment._break_before_again`).**
+"The text again" is a fixed line only at the start of a sentence, and over
+the 30 takes it came back in 24. In five, SaT or Whisper had run it onto the
+sentence before; in all three of 0510's, `أقول ابتهج النص مجددا` became
+"Once again, the text was rejoiced." A stop now goes before it in every
+Arabic transcript. Back to English, `ar_fix`'s heard text:
+
+| | chrF | References right | Title month | "The text again" |
+|---|---|---|---|---|
+| Before | 56.8 | 60/60 | 30/30 | 24/30 |
+| Stop added before SaT runs | 56.3 | 60/60 | 30/30 | 30/30 |
+| **Stop added after SaT** | **56.9** | 60/60 | 30/30 | **29/30** |
+
+Added first, the stop split SaT's stretches and moved its other breaks
+(0403's second take 63.3 to 47.7), so it is added after. Then only the five
+takes change: 0510 +2.1, +0.7, +1.8, 1111 +0.2, 0120's third -0.1. 0510
+now reads "Again, I say rejoice." Whisper's figures only.
 
 **SaT for Hebrew: measured, not kept (2026-10-29).** The listen-back run's
 30 heard readings (no hint, as the app is), put back into English by the

@@ -224,6 +224,30 @@ def unpunctuated_runs(words: Sequence[str]) -> list[tuple[int, int]]:
     return runs
 
 
+def _break_before_again(words: list[str]) -> bool:
+    """End the sentence before each `النص مجددا`. True when one was ended.
+
+    "The text again" is a line of its own (`fixed_lines`), but only at the
+    start of a sentence. In 5 of 30 takes heard back (2026-10-29) it was
+    run onto the one before - in 0510's, Whisper's punctuation and SaT both
+    left `أقول ابتهج النص مجددا` whole, and madlad wrote "Once again, the
+    text was rejoiced." - so this holds wherever Whisper's punctuation does,
+    not only in the stretches SaT is asked about.
+    """
+    from .fixed_lines import _ar_fold
+
+    ended = False
+    for i in range(1, len(words) - 1):
+        if (
+            _ar_fold(words[i]) == "النص"
+            and _ar_fold(words[i + 1]) == "مجددا"
+            and not _ENDS_SENTENCE.search(words[i - 1])
+        ):
+            words[i - 1] = _TRAILING.sub("", words[i - 1]) + "."
+            ended = True
+    return ended
+
+
 def restore(texts: Sequence[str], language: str | None) -> list[str]:
     """`texts` with a stop wherever SaT finds a sentence end Whisper left out.
 
@@ -241,13 +265,11 @@ def restore(texts: Sequence[str], language: str | None) -> list[str]:
             words.append(word)
             owner.append(index)
     runs = unpunctuated_runs(words)
-    if not runs:
-        return texts
     for start, end in runs:
         stretch = words[start:end]
         breaks = _breaks(stretch)
         if breaks is None:
-            return texts
+            break
         for first, last in _reference_spans(stretch):
             for i in range(first, last):
                 breaks[i] = False
@@ -261,6 +283,11 @@ def restore(texts: Sequence[str], language: str | None) -> list[str]:
             "found %d sentence ends in %d unpunctuated words (%s ...)",
             sum(breaks) + 1, end - start, " ".join(words[start : start + 6]),
         )
+    # After SaT, not before: ended first, it cut SaT's stretches in two and
+    # moved its other breaks - chrF 56.8 to 56.3 over the 30 takes.
+    again = _break_before_again(words)
+    if not runs and not again:
+        return texts
     rebuilt: list[list[str]] = [[] for _ in texts]
     for word, index in zip(words, owner):
         rebuilt[index].append(word)
