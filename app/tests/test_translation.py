@@ -1537,6 +1537,33 @@ def test_a_lowercase_lord_reaches_the_model_capitalized():
     assert asked == sent
 
 
+def test_an_arabic_translation_unlike_its_source_is_replaced():
+    """madlad wrote a Qur'an verse for this sentence; by clause, it did not."""
+    source = "And it is our Lord's direction, that we shall fear Jehovah."
+    translator, asked = _canned_translator({
+        source: "QURAN",
+        "QURAN": "Allah says: and when we took the earth, when we took the earth",
+        "And it is our Lord's direction,": "ARABIC1",
+        "that we shall fear Jehovah.": "ARABIC2",
+        "ARABIC1 ARABIC2": source,
+    })
+    assert translator.translate([source], "ar", source_language="en") == ["ARABIC1 ARABIC2"]
+
+
+def test_an_arabic_translation_like_its_source_is_kept_and_checked_once():
+    source = "Wait on the Lord, and be of good courage."
+    translator, asked = _canned_translator({source: "ARABIC", "ARABIC": source})
+    assert translator.translate([source], "ar", source_language="en") == ["ARABIC"]
+    assert asked == [source, "ARABIC"]
+
+
+def test_only_arabic_is_checked_back():
+    source = "Wait on the Lord."
+    translator, asked = _canned_translator({source: "HEBREW"})
+    translator.translate([source], "he", source_language="en")
+    assert asked == [source]
+
+
 def test_a_fixed_line_before_a_bare_reference_keeps_both():
     """`The text again. Hebrews 12:7.` needs no model at all."""
     translator, asked = _canned_translator({})

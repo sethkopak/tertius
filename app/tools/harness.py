@@ -59,6 +59,12 @@ A run of three or more reference words heard not at all is listed as lost.
 Not counted, unless `--raw`: a trailing `תודה רבה`, Whisper's text after the
 last word, and the gender of a number word (`שנים עשר` / `שתים עשרה`).
 
+**Arabic** (`--lang ar`, 2026-10-27): the reference is the translation in
+spoken form. Both sides lose short vowels, shadda, sukun, tanwin, tatweel,
+punctuation and Latin, and spellings that sound alike are folded (أ/إ/آ->ا,
+ى->ي, ة->ه); Arabic-Indic digits count as digits. **letters** (spaces
+ignored) decides; **words** is shown.
+
 `back` translates what was heard into English with the app's translator and
 scores it against the English transcript: chrF (character n-grams 1-6, beta
 2), scripture references come back right, and whether the title's month
@@ -330,7 +336,32 @@ def hebrew_scorer(args):
     return norm, {"letters": 10**9, "skeleton": 10**9, "sound": 10**9, "words": 3}
 
 
-SCORERS = {"zh": chinese_scorer, "he": hebrew_scorer}
+# Everything Arabic text carries that is not a letter heard: short vowels,
+# tanwin, shadda, sukun, dagger alef (U+064B-U+065F, U+0670), Quranic marks
+# (U+06D6-U+06ED) and tatweel.
+_HARAKAT = re.compile(r"[ً-ٰٟۖ-ۭـ]")
+# Spellings Whisper and the translator choose between for one sound: the
+# hamza's seat on alef, alef maqsura for ya, ta marbuta for ha.
+_AR_SPELLINGS = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه"})
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_NOT_ARABIC = re.compile(r"[^ء-ي ]+")
+
+
+def arabic_scorer(args):
+    from tertius.numbers import spell
+
+    def norm(text, spoken_form):
+        # Both sides spelled, as for Hebrew; Whisper writes either kind of digit.
+        # NFKC: madlad writes some lam-alifs as one presentation form (ﻻ).
+        text = unicodedata.normalize("NFKC", text).translate(_AR_DIGITS)
+        text = _HARAKAT.sub("", spell(text, "ar"))
+        words = _NOT_ARABIC.sub(" ", text.translate(_AR_SPELLINGS)).split()
+        return {"letters": "".join(words), "words": words}
+
+    return norm, {"letters": 10**9, "words": 3}
+
+
+SCORERS = {"zh": chinese_scorer, "he": hebrew_scorer, "ar": arabic_scorer}
 
 
 def score(out, source, files, args):

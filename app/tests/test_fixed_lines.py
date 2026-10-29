@@ -125,3 +125,26 @@ def test_the_hebrew_lines_are_googles(text, expected):
     """madlad wrote `מנה` ("portion") for the title in all ten harness files,
     and in 1005 put invented Biblical Hebrew where "The text again" was."""
     assert split(text, "he") == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Manna for January 20th.", ("المنّ ليوم 20 يناير.", "")),
+        ("Manna for August 5th.", ("المنّ ليوم 5 أغسطس.", "")),
+        ("The text again.", ("النص مجددًا:", "")),
+        # Whisper's `Text again.` too.
+        ("Text again.", ("النص مجددًا:", "")),
+        # madlad: "the Riyadh daily newspaper".
+        ("Daily Heavenly Manna.", ("المنّ السماوي اليومي.", "")),
+        ("Daily Heavenly Manna. Manna for January 1st.", ("المنّ السماوي اليومي. المنّ ليوم 1 يناير.", "")),
+        (
+            "The text again, Consider him who endured such contradiction of sinners against himself.",
+            ("النص مجددًا: ", "Consider him who endured such contradiction of sinners against himself."),
+        ),
+    ],
+)
+def test_the_arabic_lines_are_googles(text, expected):
+    """madlad wrote `منّا` for the title, and with "The text again," in front
+    of 1005's verse rendered it as a Qur'an verse (2026-10-28)."""
+    assert split(text, "ar") == expected

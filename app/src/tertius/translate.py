@@ -551,6 +551,49 @@ _WESTERN_STOPS = str.maketrans(
 # `האל`. Only after "the" and "our": "the servant is not above his lord" is a
 # master, and lowercase there on purpose.
 _LOWERCASE_LORD = re.compile(r"\b(?i:the|our)\s+lord\b")
+
+# Targets whose every sentence is put back into English and compared with the
+# English it came from. Given scripture in King James English, madlad
+# sometimes writes into Arabic something else entirely: in the first 42 Manna
+# transcripts (2026-10-28), three Qur'an verses - `قال تعالى: ﴿...﴾ (سورة
+# البقرة، الآية: 105)` - a saying of the Prophet, "obey his messenger
+# Muhammad, peace be upon him" over and over, and "Whoever wants God to
+# forgive him" for "See that none render evil for evil". m2m100 did the same.
+# Put back into English, those scored chrF 15.0-18.3 against their source,
+# where the median sentence scored 55.3; 19 of 411 sentences scored under
+# INVENTED_CHRF, the rest of them short, rightly translated lines
+# (`Psalms 66:8,9` for "Psalm 66, verses 8 and 9"). A sentence under it is
+# translated again two ways - with a wider beam, and clause by clause - and
+# whichever of the three comes back closest to the English is kept, so a
+# short line rightly translated keeps its translation. Beam 8 alone fixed one
+# of two that still failed, clause by clause the other; a repetition penalty,
+# a no-repeat window and beam 1 did not.
+CHECKED_BACK_TARGETS = frozenset({"ar"})
+INVENTED_CHRF = 20.0
+_CLAUSE_BREAK = re.compile(r"(?<=[,;:])\s+")
+
+
+def _chrf(hypothesis: str, reference: str, n_max: int = 6, beta: float = 2.0) -> float:
+    """chrF (Popovic 2015): character n-grams 1..6, whitespace removed,
+    precision and recall averaged over n, then F-beta with beta 2."""
+    from collections import Counter
+
+    h, r = "".join(hypothesis.split()), "".join(reference.split())
+    precisions, recalls = [], []
+    for n in range(1, n_max + 1):
+        hc = Counter(h[i:i + n] for i in range(len(h) - n + 1))
+        rc = Counter(r[i:i + n] for i in range(len(r) - n + 1))
+        if not hc or not rc:
+            continue
+        match = sum((hc & rc).values())
+        precisions.append(match / sum(hc.values()))
+        recalls.append(match / sum(rc.values()))
+    if not precisions:
+        return 0.0
+    p, rr = sum(precisions) / len(precisions), sum(recalls) / len(recalls)
+    if p + rr == 0:
+        return 0.0
+    return 100 * (1 + beta**2) * p * rr / (beta**2 * p + rr)
 # Not after a digit: `2,12` is one reference, not two clauses.
 _CLAUSE_END = re.compile(r"(?<=\D[,，;；])")
 # A clause shorter than this is joined to the next: `感谢上帝,` is not worth a
@@ -744,6 +787,8 @@ class Translator:
         source_language: str | None = None,
         on_progress: Callable[[int, int], None] | None = None,
         _check_clauses: bool = True,
+        _check_back: bool = True,
+        _beam_size: int = 4,
     ) -> list[str]:
         """Translate a list of texts, preserving order and length.
 
@@ -853,7 +898,7 @@ class Translator:
                 prefixes[start : start + BATCH_SIZE] if prefixes is not None else None
             )
             results = self._translator.translate_batch(
-                chunk, target_prefix=chunk_prefixes, beam_size=4
+                chunk, target_prefix=chunk_prefixes, beam_size=_beam_size
             )
             for offset, (index, result) in enumerate(
                 zip(wanted[start : start + BATCH_SIZE], results)
@@ -882,7 +927,68 @@ class Translator:
             self._restore_dropped_clauses(
                 texts, out, wanted, target_language, source_language
             )
+        if (
+            _check_back
+            and target_language in CHECKED_BACK_TARGETS
+            and source_language == "en"
+        ):
+            self._replace_invented(texts, out, wanted, target_language)
         return out
+
+    def _replace_invented(
+        self,
+        texts: Sequence[str],
+        out: list[str],
+        indices: Sequence[int],
+        target_language: str,
+    ) -> None:
+        """Translate again any sentence whose translation is not of it.
+
+        See CHECKED_BACK_TARGETS. Every sentence pays for one translation back
+        into English; only those that come back unlike their source pay for
+        two more translations and their two checks.
+        """
+        inner = {"_check_clauses": False, "_check_back": False}
+        indices = list(indices)
+        back = self.translate(
+            [out[i] for i in indices], "en", source_language=target_language, **inner
+        )
+        flagged = [
+            (index, score)
+            for index, returned in zip(indices, back)
+            if (score := _chrf(returned, texts[index])) < INVENTED_CHRF
+        ]
+        if not flagged:
+            return
+        sources = [texts[index] for index, _ in flagged]
+        wide = self.translate(
+            sources, target_language, source_language="en", _beam_size=8, **inner
+        )
+        pieces = [[p for p in _CLAUSE_BREAK.split(s.strip()) if p] for s in sources]
+        flat = self.translate(
+            [p for ps in pieces for p in ps], target_language, source_language="en", **inner
+        )
+        by_clause, position = [], 0
+        for ps in pieces:
+            by_clause.append(" ".join(x.strip() for x in flat[position:position + len(ps)]))
+            position += len(ps)
+        candidates = [c for pair in zip(wide, by_clause) for c in pair]
+        returned = self.translate(
+            candidates, "en", source_language=target_language, **inner
+        )
+        for n, (index, score) in enumerate(flagged):
+            best, best_score = out[index], score
+            for candidate, back_again in zip(
+                candidates[2 * n : 2 * n + 2], returned[2 * n : 2 * n + 2]
+            ):
+                if (s := _chrf(back_again, texts[index])) > best_score:
+                    best, best_score = candidate, s
+            if best != out[index]:
+                log.info(
+                    "translation unlike its source (chrF %.1f); translated again "
+                    "(%.1f): %s", score, best_score, texts[index][:40],
+                )
+                out[index] = best
 
     def _restore_dropped_clauses(
         self,

@@ -229,3 +229,21 @@ def test_a_hebrew_range_and_a_clock_time_are_left_as_they_were():
     """Google kept a range's digits, so there is no wording to copy."""
     assert spell("האיגרת השנייה אל התסלוניקים 2:10-12.", "he").endswith("שתיים:עשר-שתים עשרה.")
     assert spell("בשעה 10:30 בבוקר", "he") == "בשעה עשר:שלושים בבוקר"
+
+
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        ("الرسالة إلى العبرانيين 12:7.", "الرسالة إلى العبرانيين، الإصحاح اثنا عشر، الآية سبعة."),
+        ("سفر المزامير 66:8,9.", "سفر المزامير، الإصحاح ستة و ستون، الآيتان ثمانية وتسعة."),
+        ("إنجيل لوقا 1:1,2,3", "إنجيل لوقا، الإصحاح واحد، الآيات واحد واثنان وثلاثة"),
+    ],
+)
+def test_an_arabic_reference_is_read_as_chapter_and_verse(text, spoken):
+    """`اثنا عشر:سبعة` has no word for the colon."""
+    assert spell(text, "ar") == spoken
+
+
+def test_an_arabic_range_and_a_clock_time_are_left_as_they_were():
+    assert spell("سفر المزامير 23:5-6", "ar") == "سفر المزامير ثلاثة و عشرون:خمسة-ستة"
+    assert spell("الساعة 10:30 صباحا", "ar") == "الساعة عشرة:ثلاثون صباحا"

@@ -226,6 +226,47 @@ def _hebrew_dates_and_references(text: str) -> str:
     return re.sub(r"\s+, פרק ", ", פרק ", text)
 
 
+@functools.lru_cache(maxsize=1)
+def _arabic_book_names() -> tuple[str, ...]:
+    """The Arabic names of the 66 books, from the table scripture.py uses."""
+    from .scripture import _table
+
+    names = {entry.get("labels", {}).get("ar") for entry in _table().values()}
+    names.discard(None)
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _arabic_references(text: str) -> str:
+    """Say a reference the way Google writes it out in Arabic.
+
+    `العبرانيين 12:7` was read `اثنا عشر:سبعة`, two numbers and no word for
+    the colon - the shape Chinese heard back as `6689` - and Whisper wrote it
+    back as `12-7` or not at all: 24 of 60 references came back to English in
+    the first Arabic run (2026-10-28). Google writes `سفر المزامير، الإصحاح
+    119، الآية 105`, `الآيتان 28 و29` for two verses and `الآيات 1 و2 و3`
+    for more; the digits are then spelled like any other. A range is left as
+    it was, as for Hebrew.
+    """
+    books = _arabic_book_names()
+
+    def reference(match: "re.Match") -> str:
+        before = text[: match.start()].rstrip()
+        if not before.endswith(books):
+            return match.group(0)
+        parts = _VERSE_JOINER.split(match.group("verses"))
+        if any(part in "-–—~～" for part in parts[1::2]):
+            return match.group(0)
+        verses = parts[::2]
+        if len(verses) == 1:
+            said = f"الآية {verses[0]}"
+        else:
+            said = ("الآيتان " if len(verses) == 2 else "الآيات ") + " و".join(verses)
+        return f"، الإصحاح {match.group('chapter')}، {said}"
+
+    text = _CHAPTER_VERSE.sub(reference, text)
+    return re.sub(r"\s+، الإصحاح ", "، الإصحاح ", text)
+
+
 @functools.lru_cache(maxsize=32)
 def _supported(language: str) -> bool:
     """Does `num2words` know this language? Asked once per language.
@@ -262,6 +303,8 @@ def spell(text: str, language: str) -> str:
         text = _chinese_references(text)
     elif language == "he":
         text = _hebrew_dates_and_references(text)
+    elif language == "ar":
+        text = _arabic_references(text)
 
     def say(match: "re.Match") -> str:
         value = int(match.group(0))

@@ -12,7 +12,7 @@ text again" into the verse (`Manna for june 16th, no chastening, ...`,
 `The text again: thou anointest my head ...`), so what follows is handed back
 to be translated as usual, and the rendered words are put in front of it.
 
-English into Chinese and Hebrew (2026-10-26), and back: Chinese into
+English into Chinese, Hebrew (2026-10-26) and Arabic (2026-10-28), and back: Chinese into
 English, for what Whisper hears of a Chinese reading (2026-10-23). There the title kept its place in 21 of 30
 readings left to madlad, and in fewer once the reference beside it was
 protected: with a placeholder in the sentence, madlad dropped `4月3日的玛纳`
@@ -41,9 +41,11 @@ _TITLE = re.compile(
 
 # `The text again.`, `The text again, Rejoice...`, `The text again: thou...`.
 # Punctuation or the end must follow "again", so "The text again shows that..."
-# is a sentence of its own and stays one.
+# is a sentence of its own and stays one. Whisper also writes `Text again.`
+# (5 of the first 42 English transcripts), which madlad put into Arabic as
+# "send a second text" (2026-10-28).
 _AGAIN = re.compile(
-    r"^\s*The\s+text\s+again\s*(?:[.,:;]\s*|$)(?P<rest>.*)$",
+    r"^\s*(?:The\s+)?text\s+again\s*(?:[.,:;]\s*|$)(?P<rest>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -56,16 +58,36 @@ _AGAIN = re.compile(
 # files, and "The text again" four ways, once as invented Biblical Hebrew in
 # its place (1005). The day stays a digit, as Google writes it; how it is
 # said is `numbers.spell`'s business.
-_TITLES = {"zh": "{month}月{day}日的吗哪", "he": "מן ל-{day} ב{month_name}"}
-_AGAINS = {"zh": "再读一遍经文", "he": "הטקסט שוב"}
+#
+# Arabic is Google's (2026-10-28): `المنّ ليوم 5 يناير.`, `النص مجددًا:`, all
+# twelve months asked. madlad wrote the title `منّا`, a transliteration, and
+# with "The text again," in front of it rendered 1005's verse as a Qur'an
+# verse; without it, as the verse.
+_TITLES = {
+    "zh": "{month}月{day}日的吗哪",
+    "he": "מן ל-{day} ב{month_name}",
+    "ar": "المنّ ليوم {day} {month_name}",
+}
+_AGAINS = {"zh": "再读一遍经文", "he": "הטקסט שוב", "ar": "النص مجددًا"}
+# The series' own name, where a recording says it. madlad made it "the Riyadh
+# daily newspaper" in Arabic, every way it was asked (2026-10-28); Google's.
+_SERIES = re.compile(
+    r"^\s*Daily\s+Heavenly\s+Manna\s*(?:[.,:;!]\s*|$)(?P<rest>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_SERIES_NAMES = {"ar": "المنّ السماوي اليومي"}
 # The stop after a title on its own, and the colon before what follows a line.
-_ALONE = {"zh": "。", "he": "."}
-_BEFORE_REST = {"zh": "：", "he": ": "}
+_ALONE = {"zh": "。", "he": ".", "ar": "."}
+_BEFORE_REST = {"zh": "：", "he": ": ", "ar": ": "}
 # Month names after ב: six as Google wrote them (January, March, June,
 # September, October, December), six as madlad did in the harness files.
 _MONTH_NAMES_BY_LANGUAGE = {
     "he": dict(enumerate(
         "ינואר פברואר מרץ אפריל מאי יוני יולי אוגוסט ספטמבר אוקטובר נובמבר דצמבר".split(),
+        start=1,
+    )),
+    "ar": dict(enumerate(
+        "يناير فبراير مارس أبريل مايو يونيو يوليو أغسطس سبتمبر أكتوبر نوفمبر ديسمبر".split(),
         start=1,
     )),
 }
@@ -131,6 +153,14 @@ def split(
         return _split_chinese(text)
     if (source_language or "en") != "en" or target_language not in _TITLES:
         return None
+    series = _SERIES.match(text or "")
+    if series and target_language in _SERIES_NAMES:
+        name = _SERIES_NAMES[target_language] + _ALONE[target_language]
+        rest = series.group("rest").strip()
+        following = split(rest, target_language) if rest else None
+        if following:
+            return f"{name} {following[0]}", following[1]
+        return (f"{name} " if rest else name), rest
     title = _TITLE.match(text or "")
     if title:
         day = int(title.group("day"))
