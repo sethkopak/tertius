@@ -140,6 +140,44 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-10-30 — which languages Whisper hears back without sentence ends
+
+`punctuate.py` covers English, German, French and Italian, and `segment.py`
+covers Arabic. For every other language a transcript Whisper leaves without
+stops reaches madlad as one long sentence. Which languages that happens to had
+not been measured. Survey: the 16 Chatterbox languages not yet measured,
+two readings each (0120, 0616), one take, through the harness's own
+translate/speak/listen stages, with Whisper auto-detecting as the app does
+(`scratchpad/punc_survey.py`, `punc_score.py`). "Kept" is sentence ends
+heard against sentence ends in what was read; ">=40" counts stretches
+`unpunctuated_runs` would hand on (40+ words, almost no commas).
+
+| | Kept | >=40 stretches | Longest |
+|---|---|---|---|
+| **hi** (heard as Urdu) | **0/22** | 2 | 233 |
+| **hi**, language set | **0/22** | 1 | 224 |
+| es | 16/22 | 1 | 187 |
+| el | 20/22 | 1 | 89 |
+| ko | 11/18 | 1 | 84 |
+| sw | 8/22 | 0 | - |
+| da | 14/24 | 0 | - |
+| ja | 12/18 | (no spaces to count) | |
+| fi, ms, nl, no, pl, pt, ru, sv, tr | 82-112% | 0 | - |
+
+(Arabic, the same way, for scale: 2/19 kept, longest 140.)
+
+- **Hindi is Arabic's case.** Not one sentence end was heard, with the language
+  left to Whisper or set to Hindi. Left to Whisper, both readings were also
+  taken for **Urdu** and written in Urdu script. Set to Hindi, they came
+  back in Devanagari. SaT covers Hindi.
+- **Spanish, Greek and Korean do it now and then.** In one reading each,
+  a long stretch came back with no stops. Spanish 0616 has none from start to
+  finish, all lowercase (187 words), while 0120 is punctuated normally.
+- **Swahili and Danish** keep fewer stops, but nothing reaches 40 words.
+- Nothing changed in the app. Two readings a language finds where it
+  happens. It does not show whether SaT would help back to English; that
+  would be measured as Arabic was.
+
 ## 2026-10-28 (later) — Arabic, measured the way Hebrew was
 
 Every figure here is **Whisper's**, not a listener's: Whisper large-v3-turbo
@@ -429,9 +467,13 @@ source (`MODE_TEXT`), and audio is turned away as `Skipped:`, the same as
 the text scan ignores it. Text matching is never asked for in that mode.
 The *Choose files* button uses the same upload, so it is fixed too.
 
-**Tertius Online not touched.** Its vendored `app/` and its second
-`index.html`/`app.js` need the same drop fix if it has the same upload path.
-Not checked.
+**Tertius Online: checked 2026-10-30, no fix needed.** Its vendored `app/`
+is `ecf9343`, which has this fix. Its own page never had the bug: the upload
+carries `text_source=1` when Translate and *Translate text files* are
+ticked, and `worker/api.ts` queues the `.txt` as a `translate_text` job.
+Online has no Read aloud, so a text source there always means Translate is
+on. That path ran in production on 2026-09-29 (Online's STATUS). The worker
+has no unit test for it.
 
 **Run in the real app, 2026-10-29.** The app running since 2026-10-28 07:33
 (the process that hit the bug, GPU still marked broken) was restarted on
