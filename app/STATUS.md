@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-28
+Last updated: 2026-10-30
 
 ## Where it stands
 
@@ -335,6 +335,32 @@ Added first, the stop split SaT's stretches and moved its other breaks
 (0403's second take 63.3 to 47.7), so it is added after. Then only the five
 takes change: 0510 +2.1, +0.7, +1.8, 1111 +0.2, 0120's third -0.1. 0510
 now reads "Again, I say rejoice." Whisper's figures only.
+
+**Where the two weakest Arabic readings lose (2026-10-30), read by hand.**
+For each reading, the English, the Arabic Tertius read, the three hearings
+and the English back were compared side by side. No code changed.
+- **0616 (chrF 49.6): the translation into Arabic.** What Whisper heard
+  matches what was read almost word for word. madlad's Arabic of the
+  King James verse is wrong: "No chastening for the present seemeth to be
+  joyous" became `لا تأديب، لأن الحاضر يبدو سعيداً ولكن محزناً` ("No
+  discipline, because the present seems happy but sad"). The rest of the
+  gap is King James wording against plain modern English, which chrF counts
+  as loss. Supplying the Bible text instead is ruled out (translate what is
+  heard).
+- **0510 (47.9): the listening.** `يفيض` (overflows) was heard as
+  `يفيد` (benefits) every time, 4 times in each of the 3 takes, so
+  "my cup runneth over" came back as "my cup works". Whether Chatterbox
+  says `ض` badly or Whisper mishears it, only a listener can say. In one
+  take madlad also dropped the opening clause of an 81-word sentence. That
+  is not a pattern: over the 18 sentences SaT leaves above 40 words, the
+  English runs a median 1.33 words per Arabic word, and this one 1.00.
+- **madlad writes lam-alef as a ligature** (U+FEFB, 9 times in the 10
+  readings; U+FEF7 and U+FEF9 once each, which Chatterbox's tokenizer does
+  not have). Every one was heard right in all three takes, except
+  `كلا` heard as `كل`. Nothing to fix.
+
+What chrF can still tell is mostly wording, so Arabic is not being tuned
+further against it. The next real check is a listener who speaks Arabic.
 
 **SaT for Hebrew: measured, not kept (2026-10-29).** The listen-back run's
 30 heard readings (no hint, as the app is), put back into English by the
