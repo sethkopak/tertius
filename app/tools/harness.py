@@ -429,6 +429,32 @@ def chrf(hyp: str, ref: str, n_max: int = 6, beta: float = 2.0) -> float:
 
 
 _ROMAN = re.compile(r"\b(III|II|I)(?= [A-Z][a-z])")
+_UNITS = ("zero one two three four five six seven eight nine ten eleven twelve "
+          "thirteen fourteen fifteen sixteen seventeen eighteen nineteen").split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+_WORD = ({w: i for i, w in enumerate(_UNITS)}
+         | {w: 10 * i for i, w in enumerate(_TENS) if w != "_"})
+_NUMBER = r"(?:\d+|(?:%s)(?:[- ](?:%s))?)" % ("|".join(_WORD), "|".join(_UNITS[1:10]))
+_SPELLED = re.compile(rf",?\s*\bchapter\s+({_NUMBER})\s*,?\s*verses?\s+({_NUMBER})",
+                      re.IGNORECASE)
+
+
+def _number(text):
+    if text.isdigit():
+        return int(text)
+    return sum(_WORD[w] for w in re.split(r"[- ]", text.lower()))
+
+
+def _in_digits(match):
+    """`Hebrews chapter twelve, verse seven` as `Hebrews 12:7`.
+
+    Left alone in digits: `scripture.find_references` reads "Hebrews,
+    chapter 12, verse 7" already, and not "Hebrews, 12:7".
+    """
+    chapter, verse = match.groups()
+    if chapter.isdigit() and verse.isdigit():
+        return match.group(0)
+    return f" {_number(chapter)}:{_number(verse)}"
 
 
 def references(text):
@@ -437,6 +463,9 @@ def references(text):
 
     # madlad writes "I Timothy" as often as "1 Timothy".
     text = _ROMAN.sub(lambda m: str(len(m.group(1))), text)
+    # And, from Hindi read as `अध्याय बारह, वचन सात`, "Hebrews chapter twelve
+    # verse seven" as often as "Hebrews 12:7".
+    text = _SPELLED.sub(_in_digits, text)
     return [f"{identify(text[a:b])} {chapter_and_verse(text[a:b])}"
             for a, b in find_references(text)]
 

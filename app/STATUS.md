@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**900 tests, all passing** on Windows locally (one skips: Windows has no
+**907 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -139,6 +139,30 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-11-01 — The harness counts references written in words
+
+`harness.references` now reads "Hebrews chapter twelve, verse seven" as
+Hebrews 12:7, as madlad often writes Hindi references back. A reference
+counts only when it matches one in the source English, so this can only
+find references that were right and went uncounted. Rescored every saved
+run in the scratchpad (37 run/heard pairs), old counting against new:
+
+| Run | Before | Now |
+|---|---|---|
+| Hindi, numbers spelled, language set (with or without SaT) | 22/60 | 25/60 |
+| Hindi, numbers spelled, auto-detect | 12/60 | 13/60 |
+| Hindi, numbers + SaT, auto-detect | 11/60 | 12/60 |
+| Hebrew `he_fix` with hint | 7/60 | 9/60 |
+| Hebrew `he_lb` without hint | 6/60 | 8/60 |
+| Every Arabic run, every other Hebrew run, `tx_*` | same | same |
+
+- The first try rewrote digit forms too, and "Hebrews, chapter 12, verse
+  7", which `find_references` already reads, became "Hebrews, 12:7", which
+  it doesn't: Hebrew `he_lb` fell 10/60 to 2/60. Digit forms are now left
+  alone.
+- Only "chapter N verse N" is read; numbers up to ninety-nine.
+- `tests/test_harness_references.py`, 7 tests.
 
 ## 2026-11-01 — SaT on for Hindi and Urdu in the app
 
