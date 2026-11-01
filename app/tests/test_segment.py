@@ -1,4 +1,4 @@
-"""Finding sentence ends in Arabic Whisper wrote without any.
+"""Finding sentence ends in Arabic and Hindi Whisper wrote without any.
 
 The model itself is not loaded here; `_breaks` is replaced with a stand-in.
 What it did on real readings is recorded in segment.py.
@@ -67,7 +67,7 @@ def test_the_app_translates_it_as_sentences(monkeypatch):
     assert len(sentences_of([HEARD], "ar")) == 3
 
 
-def test_only_arabic(monkeypatch):
+def test_only_the_languages_it_is_for(monkeypatch):
     monkeypatch.setattr(segment, "_breaks", _breaks_after("مايو"))
     assert restore([HEARD], "he") == [HEARD]
     assert restore([HEARD], None) == [HEARD]
@@ -131,3 +131,33 @@ def test_the_text_again_is_translated_as_its_fixed_line(monkeypatch):
     monkeypatch.setattr(segment, "_breaks", lambda words: None)
     sentences = sentences_of(["ومرة أخرى أقول ابتهج النص مجددا أنت تضع زيت على رأسي"], "ar")
     assert split(sentences[1], "en", source_language="ar")[0] == "The text again: "
+
+
+# 0226 as Whisper heard it from a Hindi reading, language set (2026-11-01).
+HEARD_HI = (
+    "26 फरवरी के लिए मनना भगवान में हमेशा प्रसन्न रहो और मैं फिर से कहता हूँ "
+    "प्रसन्न रहो फिलिप्यों के नाम पत्रिय ध्याय 4 वचन 4 इसाई धर्म के अनिवाईयों "
+    "के लिए कोई विशेश दिन नहीं है और ना ही कोई विशेश समय है"
+)
+
+
+@pytest.mark.parametrize("language", ["hi", "ur"])
+def test_hindi_and_urdu_are_found_too(monkeypatch, language):
+    """Auto-detect heard 16 of 30 Hindi readings as Urdu (2026-10-31)."""
+    monkeypatch.setattr(segment, "_breaks", _breaks_after("मनना", "रहो"))
+    [out] = restore([HEARD_HI], language)
+    assert out.startswith("26 फरवरी के लिए मनना. भगवान में")
+    assert out.endswith("कोई विशेश समय है.")
+
+
+@pytest.mark.parametrize("stop", ["।", "۔"])
+def test_the_danda_and_the_urdu_stop_end_sentences(monkeypatch, stop):
+    """SaT is asked about each side of Whisper's own stop, not across it."""
+    asked = []
+    monkeypatch.setattr(
+        segment, "_breaks", lambda words: asked.append(len(words)) or [False] * len(words)
+    )
+    first = HEARD_HI + stop
+    [out] = restore([first + " " + HEARD_HI], "hi")
+    assert asked == [len(HEARD_HI.split())] * 2
+    assert out == first + " " + HEARD_HI + "."

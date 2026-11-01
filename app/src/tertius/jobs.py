@@ -847,9 +847,9 @@ class JobManager:
                 load = getattr(translator, "load", None)
                 if callable(load):
                     load()
-                # Arabic's sentence model (segment.py), now for the same
-                # reason, when the recording is said to be Arabic. Left to
-                # auto-detect, it comes with the first Arabic transcript.
+                # The sentence model (segment.py), now for the same reason,
+                # when the recording is said to be in a language it is for.
+                # Left to auto-detect, it comes with the first such transcript.
                 from .segment import (
                     DOWNLOAD_BYTES,
                     LANGUAGES as SEGMENTED,

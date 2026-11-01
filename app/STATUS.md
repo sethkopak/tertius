@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**896 tests, all passing** on Windows locally (one skips: Windows has no
+**900 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -139,6 +139,24 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-11-01 — SaT on for Hindi and Urdu in the app
+
+`segment.LANGUAGES` is now `ar`, `hi`, `ur`, as measured in the two entries
+below: with numbers spelled out, chrF 32.3 to 34.7 with the language set to
+Hindi, 29.4 to 34.3 left to auto-detect; references right 22/60 both ways
+with the language set, 12/60 to 11/60 auto. Whisper's figures, 10 readings × 3 takes.
+
+- **Urdu** is in for the takes auto-detect hears as Urdu (16 of 30). Those
+  are the only Urdu it was measured on: Hindi speech written in Urdu
+  script, not Urdu recordings.
+- The danda `।` and the Urdu stop `۔` now count as sentence ends, as they
+  did in the measurement, so SaT is asked only about stretches between them.
+- Hindi references are not kept whole as Arabic's are (`_reference_spans`
+  reads Arabic only); it was measured that way.
+- The download shows as "sentence model" (was "Arabic sentence model"), the
+  same 1.1 GB, asked for only when the transcript is in one of the three.
+- 4 tests added (`test_segment.py`); they fail without the change.
 
 ## 2026-11-01 — Hindi numbers spelled out: references 0/60 to 22/60
 

@@ -1,4 +1,4 @@
-"""Sentence breaks for Arabic Whisper writes without any.
+"""Sentence breaks for Arabic and Hindi Whisper writes without any.
 
 Whisper writes Tertius's Arabic readings with no stops at all: 30 of them,
 heard on 2026-10-28, came to 32 "sentences" against the 324 of the English
@@ -28,6 +28,14 @@ falls in, and none inside a scripture reference - SaT put one in 7 of 60
 (`الآية. خمسة.`), and `scripture.arabic_references` reads a reference
 whole. Like `punctuate.restore`, only stretches Whisper left unpunctuated are
 touched.
+
+Hindi is written much the same way: no stops, commas at most. On 30 Hindi
+readings put back into English (2026-11-01, numbers spelled out), SaT took
+chrF 32.3 to 34.7 with the language set to Hindi, and 29.4 to 34.3 left to
+auto-detect - which heard 16 of the 30 as Urdu and wrote them in Urdu
+script, so Urdu is here for those. That is the only Urdu it was measured on.
+References right were 22/60 either way with the language set. Hindi
+references are not kept whole as Arabic's are; that is how it was measured.
 """
 
 from __future__ import annotations
@@ -55,10 +63,10 @@ TOKENIZER_FILES = [
     "tokenizer.json",
     "tokenizer_config.json",
 ]
-LANGUAGES = frozenset({"ar"})
+LANGUAGES = frozenset({"ar", "hi", "ur"})
 # What the page calls it while it downloads, and the pinned files' sizes on
 # the Hub (model.safetensors is 1,109,839,340 of it).
-MODEL_LABEL = "Arabic sentence model"
+MODEL_LABEL = "sentence model"
 DOWNLOAD_BYTES = 1_124_006_716
 
 # `wtpsplit`'s defaults for a "-sm" model.
@@ -66,7 +74,8 @@ THRESHOLD = 0.25
 BLOCK_TOKENS = 510
 STRIDE_TOKENS = 64
 
-_ENDS_SENTENCE = re.compile(r"[.!?؟…][\"'”’)\]»]*$")
+# The danda and the Urdu full stop end sentences too.
+_ENDS_SENTENCE = re.compile(r"[.!?؟…।۔][\"'”’)\]»]*$")
 _INNER_MARK = re.compile(r"[,;:،؛]")
 _TRAILING = re.compile(r"[.,!?:;…،؛؟-]+$")
 
@@ -96,8 +105,8 @@ def _snapshots(local_only: bool, **kwargs) -> tuple[str, str] | None:
 def ensure_model(on_progress: Callable[[int, int], None] | None = None) -> bool:
     """Download the model if it is not here yet. True when it is ready.
 
-    Asked for only when the transcript is Arabic, so nobody else pays for
-    1.1 GB. A failure is logged and is not fatal: the transcript is then
+    Asked for only when the transcript is in one of `LANGUAGES`, so nobody
+    else pays for 1.1 GB. A failure is logged and is not fatal: the transcript is then
     translated as Whisper wrote it, which is what happened before.
     """
     if _snapshots(local_only=True):
@@ -210,7 +219,8 @@ def _reference_spans(words: Sequence[str]) -> list[tuple[int, int]]:
 def unpunctuated_runs(words: Sequence[str]) -> list[tuple[int, int]]:
     """`(start, end)` word ranges that Whisper left unpunctuated.
 
-    `punctuate.unpunctuated_runs`, with Arabic's own marks counted.
+    `punctuate.unpunctuated_runs`, with Arabic's, Hindi's and Urdu's own marks
+    counted.
     """
     runs, start = [], 0
     for i, word in enumerate(words):
