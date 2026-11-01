@@ -23,6 +23,8 @@ the model sees the text, and nowhere else. **The cues keep the digits**: an
 `el`, `hi`, `ms`, `sw` and `zh` raise `NotImplementedError` and their digits
 are left alone, which is no worse than before.
 
+Hindi is spelled here too, by `_hindi` (2026-10-31).
+
 Chinese is spelled here instead, by `_chinese`. It was once thought not to need
 it, on the grounds that Chinese writes 六十六 in running text. The translator
 does not: madlad writes `詩篇 66:8,9.` and `1月1日`, and Chatterbox read those
@@ -81,8 +83,46 @@ def _chinese(value: int) -> str:
     return out
 
 
+# 0-99 in Hindi: each is a word of its own, not tens and units. Checked on
+# 2026-10-31 by putting all of them into Google Translate, Hindi to English:
+# every one came back as its number.
+_HINDI_UNDER_100 = """
+शून्य एक दो तीन चार पाँच छह सात आठ नौ
+दस ग्यारह बारह तेरह चौदह पंद्रह सोलह सत्रह अठारह उन्नीस
+बीस इक्कीस बाईस तेईस चौबीस पच्चीस छब्बीस सत्ताईस अट्ठाईस उनतीस
+तीस इकतीस बत्तीस तैंतीस चौंतीस पैंतीस छत्तीस सैंतीस अड़तीस उनतालीस
+चालीस इकतालीस बयालीस तैंतालीस चवालीस पैंतालीस छियालीस सैंतालीस अड़तालीस उनचास
+पचास इक्यावन बावन तिरपन चौवन पचपन छप्पन सत्तावन अट्ठावन उनसठ
+साठ इकसठ बासठ तिरसठ चौंसठ पैंसठ छियासठ सड़सठ अड़सठ उनहत्तर
+सत्तर इकहत्तर बहत्तर तिहत्तर चौहत्तर पचहत्तर छिहत्तर सतहत्तर अठहत्तर उन्यासी
+अस्सी इक्यासी बयासी तिरासी चौरासी पचासी छियासी सत्तासी अट्ठासी नवासी
+नब्बे इक्यानवे बानवे तिरानवे चौरानवे पंचानवे छियानवे सत्तानवे अट्ठानवे निन्यानवे
+""".split()
+
+
+def _hindi(value: int) -> str:
+    """0-9999 in Hindi words: 123 -> एक सौ तेईस, 2405 -> दो हज़ार चार सौ पाँच.
+
+    Google read `एक सौ तेईस`, `दो हज़ार चार सौ पाँच` and `नौ हज़ार नौ सौ
+    निन्यानवे` back as those numbers. A year comes out the same way, as
+    `num2words` years do in the other languages.
+    """
+    if value < 100:
+        return _HINDI_UNDER_100[value]
+    thousands, rest = divmod(value, 1000)
+    hundreds, rest = divmod(rest, 100)
+    words = []
+    if thousands:
+        words += [_HINDI_UNDER_100[thousands], "हज़ार"]
+    if hundreds:
+        words += [_HINDI_UNDER_100[hundreds], "सौ"]
+    if rest:
+        words.append(_HINDI_UNDER_100[rest])
+    return " ".join(words)
+
+
 # Languages `num2words` cannot do, spelled here instead.
-_OWN_SPELLERS = {"zh": _chinese}
+_OWN_SPELLERS = {"zh": _chinese, "hi": _hindi}
 
 # `66:8,9`, `2:10-12`: chapter, colon, then verses joined by commas and dashes.
 _CHAPTER_VERSE = re.compile(
@@ -267,6 +307,46 @@ def _arabic_references(text: str) -> str:
     return re.sub(r"\s+، الإصحاح ", "، الإصحاح ", text)
 
 
+@functools.lru_cache(maxsize=1)
+def _hindi_book_names() -> tuple[str, ...]:
+    """The Hindi names of the books, from the table scripture.py uses (44 of 66)."""
+    from .scripture import _table
+
+    names = {entry.get("labels", {}).get("hi") for entry in _table().values()}
+    names.discard(None)
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _hindi_references(text: str) -> str:
+    """Say a reference the way Google writes it out in Hindi.
+
+    Read as digits, `इब्रानियों के नाम पत्री 12:7` was heard back as `...
+    पत्री बारा सकता`, and not one of 60 references came back to English
+    (2026-10-31). Google writes `इब्रानियों अध्याय 12, वचन 7` and `भजन संहिता
+    अध्याय 66, वचन 8 और 9`; the digits are then spelled like any other. A range
+    is left as it was, as for Hebrew and Arabic.
+
+    The table has a Hindi name for only 44 of the 66 books - not Luke - so
+    `12:7` counts wherever it stands, unless `बजे` ("o'clock") follows it.
+    `4.3` counts only after a name the table has.
+    """
+    books = _hindi_book_names()
+
+    def reference(match: "re.Match") -> str:
+        before = text[: match.start()].rstrip()
+        after = text[match.end() :].lstrip()
+        colon = match.group(0)[len(match.group("chapter")) :].lstrip()[:1] in ":："
+        if after.startswith("बजे") or not (colon or before.endswith(books)):
+            return match.group(0)
+        parts = _VERSE_JOINER.split(match.group("verses"))
+        if any(part in "-–—~～" for part in parts[1::2]):
+            return match.group(0)
+        verses = parts[::2]
+        return f"अध्याय {match.group('chapter')}, वचन " + " और ".join(verses)
+
+    return _CHAPTER_VERSE.sub(reference, text)
+
+
 @functools.lru_cache(maxsize=32)
 def _supported(language: str) -> bool:
     """Does `num2words` know this language? Asked once per language.
@@ -305,6 +385,8 @@ def spell(text: str, language: str) -> str:
         text = _hebrew_dates_and_references(text)
     elif language == "ar":
         text = _arabic_references(text)
+    elif language == "hi":
+        text = _hindi_references(text)
 
     def say(match: "re.Match") -> str:
         value = int(match.group(0))

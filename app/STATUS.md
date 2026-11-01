@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-31
+Last updated: 2026-11-01
 
 ## Where it stands
 
@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**881 tests, all passing** on Windows locally (one skips: Windows has no
+**896 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -139,6 +139,39 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-11-01 — Hindi numbers spelled out: references 0/60 to 22/60
+
+num2words has no Hindi, so `numbers.spell` left Hindi digits alone and
+Chatterbox read them itself (see the entry below). Now `numbers._hindi` spells
+0-9999 from the 100 words for 0-99 (each its own word) with सौ and हज़ार. All
+99 words for 1-99, and `एक सौ तेईस`, `दो हज़ार चार सौ पाँच` and `नौ हज़ार नौ
+सौ निन्यानवे`, came back from Google Translate as their numbers. A reference
+is said as Google writes one out, `इब्रानियों अध्याय 12, वचन 7`, with the digits
+then spelled. The table has a Hindi name for only 44 of the 66 books (not
+Luke), so a colon reference counts wherever it stands unless `बजे` ("o'clock")
+follows it. A `.` reference counts only after a name the table has.
+
+Measured the way the entry below was (`scratchpad/hi_run.py ... hi_num`): the
+same ten translations, read again, three takes, heard both ways. The numbers
+change the readings, so these are new takes, not the same audio.
+
+| back to English | auto-detect | language set |
+|---|---|---|
+| before (no SaT) | chrF 28.1, refs 0/60 | chrF 30.2, refs 0/60 |
+| numbers spelled | chrF 29.4, refs 12/60 | chrF 32.3, refs 22/60 |
+| numbers + SaT | chrF **34.3**, refs 11/60 | chrF **34.7**, refs 22/60 |
+
+- **Kept.** References went from none to 22 of 60 with the language set.
+- madlad often writes a reference back in words ("Hebrews chapter twelve
+  verse three"), which the harness's `references` does not read. Counted with
+  those (`scratchpad/hi_refs.py`): 25/60 set, 13/60 auto. The rest were lost
+  before translation. Whisper heard `वचन सात` as `वचन साथ` ("with"), or
+  heard no `अध्याय` at all.
+- SaT on top gave +2.4 (set) and +4.9 (auto), as it did without the numbers.
+  It is still not in the app.
+- Still there: madlad's Hindi of 0510 loops (`ध्रुवीय` 15 times), and
+  Whisper keeps dropping long stretches.
 
 ## 2026-10-31 — Hindi: SaT measured, and Urdu pointed out
 

@@ -50,7 +50,7 @@ def test_a_reference_is_spoken_part_by_part():
     assert spell("2 Cor. 4:17", "en") == "two Cor. four:seventeen"
 
 
-@pytest.mark.parametrize("language", ["el", "hi", "ms", "sw"])
+@pytest.mark.parametrize("language", ["el", "ms", "sw"])
 def test_unsupported_languages_keep_their_digits(language):
     """No worse off than before, which is the point of failing this way.
 
@@ -247,3 +247,40 @@ def test_an_arabic_reference_is_read_as_chapter_and_verse(text, spoken):
 def test_an_arabic_range_and_a_clock_time_are_left_as_they_were():
     assert spell("سفر المزامير 23:5-6", "ar") == "سفر المزامير ثلاثة و عشرون:خمسة-ستة"
     assert spell("الساعة 10:30 صباحا", "ar") == "الساعة عشرة:ثلاثون صباحا"
+
+
+@pytest.mark.parametrize(
+    "value, words",
+    [
+        (0, "शून्य"), (7, "सात"), (23, "तेईस"), (49, "उनचास"), (99, "निन्यानवे"),
+        (100, "एक सौ"), (123, "एक सौ तेईस"), (1000, "एक हज़ार"),
+        (2405, "दो हज़ार चार सौ पाँच"), (9999, "नौ हज़ार नौ सौ निन्यानवे"),
+    ],
+)
+def test_hindi_numbers_are_spelled_here(value, words):
+    """num2words has no Hindi; Chatterbox read `12:7` itself (2026-10-31)."""
+    assert spell(f"{value}", "hi") == words
+
+
+@pytest.mark.parametrize(
+    "text, spoken",
+    [
+        ("इब्रानियों के नाम पत्री 12:7।", "इब्रानियों के नाम पत्री अध्याय बारह, वचन सात।"),
+        ("भजन संहिता 66:8,9।", "भजन संहिता अध्याय छियासठ, वचन आठ और नौ।"),
+        # A book the table has no Hindi name for: the colon is enough.
+        ("लूका 1:1,2,3", "लूका अध्याय एक, वचन एक और दो और तीन"),
+        ("याक़ूब की पत्री 4.3।", "याक़ूब की पत्री अध्याय चार, वचन तीन।"),
+    ],
+)
+def test_a_hindi_reference_is_read_as_chapter_and_verse(text, spoken):
+    assert spell(text, "hi") == spoken
+
+
+def test_a_hindi_range_a_clock_time_and_a_decimal_are_left_as_they_were():
+    assert spell("लूका 2:10-12", "hi") == "लूका दो:दस-बारह"
+    assert spell("सुबह 10:30 बजे", "hi") == "सुबह दस:तीस बजे"
+    assert spell("कीमत 4.5 है", "hi") == "कीमत चार.पाँच है"
+
+
+def test_devanagari_digits_are_spelled_too():
+    assert spell("(१) मई 10", "hi") == "(एक) मई दस"
