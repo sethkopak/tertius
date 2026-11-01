@@ -140,6 +140,48 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-11-01 — Why Whisper drops Hindi: 30-second windows (not in the app yet)
+
+The 30 Hindi takes (numbers spelled out, language set) were heard at 74% of
+the words read. Not Chatterbox: every take reads at a steady 3.1 written
+words a second, and takes of the same length were heard very differently
+(0226: 57-59 s each, 132, 71 and 100 of 185 words). Not gaps either:
+re-heard with timestamps, Whisper's segments cover every take with no gap
+over 1.5 s but one. It writes a whole 30-second window as one segment at
+1.5-1.8 words a second and leaves the rest out (0226 take 2: 30-51 s,
+10 words).
+
+Words heard, of those read, all 30 takes, turbo, language `hi`:
+
+| How it was heard | All | Worst take |
+|---|---|---|
+| As the app does now | 74% | 38% |
+| Hindi in `REFILL_LANGUAGES` (gap and slow-segment refill) | 77% | 48% |
+| `chunk_length=15`, otherwise as now | **95%** | **74%** |
+| Batched VAD pipeline, chunks of 30 / 15 / 10 s | 65% / 93% / 94% | 52% / 59% / 74% |
+
+The refill barely helps because its slow rule (`SLOW_WORDS_PER_SECOND`
+1.3, set for English and Hebrew) does not catch 1.5 words a second, and it
+cost 1218 take 3 46 words.
+
+`chunk_length=15` put back into English with SaT, against the same takes as
+heard now (with SaT): **chrF 34.7 to 40.9**, but references right **25/60
+to 11/60**. More references come back than before; madlad names their books
+wrongly. Heard with no commas, `रोमियो के नाम पत्री अध्याई 13 वचन 12` goes to SaT
+and comes back as "Letter to Romeo chapter 13 verse 12" (twice),
+"Letter to Rome", and "First Epistle to Timothy". Before, Whisper's commas
+kept SaT off those stretches.
+
+- Not in the app: `chunk_length` would change every language's
+  transcription, so it would be for Hindi (and Urdu) only. And the
+  references loss would come with it.
+- What would fix references whatever madlad does: read Hindi references
+  before translating and write the English citation, as
+  `scripture.arabic_references` does for Arabic (60/60 there).
+- Auto-detect was not tried at 15 s.
+- Scratch: `hi_gap/`, `hi_win/`, `hi_p15/`; scripts `hi_drop.py`,
+  `hi_gaps.py`, `hi_win.py`, `hi_p15back.py`.
+
 ## 2026-11-01 — The harness counts references written in words
 
 `harness.references` now reads "Hebrews chapter twelve, verse seven" as
