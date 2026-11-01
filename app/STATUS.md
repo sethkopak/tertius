@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-10-30
+Last updated: 2026-10-31
 
 ## Where it stands
 
@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**877 tests, all passing** on Windows locally (one skips: Windows has no
+**881 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -139,6 +139,47 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-10-31 — Hindi: SaT measured, and Urdu pointed out
+
+Every figure is **Whisper's**. Ten harness files, three takes, madlad both
+ways (`scratchpad/hi_run.py`). Heard two ways: auto-detect, as the app does by
+default, and with the language set to Hindi. Back-translated without SaT, then
+with SaT (`segment.LANGUAGES` plus `hi`, `।` and `۔` counted as stops) on
+copies of the same heard text.
+
+| back to English | auto-detect | language set |
+|---|---|---|
+| without SaT | chrF 28.1, title 16/30 | chrF 30.2, title 23/30 |
+| with SaT | chrF **32.8**, title 20/30 | chrF **32.6**, title 23/30 |
+| references right | 0/60 both ways | 0/60 both ways |
+
+(Arabic, for scale: 53.5 without SaT, 56.8 with, references 60/60.)
+
+- **SaT helps most where a take collapsed.** With auto-detect, 0120 take 2
+  went from 4.6 to 37.4 and 0616 take 1 from 14.8 to 38.0. A few takes lost
+  up to 2.5 (1218 take 2 set to Hindi, 37.7 to 35.2).
+- **Not added to the app.** Hindi's losses are mostly elsewhere, so SaT alone
+  leaves it at about 33:
+  - **Numbers are not spelled.** num2words has no Hindi, so `numbers.spell`
+    leaves `12:7` as digits and Chatterbox reads them itself. 0120's
+    `12:7` was heard as `बारा सकता`. Not one reference of 60 came back right.
+  - **Whisper drops much of what it hears.** 0226 take 3, set to Hindi:
+    74 words heard of 179 read. The same audio heard twice gives different
+    lengths: 0120 take 2 was 231 words with auto-detect, 127 with Hindi set.
+  - **Loops, both models.** madlad's Hindi of 0510 repeats `ध्रुवीय` 15
+    times. Whisper heard 0510 take 2 with one word 34 times, and madlad
+    turned that into `50` repeated (chrF 0.1). 0829 came back as "you don't
+    know" over and over.
+  - `मन्ना` was heard as `मनना` and came back as "Remember".
+- **Auto-detect took Hindi for Urdu in 16 of 30 takes** (the survey's two
+  included). For text detected as Urdu, the app would pass `ur` on, so SaT
+  would need `ur` too.
+- **Urdu now has a notice** (`jobs._note_urdu_detected`). When the language is
+  left to auto-detect and Whisper says Urdu, the page says: "talk.mp3 was heard
+  as Urdu and written in Urdu script. If it is Hindi, set the language to Hindi
+  and transcribe it again for Devanagari." The transcript is left as it is.
+  Test: `tests/test_detected_language.py`.
 
 ## 2026-10-30 — which languages Whisper hears back without sentence ends
 

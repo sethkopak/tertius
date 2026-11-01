@@ -582,6 +582,23 @@ class JobManager:
                 f" (+{len(notes) - 1} more, in the .json)" if len(notes) > 1 else ""
             )
 
+    def _note_urdu_detected(self, path, result, options) -> None:
+        """Say that Hindi left to auto-detect can come out as Urdu.
+
+        Spoken Hindi and Urdu are close enough that Whisper does not always
+        tell them apart. On 2026-10-30 it took both Hindi readings it was given
+        for Urdu and wrote them in Urdu script; with the language set to Hindi
+        it wrote Devanagari. The transcript is left as it is: it may be Urdu.
+        """
+        if options.language or getattr(result, "language", None) != "ur":
+            return
+        with self._lock:
+            self._notice = (
+                f"{Path(path).name} was heard as Urdu and written in Urdu "
+                f"script. If it is Hindi, set the language to Hindi and "
+                f"transcribe it again for Devanagari."
+            )
+
     @staticmethod
     def _free_gpu(*models, purpose: str) -> None:
         """Take models the next stage does not need off the GPU.
@@ -1020,6 +1037,7 @@ class JobManager:
                                 else {}
                             ),
                         )
+                        self._note_urdu_detected(path, result, options)
                 except Exception as exc:  # one bad file must not stop the batch
                     log.exception("failed: %s", path)
                     message = f"{type(exc).__name__}: {exc}"
