@@ -170,8 +170,12 @@ and it installs from the zip rather than `git pull`, so zip downloads work.
   Untracked files never block it. This machine is blocked today by the
   uncommitted Hindi work, which is the point. Verified for real in a scratch
   clone wound back to v0.1.1: fetched v0.1.101 from GitHub, moved to
-  `03919ec`, untracked transcript kept. Not yet run through the button and
-  restart on a checkout.
+  `03919ec`, untracked transcript kept. **Then through the button, by Seth,
+  2026-11-03:** a clean clone at `69eab05` (0.1.101), started with
+  `Start Tertius.bat`, updated to v0.1.103 (`0fae0c1`) with one click and
+  came back by itself; the server's command line had no `--open-browser`,
+  so it was the launcher's restart, not a hand start. v0.1.101..v0.1.103 are
+  test releases with nothing but a version bump.
 - Restart: the server exits with 75, and the launcher runs the launcher *from
   disk* again with `--no-browser`. The server only exits when it was started
   by a launcher (`TERTIUS_LAUNCHER=1`); by hand, it installs and asks for a
