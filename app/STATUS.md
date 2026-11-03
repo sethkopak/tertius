@@ -151,8 +151,9 @@ version number on `/api/version` and reloads itself. `tertius/updates.py`.
 Decided with Seth: an update is a **GitHub Release**, not a commit on `main`,
 and it installs from the zip rather than `git pull`, so zip downloads work.
 
-- **No releases exist yet**, so today the dialog says none have been
-  published. To ship one: bump `__version__` in `app/src/tertius/__init__.py`
+- **v0.1.1 is the only release.** `main` says 0.1.103, left over from the
+  test releases, so **the next real release must be newer than 0.1.103**
+  (0.2.0, say) or copies at 0.1.103 will never be offered it. To ship one: bump `__version__` in `app/src/tertius/__init__.py`
   *and* `version` in `pyproject.toml` (a test holds them equal), push, then
   publish a release tagged `vX.Y.Z` whose notes are written for users. A tag
   that disagrees with the `__version__` inside it is refused; otherwise it
@@ -174,8 +175,9 @@ and it installs from the zip rather than `git pull`, so zip downloads work.
   2026-11-03:** a clean clone at `69eab05` (0.1.101), started with
   `Start Tertius.bat`, updated to v0.1.103 (`0fae0c1`) with one click and
   came back by itself; the server's command line had no `--open-browser`,
-  so it was the launcher's restart, not a hand start. v0.1.101..v0.1.103 are
-  test releases with nothing but a version bump.
+  so it was the launcher's restart, not a hand start. v0.1.101..v0.1.103
+  were test releases with nothing but a version bump; releases and tags
+  deleted afterwards, the commits kept.
 - Restart: the server exits with 75, and the launcher runs the launcher *from
   disk* again with `--no-browser`. The server only exits when it was started
   by a launcher (`TERTIUS_LAUNCHER=1`); by hand, it installs and asks for a
