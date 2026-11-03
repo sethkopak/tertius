@@ -1990,15 +1990,12 @@ $('btn-check-updates').onclick = async () => {
   }
   renderChangelog(data.releases, data.more_releases);
   const headline = `${data.latest} is out - you have v${data.current}.`;
-  if (data.git_checkout) {
-    updateMessage(`${headline} This copy is a git checkout, so update it with git pull ` +
-      'rather than from here.');
-    finishUpdateDialog();
-    return;
-  }
   pendingUpdate = data.latest;
   $('btn-update-apply').hidden = false;
-  if (data.job_running) {
+  if (data.blocked) {
+    $('btn-update-apply').disabled = true;
+    updateMessage(`${headline} ${data.blocked}`, true);
+  } else if (data.job_running) {
     $('btn-update-apply').disabled = true;
     updateMessage(`${headline} A job is running; let it finish, then update.`);
   } else {

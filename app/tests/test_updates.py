@@ -207,12 +207,115 @@ def test_only_a_published_newer_tag_is_installed(install):
                           fetch=fetcher(tertius_files()))
 
 
-def test_a_git_checkout_is_left_to_git(install):
+def test_a_git_checkout_is_updated_with_git_not_the_zip(install, monkeypatch):
     (install / ".git").mkdir()
-    with pytest.raises(updates.UpdateError, match="git pull"):
-        updates.apply("v0.2.0", root=install, current="0.1.0",
-                      releases=[release("v0.2.0")], fetch=fetcher(tertius_files()))
+    calls = []
+    monkeypatch.setattr(updates, "apply_git", lambda tag, root, current: calls.append(tag) or {})
+    zip_fetch = fetcher(tertius_files())
+    updates.apply("v0.2.0", root=install, current="0.1.0",
+                  releases=[release("v0.2.0")], fetch=zip_fetch)
+    assert calls == ["v0.2.0"]
+    assert zip_fetch.seen == []
     assert (install / "README.md").read_text() == "old readme\n"
+
+
+# ------------------------------------------------------------ git checkouts
+
+def git(root, *args):
+    done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def commit_version(repo, version, tag=None):
+    init = repo / "app" / "src" / "tertius" / "__init__.py"
+    init.parent.mkdir(parents=True, exist_ok=True)
+    init.write_text(f'__version__ = "{version}"\n')
+    (repo / "README.md").write_text(f"readme {version}\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", version)
+    if tag:
+        git(repo, "tag", tag)
+
+
+@pytest.fixture()
+def checkout(tmp_path, monkeypatch):
+    """An upstream at 0.1.0 with v0.2.0 tagged after it, and a clone at 0.1.0."""
+    for key in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{key}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{key}_EMAIL", "test@example.invalid")
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    git(upstream, "init", "-q")
+    commit_version(upstream, "0.1.0")
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(upstream), str(clone)], check=True)
+    commit_version(upstream, "0.2.0", tag="v0.2.0")
+    return upstream, clone
+
+
+def version_in(clone):
+    return (clone / "app" / "src" / "tertius" / "__init__.py").read_text()
+
+
+def test_a_clean_checkout_moves_forward_to_the_release(checkout):
+    upstream, clone = checkout
+    result = updates.apply_git("v0.2.0", clone, current="0.1.0", source=str(upstream))
+    assert '"0.2.0"' in version_in(clone)
+    assert git(clone, "rev-parse", "HEAD") == git(upstream, "rev-parse", "v0.2.0")
+    assert result["changed"] == 2
+
+
+def test_untracked_files_do_not_stop_it(checkout):
+    upstream, clone = checkout
+    (clone / "transcripts").mkdir()
+    (clone / "transcripts" / "talk.srt").write_text("mine")
+    updates.apply_git("v0.2.0", clone, current="0.1.0", source=str(upstream))
+    assert (clone / "transcripts" / "talk.srt").read_text() == "mine"
+
+
+def test_uncommitted_changes_are_never_overwritten(checkout):
+    upstream, clone = checkout
+    (clone / "README.md").write_text("work in progress\n")
+    assert "README.md" in updates.git_blocker(clone)
+    with pytest.raises(updates.UpdateError, match="uncommitted changes"):
+        updates.apply_git("v0.2.0", clone, current="0.1.0", source=str(upstream))
+    assert (clone / "README.md").read_text() == "work in progress\n"
+    assert '"0.1.0"' in version_in(clone)
+
+
+def test_local_commits_stop_it_rather_than_merge(checkout):
+    upstream, clone = checkout
+    (clone / "notes.md").write_text("local\n")
+    git(clone, "add", "notes.md")
+    git(clone, "commit", "-q", "-m", "local work")
+    before = git(clone, "rev-parse", "HEAD")
+    with pytest.raises(updates.UpdateError, match="commits that v0.2.0 does not"):
+        updates.apply_git("v0.2.0", clone, current="0.1.0", source=str(upstream))
+    assert git(clone, "rev-parse", "HEAD") == before
+
+
+def test_a_detached_head_is_not_moved(checkout):
+    upstream, clone = checkout
+    git(clone, "checkout", "-q", "--detach")
+    assert "detached" in updates.git_blocker(clone)
+
+
+def test_a_git_tag_that_disagrees_with_its_code_is_not_installed(checkout):
+    upstream, clone = checkout
+    commit_version(upstream, "0.2.5", tag="v0.3.0")
+    with pytest.raises(updates.UpdateError, match="contains version 0.2.5"):
+        updates.apply_git("v0.3.0", clone, current="0.1.0", source=str(upstream))
+    assert '"0.1.0"' in version_in(clone)
+
+
+def test_the_dialog_is_told_why_before_the_click(checkout, monkeypatch):
+    upstream, clone = checkout
+    (clone / "README.md").write_text("work in progress\n")
+    monkeypatch.setattr(updates, "install_dir", lambda: clone)
+    result = updates.check("0.1.0", releases=[release("v0.2.0")])
+    assert result["git_checkout"] is True
+    assert "uncommitted changes" in result["blocked"]
 
 
 def test_a_failure_part_way_puts_every_file_back(install, monkeypatch):

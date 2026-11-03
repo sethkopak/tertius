@@ -45,9 +45,11 @@ code as your user can already do everything Tertius can do.
      time you read Hebrew aloud;
   6. asking `api.github.com` for this repository's releases, **only when you
      click Updates** - never at startup or in the background - and, if you
-     then click Update, downloading that release's source zip from GitHub
-     (and, should its `requirements.txt` have changed, the launcher installing
-     it from PyPI on restart).
+     then click Update, downloading that release's source zip from GitHub -
+     or, in a git clone, `git fetch` of that one tag from
+     `github.com/sethkopak/tertius` itself, never from `origin` - (and, should
+     its `requirements.txt` have changed, the launcher installing it from PyPI
+     on restart).
 
   This list said "three" while listing four, for some weeks. It is six now
   and the count is worth checking against the list whenever either changes.

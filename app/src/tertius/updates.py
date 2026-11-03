@@ -14,11 +14,16 @@ Installing replaces the code in place, from the release's source zip:
 - Only files that are *in* the release are written. Everything else in the
   folder - `app/.venv`, `transcripts/`, the remembered session, the shortcut -
   is never in a release, so it is never touched.
-- A git checkout is refused. Overwriting tracked files under a working tree
-  makes every file look modified, and on a machine where someone is
-  developing it destroys uncommitted work. `git pull` is the update there.
 - The whole release is unpacked and checked before anything is replaced, and
   a failure part-way through puts back every file it had already changed.
+
+A git checkout is updated with git instead, from the same button: copying a
+zip over a working tree would make every file look modified. The release tag
+is fetched from GitHub itself - not from `origin`, which may be a fork - and
+the checkout fast-forwards to it. It refuses rather than merges: uncommitted
+changes to tracked files, a detached HEAD, or local commits the release does
+not have all stop it, with the reason, before anything moves. Untracked files
+do not, because a fast-forward never touches them.
 
 Files a release *removes* are left where they are. Nothing imports a module
 nobody names, and deleting from someone's folder on the strength of a file
@@ -33,6 +38,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -45,6 +51,7 @@ from . import __version__
 log = logging.getLogger(__name__)
 
 REPO = "sethkopak/tertius"
+GIT_URL = f"https://github.com/{REPO}.git"
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 ZIPBALL_URL = f"https://api.github.com/repos/{REPO}/zipball/{{tag}}"
 
@@ -207,8 +214,94 @@ def check(current: str = __version__, releases: list[dict] | None = None) -> dic
         "releases": [_summarize(r) for r in newer[:MAX_RELEASES_SHOWN]],
         "more_releases": max(0, len(newer) - MAX_RELEASES_SHOWN),
         "git_checkout": is_git_checkout(),
+        # Said before the click, so the button is not offered only to fail.
+        "blocked": git_blocker() if newer and is_git_checkout() else None,
         "can_restart": can_restart(),
     }
+
+
+# --------------------------------------------------------------------------
+# Git checkouts
+# --------------------------------------------------------------------------
+
+def _git(root: Path, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            # Never stop to ask for a password: there is no terminal to ask in.
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except FileNotFoundError as exc:
+        raise UpdateError(
+            "This copy of Tertius is a git checkout, but git is not installed "
+            "or not on PATH, so it cannot be updated from here."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UpdateError(f"git {args[0]} took too long and was stopped.") from exc
+
+
+def git_blocker(root: Path | None = None) -> str | None:
+    """Why this checkout cannot be fast-forwarded, or None if it can be tried.
+
+    Only what can be known without the network. Whether the release contains
+    HEAD is only known once its tag has been fetched, and is checked then.
+    """
+    root = root or install_dir()
+    try:
+        changed = _git(root, "status", "--porcelain", "--untracked-files=no")
+        branch = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    except UpdateError as exc:
+        return str(exc)
+    if changed.returncode != 0:
+        return f"git could not read this checkout: {changed.stderr.strip()}"
+    names = [line[3:] for line in changed.stdout.splitlines() if line.strip()]
+    if names:
+        shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+        return (
+            f"This checkout has uncommitted changes ({shown}). Updating would "
+            "overwrite them, so commit or stash them first."
+        )
+    if branch.returncode != 0:
+        return "This checkout is not on a branch (detached HEAD), so there is nothing to update."
+    return None
+
+
+def apply_git(tag: str, root: Path, current: str = __version__, source: str = GIT_URL) -> dict:
+    """Fast-forward a git checkout to release `tag`, or refuse and say why."""
+    blocker = git_blocker(root)
+    if blocker:
+        raise UpdateError(blocker)
+
+    ref = f"refs/tags/{tag}"
+    fetched = _git(root, "fetch", "--quiet", "--no-tags", source, f"+{ref}:{ref}", timeout=300)
+    if fetched.returncode != 0:
+        raise UpdateError(f"Could not fetch {tag} from GitHub: {fetched.stderr.strip()}")
+
+    if _git(root, "merge-base", "--is-ancestor", "HEAD", ref).returncode != 0:
+        raise UpdateError(
+            f"This checkout has commits that {tag} does not, so it cannot simply "
+            "move forward to it. Update it with git yourself."
+        )
+    shown = _git(root, "show", f"{ref}:app/src/tertius/__init__.py")
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', shown.stdout, re.MULTILINE)
+    inside = match.group(1) if match else None
+    if parse_version(inside) != parse_version(tag):
+        raise UpdateError(
+            f"Release {tag} contains version {inside or 'unknown'}, not {tag}. "
+            "Not installing it; this needs fixing on GitHub."
+        )
+
+    changed = _git(root, "diff", "--name-only", "HEAD", ref).stdout.split("\n")
+    merged = _git(root, "merge", "--ff-only", "--quiet", ref, timeout=300)
+    if merged.returncode != 0:
+        raise UpdateError(f"git could not move to {tag}: {merged.stderr.strip()}")
+    count = sum(1 for name in changed if name.strip())
+    log.info("fast-forwarded the checkout to %s over %s: %d file(s) changed", tag, current, count)
+    return {"installed": tag, "previous": current, "changed": count}
 
 
 # --------------------------------------------------------------------------
@@ -330,17 +423,14 @@ def apply(
 ) -> dict:
     """Download release `tag` and install it over this copy."""
     root = root or install_dir()
-    if is_git_checkout(root):
-        raise UpdateError(
-            "This copy of Tertius is a git checkout. Update it with git pull "
-            "instead, so your working tree stays yours."
-        )
     # The tag is looked up again rather than trusted from the request: only a
     # published, newer release of this repository is ever installed.
     if releases is None:
         releases = fetch_releases()
     if not any(r.get("tag_name") == tag for r in _newer_releases(releases, current)):
         raise UpdateError(f"{tag} is not a published release newer than {current}.")
+    if is_git_checkout(root):
+        return apply_git(tag, root, current)
 
     staging = root / "app" / STAGING_DIRNAME
     shutil.rmtree(staging, ignore_errors=True)

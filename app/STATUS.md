@@ -162,8 +162,16 @@ and it installs from the zip rather than `git pull`, so zip downloads work.
   holds; a path outside the install refuses the whole release. Everything is
   unpacked and checked before anything moves, and a failure part-way puts
   back every file already replaced.
-- **A git checkout is refused** (the dialog says use `git pull`). That
-  includes this machine, so the Update button cannot overwrite work here.
+- **A git checkout updates too** (asked for 2026-11-03: one button, no
+  `git pull`). It fetches the one tag from `github.com/sethkopak/tertius` -
+  not `origin`, which could be a fork - and fast-forwards. It refuses, and
+  the dialog disables Update and says why before the click, on uncommitted
+  changes to tracked files, a detached HEAD, or local commits the tag lacks.
+  Untracked files never block it. This machine is blocked today by the
+  uncommitted Hindi work, which is the point. Verified for real in a scratch
+  clone wound back to v0.1.1: fetched v0.1.101 from GitHub, moved to
+  `03919ec`, untracked transcript kept. Not yet run through the button and
+  restart on a checkout.
 - Restart: the server exits with 75, and the launcher runs the launcher *from
   disk* again with `--no-browser`. The server only exits when it was started
   by a launcher (`TERTIUS_LAUNCHER=1`); by hand, it installs and asks for a

@@ -92,9 +92,11 @@ when the new version answers. **Cancel** leaves everything as it was.
 - If the new version needs different dependencies, the restart installs them
   first, so it can take a few minutes. The console window shows the progress.
 - Not while a job is running: let the batch finish, then update.
-- **A git clone is not updated from here.** Overwriting files under git would
-  make every one look modified, and would destroy work in progress on a copy
-  someone is developing. Use `git pull`.
+- **A git clone updates from the same button**, with git: it fetches the
+  release tag from GitHub and moves forward to it. It will not do that over
+  uncommitted changes to tracked files, from a detached HEAD, or when you have
+  commits the release does not - the dialog says which, and the button stays
+  off. Untracked files, like `transcripts/`, never stop it.
 - Started by hand with `python -m tertius` rather than a launcher, nothing is
   waiting to start the new version, so Tertius installs it and asks you to
   restart.
