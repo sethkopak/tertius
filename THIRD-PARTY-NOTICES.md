@@ -201,11 +201,18 @@ back to its source.
 | Source | Licence |
 | --- | --- |
 | [Wikidata](https://www.wikidata.org) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| [Indian Revised Version (IRV) Hindi, 2019](https://ebible.org/hin2017/), © 2017-2019 Bridge Connectivity Solutions — 22 Hindi book names only | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
 
 Wikidata places its data in the public domain under CC0, which imposes no
 conditions on reuse and does not affect Tertius' MIT licence. The attribution
 here is given because it is right to say where the data came from, not because
 CC0 requires it.
+
+Wikidata has no Hindi name for 22 of the books (Samuel, Kings, Chronicles,
+Ezra, Nehemiah, Lamentations, the twelve minor prophets and Luke). Those 22 are
+the book names of the Indian Revised Version, copied from its contents page and
+listed under `supplements` in the table. They are attributed here under the
+IRV's license; a Wikidata label, where one exists, is always used instead.
 
 **This is the only network request Tertius makes that is not a model
 download, and it is a build step.** The table ships as a file; nothing at run

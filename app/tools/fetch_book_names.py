@@ -6,6 +6,10 @@ of Tertius that touches the network outside a model download, and it is a
 *build* step: the table ships as data and the app never calls Wikidata.
 
     python tools/fetch_book_names.py
+    python tools/fetch_book_names.py --supplement-only   # no network
+
+Where Wikidata has no label, `SUPPLEMENTS` may supply one from a published
+Bible, recorded under `supplements` in the table with its source and license.
 
 **Why a table at all.** A translation model cannot be trusted with a book name.
 Measured, all 66 books as `<Book> 3:16` English into Russian and back: 25 came
@@ -100,6 +104,49 @@ ALIASES = {
     "zh": ("zh", "zh-hans", "zh-hant"),
 }
 
+# Names Wikidata has no label for, from a published Bible in that language.
+# Used only where Wikidata is silent: a Wikidata label always wins, so these
+# never replace a name, and the table records which books came from here.
+#
+# Hindi had 44 of 66 on 2026-09-21 and still had 44 on 2026-11-03, aliases
+# included: none of the twelve minor prophets, Samuel, Kings, Chronicles, Ezra,
+# Nehemiah, Lamentations or Luke. These 22 are the book names of the Indian
+# Revised Version, copied from its contents page. Where both name a book the two
+# agree on the name (`लैव्यव्यवस्था`, `भजन संहिता`, `मत्ती`); Wikidata often adds
+# `की पुस्तक` ("book of"), the IRV never does. No public-domain Hindi Bible is
+# on eBible.org; the IRV is the one with an open license.
+SUPPLEMENTS = {
+    "hi": {
+        "source": "Indian Revised Version (IRV) Hindi, 2019 (eBible.org hin2017)",
+        "url": "https://ebible.org/hin2017/",
+        "license": "CC BY-SA 4.0, (c) 2017-2019 Bridge Connectivity Solutions",
+        "names": {
+            "1 Samuel": "1 शमूएल",
+            "2 Samuel": "2 शमूएल",
+            "1 Kings": "1 राजाओं",
+            "2 Kings": "2 राजाओं",
+            "1 Chronicles": "1 इतिहास",
+            "2 Chronicles": "2 इतिहास",
+            "Ezra": "एज्रा",
+            "Nehemiah": "नहेम्याह",
+            "Lamentations": "विलापगीत",
+            "Hosea": "होशे",
+            "Joel": "योएल",
+            "Amos": "आमोस",
+            "Obadiah": "ओबद्याह",
+            "Jonah": "योना",
+            "Micah": "मीका",
+            "Nahum": "नहूम",
+            "Habakkuk": "हबक्कूक",
+            "Zephaniah": "सपन्याह",
+            "Haggai": "हाग्गै",
+            "Zechariah": "जकर्याह",
+            "Malachi": "मलाकी",
+            "Luke": "लूका",
+        },
+    },
+}
+
 
 def wikidata_codes() -> list[str]:
     """Every code to ask for, including the aliases."""
@@ -121,8 +168,56 @@ def ask(query: str) -> dict:
         return json.load(response)
 
 
-def main() -> int:
-    ids = " ".join(f"wd:{qid}" for _name, qid in BOOKS)
+def supplement(table: dict) -> dict:
+    """Fill the labels Wikidata left empty from `SUPPLEMENTS`, and say which."""
+    supplied: dict[str, dict] = {}
+    for code, entry in SUPPLEMENTS.items():
+        books = []
+        for name, label in entry["names"].items():
+            labels = table["books"][name]["labels"]
+            if code not in labels:
+                labels[code] = label
+                table["books"][name]["labels"] = dict(sorted(labels.items()))
+                books.append(name)
+            elif labels[code] == label and name in table.get(
+                "supplements", {}
+            ).get(code, {}).get("books", ()):
+                books.append(name)   # supplied by an earlier run
+        if books:
+            supplied[code] = {
+                "source": entry["source"],
+                "url": entry["url"],
+                "license": entry["license"],
+                "books": books,
+            }
+    if supplied:
+        table["supplements"] = supplied
+    else:
+        table.pop("supplements", None)
+    return table
+
+
+def write(table: dict) -> None:
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(
+        json.dumps(table, ensure_ascii=False, indent=1, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--supplement-only"]:
+        # Apply SUPPLEMENTS to the table as it stands, without asking Wikidata,
+        # so a supplement can change without every other label moving with it.
+        table = supplement(json.loads(OUT.read_text(encoding="utf-8")))
+        write(table)
+        print(f"wrote {OUT}")
+        for code, entry in table.get("supplements", {}).items():
+            print(f"  {code}: {len(entry['books'])} books from {entry['source']}")
+        return 0
+
+    ids =" ".join(f"wd:{qid}" for _name, qid in BOOKS)
     langs = ", ".join(f'"{code}"' for code in wikidata_codes())
     query = (
         "SELECT ?b ?lang ?label WHERE { "
@@ -167,11 +262,7 @@ def main() -> int:
             for name, qid in BOOKS
         },
     }
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(
-        json.dumps(table, ensure_ascii=False, indent=1, sort_keys=False) + "\n",
-        encoding="utf-8",
-    )
+    write(supplement(table))
 
     counts = {c: sum(1 for _n, q in BOOKS if c in by_qid[q]) for c in LANGUAGES}
     full = [c for c, n in counts.items() if n == len(BOOKS)]

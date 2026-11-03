@@ -910,10 +910,25 @@ def _hi_number(word: str) -> int | None:
     return None
 
 
+def _hi_book_sound(word: str) -> str:
+    """`_hi_sound`, but a 1, 2 or 3 standing alone is kept, as its word.
+
+    The IRV names in the table are `1 शमूएल` and `2 शमूएल`, which fold alike
+    once the digit is dropped; a reading says them `एक शमूएल` and `दो शमूएल`
+    (numbers.spell), and Whisper writes either form.
+    """
+    from .numbers import _HINDI_UNDER_100
+
+    digits = re.sub(r"[.,:;?!।]", "", word).translate(_HI_DIGITS)
+    if digits in ("1", "2", "3"):
+        return _hi_sound(_HINDI_UNDER_100[int(digits)])
+    return _hi_sound(word)
+
+
 @functools.lru_cache(maxsize=1)
 def _hi_labels() -> tuple[tuple[str, str], ...]:
     return tuple(
-        (_hi_sound(entry["labels"]["hi"]), book)
+        ("".join(_hi_book_sound(w) for w in entry["labels"]["hi"].split()), book)
         for book, entry in _table().items()
         if entry.get("labels", {}).get("hi")
     )
@@ -925,7 +940,7 @@ def _hi_book(words: list[str]) -> tuple[str, int] | None:
 
     tries = []
     for length in range(1, min(len(words), 7) + 1):
-        heard = "".join(_hi_sound(w) for w in words[-length:])
+        heard = "".join(_hi_book_sound(w) for w in words[-length:])
         if not heard:
             continue
         scores = sorted(
@@ -934,8 +949,10 @@ def _hi_book(words: list[str]) -> tuple[str, int] | None:
             reverse=True,
         )
         (score, book), (second, _) = scores[0], scores[1]
-        tries.append((score, book, length, score >= _HI_BOOK_SURE or (
-            score >= _HI_BOOK_LIKENESS and score - second >= _HI_BOOK_MARGIN)))
+        # A tie is two books, not a sure one: `शमूएल` with its number unheard.
+        tries.append((score, book, length, score > second and (
+            score >= _HI_BOOK_SURE
+            or (score >= _HI_BOOK_LIKENESS and score - second >= _HI_BOOK_MARGIN))))
     if not tries:
         return None
     book = max(tries)[1]
@@ -949,9 +966,8 @@ def hindi_references(text: str) -> list[tuple[int, int, str]]:
     """Spans of `text` that are references written in Hindi, as English.
 
     `(start, end, "Hebrews 12:3")`, found by `अध्याय` and `वचन` with a number
-    after each and a book named before them. Empty when there are none. The
-    table names 44 of the 66 books in Hindi; a reference to one of the others
-    is left to the translator.
+    after each and a book named before them. Empty when there are none. A
+    numbered book heard without its number (`शमूएल`) is left to the translator.
     """
     if not text or not re.search("[ऀ-ॿ]", text):
         return []

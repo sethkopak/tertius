@@ -1109,9 +1109,11 @@ The names come from **Wikidata, which is CC0**, fetched by
 `app/src/tertius/data/book_names.json`. That script is the only network request
 Tertius makes that is not a model download, and it is a build step — nothing at
 run time contacts Wikidata. Every entry records its Wikidata item id, so any
-name can be traced back to where it came from. 20 of the 23 languages that can
-be read aloud have all 66 books; Greek, Hindi and Malay are partial, and a book
-the table cannot name stays in English rather than being guessed.
+name can be traced back to where it came from. 21 of the 23 languages that can
+be read aloud have all 66 books; Greek and Malay are partial, and a book the
+table cannot name stays in English rather than being guessed. Hindi is complete
+only because 22 names Wikidata lacks come from the Indian Revised Version (CC
+BY-SA 4.0); see THIRD-PARTY-NOTICES.md.
 
 A spoken citation is normalised to the written form on the way through —
 `Psalm 66, verses 8 and 9` becomes `תהילים 66:8,9`. That avoids needing

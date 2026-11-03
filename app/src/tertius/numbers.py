@@ -309,7 +309,8 @@ def _arabic_references(text: str) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _hindi_book_names() -> tuple[str, ...]:
-    """The Hindi names of the books, from the table scripture.py uses (44 of 66)."""
+    """The Hindi names of the books, from the table scripture.py uses: 44
+    from Wikidata, 22 from the IRV (tools/fetch_book_names.py)."""
     from .scripture import _table
 
     names = {entry.get("labels", {}).get("hi") for entry in _table().values()}
@@ -326,9 +327,9 @@ def _hindi_references(text: str) -> str:
     अध्याय 66, वचन 8 और 9`; the digits are then spelled like any other. A range
     is left as it was, as for Hebrew and Arabic.
 
-    The table has a Hindi name for only 44 of the 66 books - not Luke - so
-    `12:7` counts wherever it stands, unless `बजे` ("o'clock") follows it.
-    `4.3` counts only after a name the table has.
+    `12:7` counts wherever it stands, unless `बजे` ("o'clock") follows it:
+    written while the table lacked 22 books, Luke among them, and kept for a
+    name written some other way. `4.3` counts only after a name the table has.
     """
     books = _hindi_book_names()
 

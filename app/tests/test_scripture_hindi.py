@@ -70,3 +70,62 @@ def test_the_reference_is_masked_and_comes_back_in_english():
 def test_no_sentence_ends_inside_it():
     words = "प्रकाश के हथियार बहन लें रोमियो के नाम पत्री अध्याई 13 वचन 12 अंधकार के".split()
     assert _reference_spans(words) == [(5, 12)]
+
+
+# The 22 books Wikidata has no Hindi name for, named from the IRV
+# (tools/fetch_book_names.py, SUPPLEMENTS). Written by hand in the form the
+# readings say them - none of these books is in the harness files, so no
+# Whisper hearing of them exists yet.
+@pytest.mark.parametrize(
+    "heard, citation",
+    [
+        ("है एक शमूएल अध्याय तीन वचन सोलह इस", "1 Samuel 3:16"),
+        ("है 1 शमूएल अध्याय 3 वचन 16", "1 Samuel 3:16"),
+        ("दो शमूएल अध्याय पांच वचन एक", "2 Samuel 5:1"),
+        ("एक राजाओं अध्याय पांच वचन एक", "1 Kings 5:1"),
+        ("दो राजाओं अध्याय पांच वचन एक", "2 Kings 5:1"),
+        ("2 इतिहास अध्याय सात वचन चौदह", "2 Chronicles 7:14"),
+        ("लूका अध्याय 12 वचन 31", "Luke 12:31"),
+        ("होशे अध्याय छह वचन छह", "Hosea 6:6"),
+        ("विलापगीत अध्याय तीन वचन बाईस", "Lamentations 3:22"),
+        ("नहेम्याह अध्याय आठ वचन दस", "Nehemiah 8:10"),
+        ("मलाकी अध्याय तीन वचन छह", "Malachi 3:6"),
+    ],
+)
+def test_a_book_named_from_the_irv_is_read(heard, citation):
+    assert [found[2] for found in hindi_references(heard)] == [citation]
+
+
+def test_a_numbered_book_without_its_number_is_left_alone():
+    """`1 शमूएल` and `2 शमूएल` differ only by the number. Before, both folded
+    to one sound and every Samuel came back as 2 Samuel."""
+    assert hindi_references("शमूएल अध्याय पांच वचन एक") == []
+
+
+def test_every_book_has_a_hindi_name_and_wikidata_wins():
+    import sys
+    from pathlib import Path
+
+    from tertius.scripture import _table
+
+    tools = Path(__file__).resolve().parents[1] / "tools"
+    sys.path.insert(0, str(tools))
+    try:
+        import fetch_book_names
+    finally:
+        sys.path.remove(str(tools))
+
+    table = _table()
+    assert all(entry["labels"].get("hi") for entry in table.values())
+    supplied = fetch_book_names.SUPPLEMENTS["hi"]["names"]
+    # A supplement fills a gap and never replaces a Wikidata label.
+    copy = {"books": {"Genesis": {"labels": {"hi": "Wikidata"}},
+                      **{name: {"labels": {}} for name in supplied}}}
+    fetch_book_names.SUPPLEMENTS["hi"]["names"]["Genesis"] = "IRV"
+    try:
+        fetch_book_names.supplement(copy)
+    finally:
+        del fetch_book_names.SUPPLEMENTS["hi"]["names"]["Genesis"]
+    assert copy["books"]["Genesis"]["labels"]["hi"] == "Wikidata"
+    assert "Genesis" not in copy["supplements"]["hi"]["books"]
+    assert copy["books"]["Luke"]["labels"]["hi"] == "लूका"
