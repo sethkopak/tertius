@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**997 tests: 995 pass, 2 skip** on Windows locally (2026-11-03; one skip is
+**999 tests: 997 pass, 2 skip** on Windows locally (2026-11-03; one skip is
 that Windows has no executable bit). The 2026-11-03 (later) work
 (`6acf40f`..`b5779c8`) passed CI on all eight jobs. The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
@@ -233,11 +233,19 @@ the page reloaded:
 
 Not tried: a dependency that is actually new, so pip installs something.
 
-**Seen, not fixed:**
-- With the libraries changed, the note under the voice model still starts
-  "Ready." before saying they need preparing.
-- While the model loads, already downloaded, the headline says "Fetching the
-  voice model ... starting the download".
+**Two misleading lines, seen in that run and fixed the same day:**
+- With the libraries changed, the note under the voice model began "Ready."
+  before saying they need preparing. It now begins "Downloaded."
+- While an already downloaded model loaded, the headline said "Fetching the
+  voice model ... starting the download". The job now records whether the
+  model is in the Hugging Face cache (`download.cached`, asked as Whisper's
+  load already was), and the band says "Loading the voice model ... already
+  downloaded". Only the run's load; Download and prepare is unchanged.
+
+Both seen in Chrome after the fix, with a stale stamp again: "Downloaded."
+in the note, then after preparing, "Loading the voice model" during the
+load, and the reading done (3 chunks, 14.2 s). 2 new tests (the flag, cached
+and not). **999 tests: 997 pass, 2 skip.**
 
 ## 2026-11-03 — Check for updates
 

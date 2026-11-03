@@ -591,6 +591,41 @@ def test_a_speech_model_that_will_not_load_stops_before_anything_is_written(
     assert api.manager.store.get(source)["status"] == "pending"
 
 
+@pytest.mark.parametrize("cached", [True, False])
+def test_the_band_is_told_whether_the_voice_model_is_a_load_or_a_download(
+    api, tmp_path, monkeypatch, cached
+):
+    """Seen 2026-11-03: an already downloaded model showed "starting the
+    download" for as long as it took to load."""
+    from tertius.jobs import JobManager
+
+    from .fakes import FakeSpeaker
+
+    monkeypatch.setattr(
+        JobManager, "_speech_model_is_cached", staticmethod(lambda key: cached)
+    )
+    seen = {}
+    original = FakeSpeaker.load
+
+    def load(self):
+        seen.update(api.manager.status(include_files=False)["download"])
+        original(self)
+
+    monkeypatch.setattr(FakeSpeaker, "load", load)
+    source = tmp_path / "talk.txt"
+    source.write_text("Read this.", encoding="utf-8")
+    api.manager.attach(api.output_dir)
+    api.manager.store.add_files([source])
+
+    api.manager.start(
+        output_dir=api.output_dir, options={"speak": True, "speech_language": "en"}
+    )
+    api.wait_done()
+
+    assert seen["cached"] is cached
+    assert seen["model"] == "chatterbox-multilingual"
+
+
 # ----------------------------------------------------------- loading the model
 #
 # Reported 2026-10-28: every Turbo load passed `nano=` to a `from_pretrained`

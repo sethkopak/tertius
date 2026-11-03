@@ -481,8 +481,10 @@ async function refreshSpeechLanguages() {
   const tags = (info.paralinguistic || []).length
     ? ` Acts on ${info.paralinguistic.map((t) => `[${t}]`).join(' ')}.`
     : ' Tags like [laugh] are removed on this model - only turbo and nano act on them.';
+  // Downloaded is not ready when an update changed the libraries: the note
+  // must not open with "Ready." and then ask for a prepare.
   noteEl.textContent = (info.ready
-    ? `Ready. ${count} language${count === 1 ? '' : 's'}, ${info.license}.`
+    ? `${info.libraries_changed ? 'Downloaded' : 'Ready'}. ${count} language${count === 1 ? '' : 's'}, ${info.license}.`
     : `Not downloaded yet - about ${gb} GB, plus torch the first time. ${info.license}.`) + tags
     + (info.libraries_changed
       ? ' This version of Tertius needs different speech libraries - prepare again to update them.'
@@ -1090,6 +1092,16 @@ function bandModel(status) {
   if (status.phase === 'preparing_speech') {
     const d = status.download || {};
     const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : null;
+    if (d.cached && pct === null) {
+      return {
+        tone: 'running',
+        headline: 'Loading the voice model',
+        counter: `${d.model || ''} — already downloaded`,
+        right: '',
+        progress: 0,
+        stats: [],
+      };
+    }
     return {
       tone: 'running',
       headline: 'Fetching the voice model',

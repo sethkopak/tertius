@@ -162,6 +162,16 @@ class JobManager:
         except Exception:
             return False
 
+    @staticmethod
+    def _speech_model_is_cached(model_key: str) -> bool:
+        """Best-effort, as for Whisper: if we cannot tell, assume a download."""
+        try:
+            from .speech import is_downloaded
+
+            return is_downloaded(model_key)
+        except Exception:
+            return False
+
     def _note_install_line(self, line: str) -> None:
         """Show pip's last line, so a long install is visibly alive."""
         with self._lock:
@@ -883,10 +893,15 @@ class JobManager:
             # Loaded before the first file for the same reason the translator
             # is: the first use may download 3-4 GB, and finding that out
             # halfway through a queue is the failure this ordering prevents.
+            # Asked outside the lock: it looks in the Hugging Face cache.
+            cached = self._speech_model_is_cached(options.speech_model)
             with self._lock:
                 self._phase = PREPARING_SPEECH
                 self._download = self._empty_download()
                 self._download["model"] = options.speech_model
+                # Already on disk, this is a load, and the band says so rather
+                # than "starting the download".
+                self._download["cached"] = cached
                 from .config import SPEECH_MODELS
 
                 entry = SPEECH_MODELS.get(options.speech_model) or {}
