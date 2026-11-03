@@ -182,11 +182,18 @@ untouched, `Start Tertius.bat` still CRLF. The dialog, in Chrome against a
 preview server with two invented releases: renders, and a refused install
 shows its error and re-enables Close.
 
+**The whole loop, for real, 2026-11-03:** v0.1.1 published as the first
+release (`29cde4c`, version bump only). A zip copy of `570250f` (v0.1.0, no
+`.git`) started through `Start Tertius.bat` on port 5099, built its venv,
+and in Chrome its Updates button found v0.1.1 with its notes. Update
+installed it (2 files changed), the server exited 75, the launcher started
+the new one, and the page reloaded itself on 0.1.1 about five seconds later.
+`.venv` kept, requirements stamp written, staging folder gone.
+
 **Not verified:**
-- **The restart has never run for real.** Exit 75 → launcher → new server
-  is tested with `subprocess.run` mocked; no real release has been installed
-  through the button. The first release after this one is that test, and
-  it needs a zip-downloaded copy, not this checkout.
+- **A release that changes `requirements.txt`** has not been through the
+  button; 0.1.1 did not, so the reinstall-on-restart path is tested only
+  with mocks.
 - **`Start Tertius.bat` is rewritten under cmd.exe while it runs**, if a
   release changes it. cmd reads a batch file by byte offset as it goes, so
   a changed .bat may misbehave once, after the launcher returns. Unchanged
