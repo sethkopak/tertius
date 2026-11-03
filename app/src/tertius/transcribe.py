@@ -544,6 +544,15 @@ PUNCTUATION_HINTS = {
     "zh": "以下是普通话的句子。吗哪,众民,称颂,经文,诗篇,希伯来书,雅各书,帖撒罗尼迦后书。",
 }
 
+# **Hindi decoded in 15 s windows.** In 30 s ones Whisper writes a whole
+# window as one segment at 1.5-1.8 words a second and leaves the rest out:
+# thirty Hindi readings, read at 3.1, were heard at 74% of their words, one
+# take at 38% (2026-11-01). In 15 s windows, 95%, the worst take 74%, and
+# back to English chrF 34.7 to 41.1 with references read by
+# `scripture.hindi_references`. Urdu too, for Hindi that auto-detect hears
+# as Urdu; not measured on Urdu recordings.
+WINDOW_SECONDS = {"hi": 15, "ur": 15}
+
 
 # **Speech Whisper jumps over.** faster-whisper decodes 30 s windows; when the
 # model ends a window early, the next starts where the window ended, and the
@@ -818,6 +827,7 @@ class WhisperTranscriber:
                 condition_on_previous_text=self.options.condition_on_previous_text,
                 word_timestamps=word_timestamps,
                 **({"hotwords": hint} if hint else {}),
+                **({"chunk_length": WINDOW_SECONDS[language]} if language in WINDOW_SECONDS else {}),
                 **extra,
             )
 
@@ -837,9 +847,11 @@ class WhisperTranscriber:
 
         segments_iter, info = run(self.options.language)
         detected = getattr(info, "language", None)
-        if self.options.language is None and detected in PUNCTUATION_HINTS:
+        if self.options.language is None and (
+            detected in PUNCTUATION_HINTS or detected in WINDOW_SECONDS
+        ):
             # The language is only known once faster-whisper has detected it,
-            # and the hint has to be in the language. Detection happens inside
+            # and the hint has to be in the language, as the windows are for it. Detection happens inside
             # `transcribe`, before any decoding - the segments are a lazy
             # generator - so asking again costs the detection, not a pass.
             segments_iter, info = run(detected)

@@ -320,6 +320,32 @@ def test_other_languages_get_no_hint_and_one_pass(options_language):
 
     assert len(model.calls) == 1
     assert "hotwords" not in model.calls[0]
+    assert "chunk_length" not in model.calls[0]
+
+
+@pytest.mark.parametrize("language", ["hi", "ur"])
+def test_hindi_is_decoded_in_15_second_windows(language):
+    """In 30 s ones, a quarter of the words read were left out (2026-11-01)."""
+    transcriber, model = _transcriber_detecting(
+        TranscriptionOptions(language=language), detects=language
+    )
+    transcriber.transcribe("manna.wav")
+
+    assert len(model.calls) == 1
+    assert model.calls[0]["chunk_length"] == 15
+
+
+@pytest.mark.parametrize("detected", ["hi", "ur"])
+def test_detected_hindi_is_asked_again_in_15_second_windows(detected):
+    transcriber, model = _transcriber_detecting(
+        TranscriptionOptions(language=None), detects=detected
+    )
+    result = transcriber.transcribe("manna.wav")
+
+    assert [call["language"] for call in model.calls] == [None, detected]
+    assert "chunk_length" not in model.calls[0]
+    assert model.calls[1]["chunk_length"] == 15
+    assert result.language == detected
 
 
 # Two segments read at a normal pace, about 2.5 words a second.

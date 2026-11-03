@@ -10,7 +10,7 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**907 tests, all passing** on Windows locally (one skips: Windows has no
+**934 tests, all passing** on Windows locally (one skips: Windows has no
 executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
@@ -217,7 +217,49 @@ the new one, and the page reloaded itself on 0.1.1 about five seconds later.
 - macOS and Linux, as ever. The executable bit is restored from the zip's
   mode bits; the test for that skips on Windows.
 
-## 2026-11-01 — Why Whisper drops Hindi: 30-second windows (not in the app yet)
+## 2026-11-01 — Hindi references read, and Hindi heard in 15-second windows
+
+Two changes for the two causes found below. Whisper's figures, the same 30
+Hindi takes (numbers spelled out), SaT on throughout.
+
+**`scripture.hindi_references`** reads `<book> अध्याय <n> वचन <n>` as Whisper
+writes it, misheard by sound (`अध्याई`, `पत्रिय ध्याय`, `बचन`, `वचंतीन`,
+`साथ` for 7, `बारा` for 12, `आर्ट` for 8), and `mask` hands madlad the English
+citation, as for Arabic. SaT no longer ends a sentence inside one. On the
+heard text alone it found 46 of 60 with the language set and 49 of 60 at
+15 s; none was wrong but one Whisper heard as Psalm 30:5, read as heard.
+Every miss checked was one Whisper did not write, or
+wrote as a number that is as like another (`तैस`, 23 or 10) and was left
+alone. Built from these same takes, so not yet tried on others.
+
+**`transcribe.WINDOW_SECONDS`**: Hindi and Urdu decoded with
+`chunk_length=15`, set or detected.
+
+| Back into English | chrF | References right |
+|---|---|---|
+| Before both, language set | 34.7 | 25/60 |
+| References read, 30 s windows | 33.6 | 46/60 |
+| References read, 15 s (experiment) | 41.1 | 49/60 |
+| **The app now, language set** | **39.9** | **51/60** |
+| Before both, auto-detect | 34.3 | 12/60 |
+| **The app now, auto-detect** | **36.5** | **32/60** |
+
+- **Whisper is not the same twice.** The app's own 15 s hearing and the
+  experiment's used the same settings; 9 of 30 takes came out the same,
+  5,591 words against 5,632. So 39.9 against 41.1 is that, and chrF
+  differences of about 1 are inside it, as is the 33.6 against 34.7 above.
+- At 15 s, auto-detect heard 10 of 30 takes as Urdu (16 at 30 s). Urdu
+  script is not read for references, which is most of auto-detect's 28
+  misses; that would be an Urdu reader.
+- The table names 44 of 66 books in Hindi; a reference to another is left
+  to madlad.
+- `listen_back.py` (the app's check of its own readings) still hears
+  Hindi in 30 s windows; not measured.
+- Tests: `test_scripture_hindi.py` (23), 4 in `test_transcribe.py`.
+- Scratch: `hi_ref/`, `hi_app15/`; scripts `hi_reader.py` (prototype),
+  `hi_reader_eval.py`, `hi_refback.py`, `hi_app15.py`.
+
+## 2026-11-01 — Why Whisper drops Hindi: 30-second windows (since put in the app, above)
 
 The 30 Hindi takes (numbers spelled out, language set) were heard at 74% of
 the words read. Not Chatterbox: every take reads at a steady 3.1 written

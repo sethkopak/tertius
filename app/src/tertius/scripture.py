@@ -834,6 +834,158 @@ def arabic_references(text: str) -> list[tuple[int, int, str]]:
         found.append((tokens[first].start(), stop, f"{name} {chapter[0]}:{verses}", end))
     return [(a, b, c) for a, b, c, _ in found]
 
+# Hindi references as Whisper writes Tertius's Hindi readings, which say them
+# `<book> अध्याय <n>, वचन <n>` (numbers.py): numbers as digits or words, and
+# words misheard by sound - `अध्याई`, `अध्याए`, `पत्रिय ध्याय` for पत्री अध्याय,
+# `बचन`, `वचंतीन` for वचन तीन, `साथ` for सात (7), `बारा` for बारह (12), `आर्ट`
+# for आठ (8), `इबलानियों` for इब्रानियों (2026-11-01, 90 takes heard). Left to
+# madlad, 25 of 60 came back to English as the reference, and "Letter to
+# Romeo" for Romans.
+#
+# Read by sound, so these are folded together: aspirated and not, retroflex
+# and dental, voiced and not, ब and व, the sibilants, long and short vowels.
+_HI_SOUND = str.maketrans({
+    "ख": "क", "ग": "क", "घ": "क", "छ": "च", "ज": "च", "झ": "च",
+    "ट": "त", "ठ": "त", "ड": "त", "ढ": "त", "थ": "त", "द": "त", "ध": "त",
+    "फ": "प", "भ": "ब", "व": "ब", "श": "स", "ष": "स", "ण": "न",
+    "ी": "ि", "ू": "ु", "ै": "े", "ौ": "ो", "ई": "इ", "ऊ": "उ", "ऐ": "ए", "औ": "ओ",
+})
+# Nukta, chandrabindu, anusvara, virama.
+_HI_MARKS = re.compile("[़ँं्]")
+_HI_LETTERS = re.compile("[^ऀ-ॣॱ-ॿ]")
+_HI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+# `अध्याय`, `अध्याई`, `अध्याए`, `अध्या`, and `ध्याय` split from `पत्री`, folded.
+_HI_CHAPTER = re.compile(r"^अ?तया[यइए]?$")
+# `वचन`, `बचन`, `हवचन`, and `वचन` run onto its number - `वचंतीन`, its
+# anusvara folded away - folded.
+_HI_VERSE = re.compile(r"^ह?बचन?(.*)$")
+_HI_NUMBER_SURE = 0.75
+_HI_NUMBER_MARGIN = 0.1
+_HI_BOOK_SURE = 0.85
+_HI_BOOK_LIKENESS = 0.65
+_HI_BOOK_MARGIN = 0.1
+
+
+def _hi_sound(word: str) -> str:
+    return _HI_LETTERS.sub("", _HI_MARKS.sub("", word)).translate(_HI_SOUND)
+
+
+@functools.lru_cache(maxsize=1)
+def _hi_numbers() -> dict[str, int]:
+    """0-99, folded. सात (7) and साठ (60) fold alike; 7 is kept, being what
+    `साथ` was every time it was heard."""
+    from .numbers import _HINDI_UNDER_100
+
+    folded: dict[str, int] = {}
+    for value, word in enumerate(_HINDI_UNDER_100):
+        folded.setdefault(_hi_sound(word), value)
+    return folded
+
+
+def _hi_number(word: str) -> int | None:
+    """A number written as digits or as a Hindi word, perhaps misheard."""
+    import difflib
+
+    from .numbers import _HINDI_UNDER_100
+
+    word = re.sub(r"[.,:;?!।]", "", word).translate(_HI_DIGITS)
+    if word.isdigit():
+        return int(word)
+    if word in _HINDI_UNDER_100:
+        return _HINDI_UNDER_100.index(word)
+    heard = _hi_sound(word)
+    if not heard:
+        return None
+    numbers = _hi_numbers()
+    if heard in numbers:
+        return numbers[heard]
+    # `तैस` is as like 10 (`दस`) as 23 (`तेईस`), and is left alone.
+    (score, value), (second, _) = sorted(
+        ((difflib.SequenceMatcher(None, heard, known).ratio(), value)
+         for known, value in numbers.items()),
+        reverse=True,
+    )[:2]
+    if score >= _HI_NUMBER_SURE and score - second >= _HI_NUMBER_MARGIN:
+        return value
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _hi_labels() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (_hi_sound(entry["labels"]["hi"]), book)
+        for book, entry in _table().items()
+        if entry.get("labels", {}).get("hi")
+    )
+
+
+def _hi_book(words: list[str]) -> tuple[str, int] | None:
+    """The book the last one to seven of `words` name, and how many name it."""
+    import difflib
+
+    tries = []
+    for length in range(1, min(len(words), 7) + 1):
+        heard = "".join(_hi_sound(w) for w in words[-length:])
+        if not heard:
+            continue
+        scores = sorted(
+            ((difflib.SequenceMatcher(None, heard, label).ratio(), book)
+             for label, book in _hi_labels()),
+            reverse=True,
+        )
+        (score, book), (second, _) = scores[0], scores[1]
+        tries.append((score, book, length, score >= _HI_BOOK_SURE or (
+            score >= _HI_BOOK_LIKENESS and score - second >= _HI_BOOK_MARGIN)))
+    if not tries:
+        return None
+    book = max(tries)[1]
+    clear = [t for t in tries if t[1] == book and t[3]]
+    if not clear:
+        return None
+    return book, max(clear)[2]
+
+
+def hindi_references(text: str) -> list[tuple[int, int, str]]:
+    """Spans of `text` that are references written in Hindi, as English.
+
+    `(start, end, "Hebrews 12:3")`, found by `अध्याय` and `वचन` with a number
+    after each and a book named before them. Empty when there are none. The
+    table names 44 of the 66 books in Hindi; a reference to one of the others
+    is left to the translator.
+    """
+    if not text or not re.search("[ऀ-ॿ]", text):
+        return []
+    tokens = list(re.finditer(r"\S+", text))
+    words = [t.group() for t in tokens]
+    found = []
+    for i, word in enumerate(words):
+        if i + 2 >= len(words) or not _HI_CHAPTER.match(_hi_sound(word)):
+            continue
+        chapter = _hi_number(words[i + 1])
+        verse_word = _HI_VERSE.match(_hi_sound(words[i + 2]))
+        if chapter is None or not verse_word:
+            continue
+        if verse_word.group(1):
+            verse, end = _hi_number(verse_word.group(1)), i + 2
+        elif i + 3 < len(words):
+            verse, end = _hi_number(words[i + 3]), i + 3
+        else:
+            continue
+        if verse is None:
+            continue
+        start_word = max(0, i - 7)
+        if found:
+            start_word = max(start_word, found[-1][3] + 1)
+        book = _hi_book(words[start_word:i])
+        if not book:
+            continue
+        name, length = book
+        name = "Psalm" if name == "Psalms" else name
+        first = i - length
+        stop = tokens[end].end() - len(re.search(r"[.,:;?!।]*$", words[end]).group())
+        found.append((tokens[first].start(), stop, f"{name} {chapter}:{verse}", end))
+    return [(a, b, c) for a, b, c, _ in found]
+
 
 def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     """Replace whole scripture references with placeholders.
@@ -845,7 +997,8 @@ def mask(text: str, offset: int = 0) -> tuple[str, list[str]]:
     `chinese_references`), which is what goes back in.
     """
     spans = [(start, end, text[start:end]) for start, end in find_references(text)]
-    for written in (chinese_references, hebrew_references, arabic_references):
+    for written in (chinese_references, hebrew_references, arabic_references,
+                    hindi_references):
         spans += [
             found for found in written(text)
             if not any(found[0] < end and start < found[1] for start, end, _ in spans)

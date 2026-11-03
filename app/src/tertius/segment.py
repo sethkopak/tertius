@@ -35,7 +35,8 @@ chrF 32.3 to 34.7 with the language set to Hindi, and 29.4 to 34.3 left to
 auto-detect - which heard 16 of the 30 as Urdu and wrote them in Urdu
 script, so Urdu is here for those. That is the only Urdu it was measured on.
 References right were 22/60 either way with the language set. Hindi
-references are not kept whole as Arabic's are; that is how it was measured.
+references are kept whole as Arabic's are since `scripture.hindi_references`
+(2026-11-01).
 """
 
 from __future__ import annotations
@@ -200,8 +201,8 @@ def _breaks(words: Sequence[str]) -> list[bool] | None:
 
 
 def _reference_spans(words: Sequence[str]) -> list[tuple[int, int]]:
-    """`(first, last)` word indexes of each Arabic scripture reference."""
-    from .scripture import arabic_references
+    """`(first, last)` word indexes of each Arabic or Hindi scripture reference."""
+    from .scripture import arabic_references, hindi_references
 
     text = " ".join(words)
     starts, position = [], 0
@@ -209,7 +210,7 @@ def _reference_spans(words: Sequence[str]) -> list[tuple[int, int]]:
         starts.append(position)
         position += len(word) + 1
     spans = []
-    for begin, end, _ in arabic_references(text):
+    for begin, end, _ in arabic_references(text) + hindi_references(text):
         covered = [i for i, s in enumerate(starts) if begin <= s < end]
         if covered:
             spans.append((covered[0], covered[-1]))
