@@ -155,8 +155,10 @@ script and checked against that page. `fetch_book_names.py` has
 `--supplement-only` (so no other label moved; diffed). The names are short
 (`1 शमूएल`, `लूका`, `होशे`), where Wikidata's often end in `की पुस्तक`.
 
-- **License, for Seth to decide.** The IRV is CC BY-SA 4.0 (© Bridge
-  Connectivity Solutions); the table had been CC0-only by choice. These
+- **License: kept, decided by Seth 2026-11-03.** The IRV is CC BY-SA 4.0 (© Bridge
+  Connectivity Solutions); the table had been CC0-only by choice, so
+  `book_names.json` is now mixed: anyone copying it (Tertius Online too)
+  must keep the IRV credit and those 22 names under BY-SA. These
   are 22 book names, attributed in THIRD-PARTY-NOTICES.md and the README.
   eBible.org lists no public-domain Hindi Bible (the IRV, Biblica's HCV, and
   the non-redistributable ERV). To undo: delete `SUPPLEMENTS["hi"]` and run
