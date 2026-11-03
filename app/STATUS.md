@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-11-01
+Last updated: 2026-11-03
 
 ## Where it stands
 
@@ -10,8 +10,8 @@ comparison + machine check, tooltips, light/dark theme, mirrored output folders,
 timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
-**934 tests, all passing** on Windows locally (one skips: Windows has no
-executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
+**997 tests: 995 pass, 2 skip** on Windows locally (2026-11-03; one skip is
+that Windows has no executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
@@ -140,6 +140,71 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-11-03 (later) — Hindi book names complete; the update feature's open items
+
+### The book-name table: Hindi 44 of 66 to 66 of 66 (`049f702`)
+
+Wikidata, asked again live, still has no Hindi label or alias for 22 books:
+1-2 Samuel, 1-2 Kings, 1-2 Chronicles, Ezra, Nehemiah, Lamentations, the
+twelve minor prophets, Luke. They now come from the **Indian Revised Version
+(IRV) Hindi, 2019**, the contents page of eBible.org's `hin2017`, copied by
+script and checked against that page. `fetch_book_names.py` has
+`SUPPLEMENTS`: used only where Wikidata has no label, recorded under
+`supplements` in the table, applied without the network with
+`--supplement-only` (so no other label moved; diffed). The names are short
+(`1 शमूएल`, `लूका`, `होशे`), where Wikidata's often end in `की पुस्तक`.
+
+- **License, for Seth to decide.** The IRV is CC BY-SA 4.0 (© Bridge
+  Connectivity Solutions); the table had been CC0-only by choice. These
+  are 22 book names, attributed in THIRD-PARTY-NOTICES.md and the README.
+  eBible.org lists no public-domain Hindi Bible (the IRV, Biblica's HCV, and
+  the non-redistributable ERV). To undo: delete `SUPPLEMENTS["hi"]` and run
+  `--supplement-only`.
+- **A bug the new names exposed:** the Hindi reader drops digits when it
+  folds by sound, so `1 शमूएल` and `2 शमूएल` folded alike and every Samuel,
+  even one with no number, came back as 2 Samuel. A lone 1/2/3 now counts as
+  its word, and a tie between two books is no match.
+- The 90 Hindi takes, before and after: 46, 49 and 25 of 60, unchanged and no
+  new wrong ones. None of the 22 books is in the harness files, so the new
+  names are tested only on hand-written heard forms (13 tests).
+- **Not heard:** readings now say `एक शमूएल अध्याय तीन` (numbers.spell). A
+  Hindi reader may say `पहला शमूएल`; the reader would not match that.
+
+### The update feature's three open items (`49ab341`)
+
+**`Start Tertius.bat` rewritten while it runs: fixed.** Reproduced in a
+scratch folder first: a batch file whose running command rewrites it (40
+lines inserted at the top). The old layout resumed mid-line and **looped**,
+re-running the rewriting command, until killed. Now the launcher call and
+everything after it are one parenthesized block, read whole before it runs,
+ending in `call exit /b %%errorlevel%%` (a plain `exit /b` there returned 0
+for a launcher that exited 3; measured). Rerun: rewritten, nothing more ran.
+
+**A release that changes `requirements.txt`, run for real** - but against a
+local release, not GitHub: a zip copy of `49ab341` with only its
+`updates.py` URLs pointed at a local server, offering a `v0.2.1` that added
+`six>=1.16` and 30 lines to the .bat. Started with `Start Tertius.bat`,
+built its venv; `/api/update/apply` (the call the button makes, made with
+curl) installed it: 5 files changed, restart, "This version needs different
+dependencies", `six 1.17.0` installed, stamp equal to the new
+`requirements.txt`'s digest, `/api/version` 0.2.1. Then the server was
+killed: cmd finished on the rewritten .bat with nothing from it run, and no
+process was left. The dialog itself was not clicked; that was done
+2026-11-03 by Seth.
+
+- Seen, not explained: the server killed by hand did not print "Tertius
+  stopped unexpectedly". Not looked into; it was the same before.
+
+**Extras after an update: fixed, mocks only.** Speech writes
+`.venv/tertius-speech.sha256` (its import list plus `CHATTERBOX_DEPENDENCIES`)
+after installing. If an update changes that, the speech menu shows Download
+and prepare again with a note, a reading refuses to load and points there, and
+preparing reinstalls the dependencies but not torch or chatterbox (keeps the
+CPU/CUDA torch). No stamp means an older install, taken as current, as the
+launcher does. Translation needed no stamp: its lists are import names, so
+`libraries_missing()` (`find_spec`, no torch import) brings the prepare row back
+when one is absent. 5 new tests; not run in a browser or against a real pip.
+
 ## 2026-11-03 — Check for updates
 
 **Updates**, beside the version at the foot of the rail, asks GitHub for
@@ -205,15 +270,12 @@ the new one, and the page reloaded itself on 0.1.1 about five seconds later.
 `.venv` kept, requirements stamp written, staging folder gone.
 
 **Not verified:**
-- **A release that changes `requirements.txt`** has not been through the
-  button; 0.1.1 did not, so the reinstall-on-restart path is tested only
-  with mocks.
-- **`Start Tertius.bat` is rewritten under cmd.exe while it runs**, if a
-  release changes it. cmd reads a batch file by byte offset as it goes, so
-  a changed .bat may misbehave once, after the launcher returns. Unchanged
-  bytes are skipped, so it only matters for a release that edits the .bat.
-- Optional extras (translate, speak) are not reinstalled when an update
-  changes their dependencies; only `requirements.txt` is.
+- ~~A release that changes `requirements.txt`~~ - run for real 2026-11-03
+  (later), against a local release rather than GitHub; see the entry above.
+- ~~`Start Tertius.bat` rewritten under cmd.exe while it runs~~ - fixed and
+  run for real 2026-11-03 (later). It was worse than "misbehave once".
+- ~~Optional extras not reinstalled~~ - fixed 2026-11-03 (later), with mocks
+  only.
 - macOS and Linux, as ever. The executable bit is restored from the zip's
   mode bits; the test for that skips on Windows.
 
@@ -251,8 +313,8 @@ alone. Built from these same takes, so not yet tried on others.
 - At 15 s, auto-detect heard 10 of 30 takes as Urdu (16 at 30 s). Urdu
   script is not read for references, which is most of auto-detect's 28
   misses; that would be an Urdu reader.
-- The table names 44 of 66 books in Hindi; a reference to another is left
-  to madlad.
+- ~~The table names 44 of 66 books in Hindi.~~ All 66 since 2026-11-03
+  (later): the other 22 from the IRV. See that entry.
 - `listen_back.py` (the app's check of its own readings) still hears
   Hindi in 30 s windows; not measured.
 - Tests: `test_scripture_hindi.py` (23), 4 in `test_transcribe.py`.
