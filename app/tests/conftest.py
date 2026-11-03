@@ -103,3 +103,11 @@ def isolated_session_file(tmp_path, monkeypatch):
     app at a deleted directory.
     """
     monkeypatch.setenv("TERTIUS_SESSION_FILE", str(tmp_path / "session.json"))
+
+
+@pytest.fixture(autouse=True)
+def isolated_speech_stamp(tmp_path, monkeypatch):
+    """Keep the suite from stamping the real environment's speech libraries."""
+    monkeypatch.setattr(
+        "tertius.speech.libraries_stamp", lambda: tmp_path / "tertius-speech.sha256"
+    )

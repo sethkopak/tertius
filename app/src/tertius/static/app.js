@@ -296,17 +296,21 @@ async function refreshTargetLanguages() {
 
   const gb = (info.download_bytes / 1e9).toFixed(1);
   const sayable = (info.speakable || []).length;
-  note.textContent = info.ready
+  note.textContent = (info.ready
     ? `${info.languages.length} languages, ${sayable} of which can also be read aloud. ${info.license}.`
     : `No languages yet — this model has to be downloaded (about ${gb} GB) and `
       + `converted before it can say what it translates into. The first time, `
-      + `that also installs the translation libraries (about 150 MB). ${info.license}.`;
+      + `that also installs the translation libraries (about 150 MB). ${info.license}.`)
+    + (info.libraries_changed
+      ? ' This version of Tertius needs a translation library that is not installed yet — prepare again to add it.'
+      : '');
   $('translation-note-row').hidden = false;
   // The language menu is filled from the converted model's vocabulary, so
   // until the model exists there is nothing to choose. Preparing it is its own
   // step rather than something Begin does silently: this used to be a deadlock
   // — no language could be picked, and a job could not start without one.
-  $('translation-prepare-row').hidden = info.ready;
+  // Shown again after an update that added a library, which only preparing installs.
+  $('translation-prepare-row').hidden = info.ready && !info.libraries_changed;
   $('translation-sentences-row').hidden = false;
 }
 
@@ -479,9 +483,12 @@ async function refreshSpeechLanguages() {
     : ' Tags like [laugh] are removed on this model - only turbo and nano act on them.';
   noteEl.textContent = (info.ready
     ? `Ready. ${count} language${count === 1 ? '' : 's'}, ${info.license}.`
-    : `Not downloaded yet - about ${gb} GB, plus torch the first time. ${info.license}.`) + tags;
+    : `Not downloaded yet - about ${gb} GB, plus torch the first time. ${info.license}.`) + tags
+    + (info.libraries_changed
+      ? ' This version of Tertius needs different speech libraries - prepare again to update them.'
+      : '');
   $('speech-note-row').hidden = false;
-  $('speech-prepare-row').hidden = info.ready;
+  $('speech-prepare-row').hidden = info.ready && !info.libraries_changed;
 }
 
 $('opt-speak').onchange = () => {

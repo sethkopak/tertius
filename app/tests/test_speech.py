@@ -1244,3 +1244,63 @@ def test_a_model_without_a_chinese_tokenizer_is_ignored():
     from tertius.speech import _segment_chinese
 
     assert _segment_chinese(SimpleNamespace()) is False
+
+
+def _installed(monkeypatch):
+    """torch and chatterbox present, as far as `find_spec` can tell."""
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec",
+        lambda name, *a: object() if name in ("torch", "chatterbox") else real(name, *a),
+    )
+
+
+def test_an_install_from_before_the_stamp_counts_as_current(monkeypatch):
+    from tertius import speech
+
+    _installed(monkeypatch)
+    assert not speech.libraries_stamp().exists()
+    assert speech.libraries_changed() is False
+    assert speech.libraries_stamp().exists()
+
+
+def test_an_update_that_adds_a_dependency_is_noticed_and_installed(monkeypatch):
+    """torch and chatterbox stay importable when an update adds to
+    `CHATTERBOX_DEPENDENCIES`, so `missing_requirements` sees nothing; the
+    stamp is what tells. Preparing then installs the dependencies again -
+    not torch, whose CPU or CUDA build was chosen at first install."""
+    from tertius import speech
+
+    _installed(monkeypatch)
+    speech.stamp_libraries()
+    monkeypatch.setattr(
+        speech, "CHATTERBOX_DEPENDENCIES", (*speech.CHATTERBOX_DEPENDENCIES, "newdep")
+    )
+    assert speech.libraries_changed() is True
+
+    calls = _capture_pip(monkeypatch)
+    monkeypatch.setattr(speech, "missing_requirements", lambda: [])
+    speech.install_requirements()
+    flat = [" ".join(call) for call in calls]
+    assert any("newdep" in line for line in flat), flat
+    assert not any("torch" in call for call in calls), flat
+    assert not any("chatterbox-tts" in call for call in calls), flat
+    assert speech.libraries_changed() is False
+
+
+def test_loading_refuses_libraries_an_update_changed(monkeypatch):
+    from tertius import speech
+
+    monkeypatch.setattr(speech, "missing_requirements", lambda: [])
+    monkeypatch.setattr(speech, "libraries_changed", lambda: True)
+    with pytest.raises(speech.SpeechUnavailableError, match="Download and prepare"):
+        speech.Speaker("chatterbox-multilingual").load()
+
+
+def test_the_speech_menu_asks_for_preparing_again_after_such_an_update(api, monkeypatch):
+    monkeypatch.setattr("tertius.speech.is_downloaded", lambda name: True)
+    monkeypatch.setattr("tertius.speech.libraries_changed", lambda: True)
+    body = api.client.get("/api/speech/languages?model=chatterbox-multilingual").get_json()
+    assert body["ready"] is True and body["libraries_changed"] is True

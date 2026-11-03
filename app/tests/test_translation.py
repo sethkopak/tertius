@@ -1610,3 +1610,19 @@ def test_other_languages_still_get_the_model():
         "El texto otra vez."
     ]
     assert asked == ["The text again."]
+
+
+def test_languages_endpoint_asks_for_preparing_again_when_a_library_is_new(
+    api, monkeypatch, tmp_path
+):
+    """An update that adds to TRANSLATION_OPTIONAL leaves the model converted,
+    so the prepare row stayed hidden and the new library was never installed."""
+    monkeypatch.setattr("tertius.translate.is_converted", lambda name: True)
+    monkeypatch.setattr("tertius.translate.supported_target_languages", lambda name: ("en",))
+    monkeypatch.setattr("tertius.translate.libraries_missing", lambda: True)
+    body = api.client.get("/api/translation/languages?model=m2m100-418M").get_json()
+    assert body["ready"] is True and body["libraries_changed"] is True
+
+    monkeypatch.setattr("tertius.translate.libraries_missing", lambda: False)
+    body = api.client.get("/api/translation/languages?model=m2m100-418M").get_json()
+    assert body["libraries_changed"] is False

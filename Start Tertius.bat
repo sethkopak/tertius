@@ -25,11 +25,18 @@ if not defined PY (
     exit /b 1
 )
 
-%PY% "%LAUNCHER%" %*
-
-if errorlevel 1 (
-    echo.
-    echo   Tertius stopped unexpectedly. Scroll up for the reason.
-    echo.
-    pause
+REM One block, ending in exit, on purpose. cmd reads a batch file as it goes,
+REM by byte offset, and an update can rewrite this file while the launcher
+REM runs; read on afterwards, a changed file would be picked up mid-line. A
+REM block is read whole before it starts, so nothing below is read again.
+(
+    %PY% "%LAUNCHER%" %*
+    if errorlevel 1 (
+        echo.
+        echo   Tertius stopped unexpectedly. Scroll up for the reason.
+        echo.
+        pause
+    )
+    REM call, so the exit code is read after the launcher returns, not before.
+    call exit /b %%errorlevel%%
 )

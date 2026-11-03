@@ -258,6 +258,22 @@ def missing_optional() -> list[str]:
     return missing
 
 
+def libraries_missing() -> bool:
+    """Is a translation library absent that preparing would install?
+
+    `TRANSLATION_REQUIREMENTS` and `TRANSLATION_OPTIONAL` are import names and
+    pip names at once, so an update that adds one shows up here with no stamp
+    needed. The settings panel asks, so `find_spec` rather than an import:
+    importing torch takes seconds.
+    """
+    import importlib.util
+
+    return any(
+        importlib.util.find_spec(name) is None
+        for name in (*TRANSLATION_REQUIREMENTS, *TRANSLATION_OPTIONAL)
+    )
+
+
 def _in_a_virtualenv() -> bool:
     return sys.prefix != sys.base_prefix
 

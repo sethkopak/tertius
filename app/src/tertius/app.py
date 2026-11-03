@@ -216,7 +216,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         kept here by hand. `ready` is what the UI needs to say "this will
         download 1.9 GB first" instead of appearing to hang on Begin.
         """
-        from .translate import is_converted, supported_target_languages
+        from .translate import is_converted, libraries_missing, supported_target_languages
 
         name = request.args.get("model") or TranscriptionOptions().translation_model
         if name not in TRANSLATION_MODELS:
@@ -226,6 +226,12 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             ready = is_converted(name)
         except Exception:
             ready = False
+        # A model converted before an update that added a library: ready, but
+        # preparing again is what installs the new one.
+        try:
+            libraries_changed = ready and libraries_missing()
+        except Exception:
+            libraries_changed = False
         languages = list(supported_target_languages(name)) if ready else []
 
         # Which of these the voice model can also *say*, rather than a
@@ -251,6 +257,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             {
                 "model": name,
                 "ready": ready,
+                "libraries_changed": libraries_changed,
                 "languages": languages,
                 "speakable": spoken,
                 "speech_model": speech_model,
@@ -316,7 +323,7 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         downloaded: the list is a constant in the package rather than something
         read out of a converted vocabulary.
         """
-        from .speech import is_downloaded, speech_language_choices
+        from .speech import is_downloaded, libraries_changed, speech_language_choices
 
         name = request.args.get("model") or TranscriptionOptions().speech_model
         if name not in SPEECH_MODELS:
@@ -326,10 +333,17 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
             ready = is_downloaded(name)
         except Exception:
             ready = False
+        # Downloaded, but an update changed what speaking installs: preparing
+        # again is what brings the libraries up to date.
+        try:
+            changed = ready and libraries_changed()
+        except Exception:
+            changed = False
         return jsonify(
             {
                 "model": name,
                 "ready": ready,
+                "libraries_changed": changed,
                 "languages": list(speech_language_choices(name)),
                 "styles": list(SPEECH_STYLE_NAMES),
                 "aliases": dict(SPEECH_STYLE_ALIASES),

@@ -691,6 +691,48 @@ def missing_requirements() -> list[str]:
     return missing
 
 
+def _libraries_digest() -> str:
+    import hashlib
+
+    spec = [*sorted(SPEECH_REQUIREMENTS.items()), *CHATTERBOX_DEPENDENCIES]
+    return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()
+
+
+def libraries_stamp() -> Path:
+    """Which speech libraries this environment was last installed with."""
+    return Path(sys.prefix) / "tertius-speech.sha256"
+
+
+def stamp_libraries() -> None:
+    try:
+        libraries_stamp().write_text(_libraries_digest(), encoding="utf-8")
+    except OSError:
+        pass  # costs one redundant dependency install, nothing more
+
+
+def libraries_changed() -> bool:
+    """Has an update changed what speaking installs, since it was installed here?
+
+    `missing_requirements` only asks for torch and chatterbox, and an update
+    that adds to `CHATTERBOX_DEPENDENCIES` leaves both in place, so without
+    this the new dependency would never be installed and the reading would
+    fail at its import. Asked with `find_spec`, not an import: the settings
+    panel asks, and importing torch takes seconds. No stamp means an install
+    from before this check, taken as matching, as the launcher does for
+    `requirements.txt`.
+    """
+    import importlib.util
+
+    if any(importlib.util.find_spec(module) is None for module in SPEECH_REQUIREMENTS):
+        return False   # not installed at all; preparing installs the lot
+    try:
+        recorded = libraries_stamp().read_text(encoding="utf-8").strip()
+    except OSError:
+        stamp_libraries()
+        return False
+    return recorded != _libraries_digest()
+
+
 def _in_a_virtualenv() -> bool:
     return sys.prefix != sys.base_prefix
 
@@ -765,16 +807,18 @@ def install_requirements(on_line: Callable[[str], None] | None = None) -> list[s
     app is not a thing to do. There the command is printed instead.
     """
     missing = missing_requirements()
-    if not missing:
+    changed = not missing and libraries_changed()
+    if not missing and not changed:
         return []
+    wanted = missing or list(CHATTERBOX_DEPENDENCIES)
 
     if not _in_a_virtualenv():
         raise SpeechUnavailableError(
             "speaking needs "
-            + ", ".join(missing)
+            + ", ".join(wanted)
             + ", and Tertius is not running in a virtual environment, so it will "
             "not install them for you. Install them yourself with:\n\n"
-            "    pip install " + " ".join(missing) + "\n"
+            "    pip install " + " ".join(wanted) + "\n"
         )
 
     def run(arguments: list[str]) -> None:
@@ -806,12 +850,15 @@ def install_requirements(on_line: Callable[[str], None] | None = None) -> list[s
         index = TORCH_CUDA_INDEX if cuda_is_present() else TORCH_CPU_INDEX
         log.info("installing torch from %s", index)
         run(["--index-url", index, "torch"])
-    if "chatterbox-tts" in missing:
+    if "chatterbox-tts" in missing or changed:
         # Its own dependencies first, then the package with none of them. The
         # order matters only for the error message: a failure here names a
-        # dependency rather than chatterbox itself.
+        # dependency rather than chatterbox itself. After an update only the
+        # dependencies are asked for again; torch and chatterbox stay as they
+        # are, so the CPU or CUDA torch chosen at first install is kept.
         run(list(CHATTERBOX_DEPENDENCIES))
-        run(["--no-deps", "chatterbox-tts"])
+        if "chatterbox-tts" in missing:
+            run(["--no-deps", "chatterbox-tts"])
 
     rest = [
         name for name in missing if name not in ("torch", "chatterbox-tts")
@@ -824,7 +871,8 @@ def install_requirements(on_line: Callable[[str], None] | None = None) -> list[s
         raise SpeechUnavailableError(
             "installed, but still cannot import: " + ", ".join(still_missing)
         )
-    return missing
+    stamp_libraries()
+    return wanted
 
 
 def is_downloaded(model_key: str) -> bool:
@@ -1194,6 +1242,11 @@ class Speaker:
                 "speaking needs " + ", ".join(missing) + ", which is not "
                 "installed. Press Download and prepare, or install it yourself:\n\n"
                 "    pip install -e app[speak]\n"
+            )
+        if libraries_changed():
+            raise SpeechUnavailableError(
+                "this version of Tertius needs different speech libraries from "
+                "the ones installed. Press Download and prepare to update them."
             )
 
         self._refuse_unloadable_nano()
