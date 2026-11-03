@@ -198,7 +198,7 @@ process was left. The dialog itself was not clicked; that was done
 - Seen, not explained: the server killed by hand did not print "Tertius
   stopped unexpectedly". Not looked into; it was the same before.
 
-**Extras after an update: fixed, mocks only.** Speech writes
+**Extras after an update: fixed** (tested with mocks here; run in the browser in the entry below). Speech writes
 `.venv/tertius-speech.sha256` (its import list plus `CHATTERBOX_DEPENDENCIES`)
 after installing. If an update changes that, the speech menu shows Download
 and prepare again with a note, a reading refuses to load and points there, and
@@ -206,7 +206,38 @@ preparing reinstalls the dependencies but not torch or chatterbox (keeps the
 CPU/CUDA torch). No stamp means an older install, taken as current, as the
 launcher does. Translation needed no stamp: its lists are import names, so
 `libraries_missing()` (`find_spec`, no torch import) brings the prepare row back
-when one is absent. 5 new tests; not run in a browser or against a real pip.
+when one is absent. 5 new tests. Speech was then run in the browser against a real pip (below); translation was not.
+
+### The extras fix, run in the browser, and a reading through the page
+
+On `3b7e9d9`, at port 5099, driven in Chrome. This machine's speech install
+predates the stamp: the first `/api/speech/languages` wrote
+`.venv/tertius-speech.sha256` and said `libraries_changed: false`, and the
+page showed Ready with no prepare row - the older-install case working.
+
+Then an update was imitated by writing a wrong digest into the stamp, and
+the page reloaded:
+- The prepare row came back, with "This version of Tertius needs different
+  speech libraries - prepare again to update them."
+- Begin, with Read aloud on, stopped the run with that message; the file
+  stayed pending, not failed.
+- **Download and prepare, for real:** pip was given the 13
+  `CHATTERBOX_DEPENDENCIES` only, all already satisfied, done in about 3 s.
+  torch stayed `2.14.0+cu126`, chatterbox 0.1.7; the stamp was rewritten
+  to the right digest and the row hid itself.
+- Begin again: `read-aloud-test.txt` (source Text, chatterbox-multilingual,
+  English, the 10 s `V1_00` clip named in the Voice clip field, recorded in
+  the job's state as `speech_voice`) was read in 31.8 s: 3 chunks, 14.0 s,
+  `.wav` and `.srt`. Back through large-v3-turbo, all three sentences word
+  for word, in order. One chunk "ended abruptly" once and was retaken.
+
+Not tried: a dependency that is actually new, so pip installs something.
+
+**Seen, not fixed:**
+- With the libraries changed, the note under the voice model still starts
+  "Ready." before saying they need preparing.
+- While the model loads, already downloaded, the headline says "Fetching the
+  voice model ... starting the download".
 
 ## 2026-11-03 — Check for updates
 
@@ -277,8 +308,8 @@ the new one, and the page reloaded itself on 0.1.1 about five seconds later.
   (later), against a local release rather than GitHub; see the entry above.
 - ~~`Start Tertius.bat` rewritten under cmd.exe while it runs~~ - fixed and
   run for real 2026-11-03 (later). It was worse than "misbehave once".
-- ~~Optional extras not reinstalled~~ - fixed 2026-11-03 (later), with mocks
-  only.
+- ~~Optional extras not reinstalled~~ - fixed 2026-11-03 (later), and run
+  in the browser the same day with a faked stale stamp (see that entry).
 - macOS and Linux, as ever. The executable bit is restored from the zip's
   mode bits; the test for that skips on Windows.
 
@@ -4846,7 +4877,9 @@ did not.
    been tried; if that holds on a GPU it changes the feature's economics. For
    scale, the multilingual model on four CPU threads measured 0.116x
    (2026-09-29) - a 40-minute reading in about 5.7 hours.
-10. Read something through the **UI**, not just through `speak_text_file`.
+10. ~~Read something through the **UI**, not just through `speak_text_file`.~~
+   Done 2026-10-29 (multilingual, through the page) and again 2026-11-03
+   (later), on current code.
 11. Have a Hebrew reader (item 7) and the Russian speaker read the **scripture
    references** in a translation too, not just the prose: the prefixes and
    cases fitted to them on 2026-09-29 are rules, and nobody who speaks either
