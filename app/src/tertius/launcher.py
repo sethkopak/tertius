@@ -18,6 +18,7 @@ Run directly:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -35,6 +36,11 @@ REQUIRED_IMPORTS = ("flask", "faster_whisper")
 DEFAULT_PORT = 5005
 STATUS_TIMEOUT = 3.0
 SHUTDOWN_WAIT = 10.0
+
+# Must match tertius.updates. Repeated rather than imported: this file runs
+# as a plain script, before the package is importable.
+RESTART_EXIT_CODE = 75
+LAUNCHER_ENV = "TERTIUS_LAUNCHER"
 
 
 # --------------------------------------------------------------------------
@@ -129,9 +135,55 @@ def create_venv(venv: Path, say=print) -> bool:
     return venv_python(venv).is_file()
 
 
-def install_requirements(python: Path, say=print) -> bool:
+def requirements_digest() -> str | None:
+    """A fingerprint of `requirements.txt`, blind to line endings.
+
+    Line endings because a git checkout on Windows has CRLF and a release zip
+    has LF, and the same requirements must not look changed.
+    """
+    try:
+        data = (app_dir() / "requirements.txt").read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def requirements_stamp(venv: Path | None = None) -> Path:
+    """Which requirements this environment was last installed from."""
+    return (venv or venv_dir()) / "tertius-requirements.sha256"
+
+
+def stamp_requirements(venv: Path | None = None) -> None:
+    digest = requirements_digest()
+    if digest is None:
+        return
+    try:
+        requirements_stamp(venv).write_text(digest, encoding="utf-8")
+    except OSError:
+        pass  # costs one redundant `pip install` next launch, nothing more
+
+
+def requirements_changed(venv: Path | None = None) -> bool:
+    """Has `requirements.txt` changed since this environment was installed?
+
+    `has_requirements` only asks whether Flask and faster-whisper are there,
+    so an update that adds a dependency or moves a pin would otherwise start
+    on the old environment and fail at the first import. No stamp at all means
+    an environment from before this check, taken as matching what is on disk:
+    reinstalling everything once on every existing machine buys nothing.
+    """
+    stamp = requirements_stamp(venv)
+    try:
+        recorded = stamp.read_text(encoding="utf-8").strip()
+    except OSError:
+        stamp_requirements(venv)
+        return False
+    return recorded != requirements_digest()
+
+
+def install_requirements(python: Path, say=print, reason: str | None = None) -> bool:
     """Install `requirements.txt` into `python`'s environment."""
-    say("  Installing dependencies - a few hundred MB, one time only...")
+    say(reason or "  Installing dependencies - a few hundred MB, one time only...")
     say("")
     requirements = app_dir() / "requirements.txt"
     for command in (
@@ -159,6 +211,15 @@ def ensure_environment(say=print) -> Path | None:
         if not install_requirements(python, say):
             say("  Dependencies failed to install. Scroll up for the reason.")
             return None
+        stamp_requirements(venv)
+        say("")
+    elif requirements_changed(venv):
+        if not install_requirements(
+            python, say, "  This version needs different dependencies - updating them..."
+        ):
+            say("  Dependencies failed to install. Scroll up for the reason.")
+            return None
+        stamp_requirements(venv)
         say("")
     return python
 
@@ -499,13 +560,40 @@ def main(argv: list[str] | None = None, say=print) -> int:
     environment["PYTHONPATH"] = (
         f"{source}{os.pathsep}{existing}" if existing else str(source)
     )
+    environment[LAUNCHER_ENV] = "1"
 
     try:
-        return subprocess.run(command, env=environment).returncode
+        code = subprocess.run(command, env=environment).returncode
     except KeyboardInterrupt:
         return 0
     except OSError as exc:
         say(f"  ERROR: could not start Tertius: {exc}")
+        return 1
+    if code == RESTART_EXIT_CODE:
+        return relaunch(argv, say)
+    return code
+
+
+def relaunch(argv: list[str] | None, say=print) -> int:
+    """Start over on the code an update just installed.
+
+    A new process running the launcher *from disk*, not a loop in this one:
+    this process is still running the old launcher, and the new version's
+    may set things up differently. No browser - the tab that asked for the
+    update is still open and reloads itself once the new server answers.
+    """
+    say("")
+    say("  Tertius was updated. Starting the new version...")
+    args = list(sys.argv[1:] if argv is None else argv)
+    if "--no-browser" not in args:
+        args.append("--no-browser")
+    try:
+        return subprocess.run([sys.executable, str(Path(__file__).resolve()), *args]).returncode
+    except KeyboardInterrupt:
+        return 0
+    except OSError as exc:
+        say(f"  ERROR: could not start the new version: {exc}")
+        say("  Start Tertius again by hand.")
         return 1
 
 

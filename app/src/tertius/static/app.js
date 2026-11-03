@@ -1926,6 +1926,132 @@ $('btn-model-info-close').onclick = () => {
 };
 ['opt-model', 'opt-compute'].forEach((id) => { $(id).onchange = refreshModelAdvice; });
 
+// --- updates ---------------------------------------------------------------
+
+// Only ever on a click: Tertius does not look for updates on its own.
+let pendingUpdate = null;
+
+const sameVersion = (a, b) => {
+  const parts = (v) => String(v || '').replace(/^v/, '').split('.').concat(['0', '0', '0'])
+    .slice(0, 3).map(Number);
+  const [x, y] = [parts(a), parts(b)];
+  return x.every((n, i) => n === y[i]);
+};
+
+function updateMessage(text, isError) {
+  $('update-message').textContent = text;
+  $('update-message').classList.toggle('warn-text', Boolean(isError));
+}
+
+function finishUpdateDialog() {
+  $('btn-update-cancel').disabled = false;
+  $('btn-update-cancel').textContent = 'Close';
+}
+
+function renderChangelog(releases, more) {
+  const box = $('update-changelog');
+  box.innerHTML = releases.map((r) => {
+    const date = r.published ? new Date(r.published).toLocaleDateString() : '';
+    const notes = r.notes || 'No notes were published with this release.';
+    return `<section class="changelog-entry">
+        <div class="changelog-head"><strong>${esc(r.name)}</strong>
+          <span class="data">${esc(r.tag)}${date ? ` · ${esc(date)}` : ''}</span></div>
+        <div class="changelog-notes">${esc(notes)}</div>
+      </section>`;
+  }).join('') + (more
+    ? `<p class="panel-body dim">…and ${plural(more, 'earlier release', 'earlier releases')}.</p>`
+    : '');
+  box.hidden = !releases.length;
+}
+
+$('btn-check-updates').onclick = async () => {
+  pendingUpdate = null;
+  $('btn-update-apply').hidden = true;
+  $('btn-update-apply').disabled = false;
+  $('btn-update-cancel').textContent = 'Cancel';
+  $('btn-update-cancel').disabled = false;
+  $('update-changelog').hidden = true;
+  updateMessage('Asking GitHub…');
+  $('update-dialog').showModal();
+  let data;
+  try {
+    data = await api('/api/update/check');
+  } catch (err) {
+    updateMessage(err.message, true);
+    finishUpdateDialog();
+    return;
+  }
+  if (!data.update_available) {
+    updateMessage(data.any_published
+      ? `You have the newest release, v${data.current}.`
+      : `No releases have been published on GitHub yet. This is v${data.current}.`);
+    finishUpdateDialog();
+    return;
+  }
+  renderChangelog(data.releases, data.more_releases);
+  const headline = `${data.latest} is out - you have v${data.current}.`;
+  if (data.git_checkout) {
+    updateMessage(`${headline} This copy is a git checkout, so update it with git pull ` +
+      'rather than from here.');
+    finishUpdateDialog();
+    return;
+  }
+  pendingUpdate = data.latest;
+  $('btn-update-apply').hidden = false;
+  if (data.job_running) {
+    $('btn-update-apply').disabled = true;
+    updateMessage(`${headline} A job is running; let it finish, then update.`);
+  } else {
+    updateMessage(`${headline} What changed:`);
+  }
+};
+
+$('btn-update-cancel').onclick = () => $('update-dialog').close();
+
+// Escape would otherwise close the dialog mid-install and hide how it went.
+$('update-dialog').addEventListener('cancel', (event) => {
+  if ($('btn-update-cancel').disabled) event.preventDefault();
+});
+
+$('btn-update-apply').onclick = async () => {
+  const tag = pendingUpdate;
+  if (!tag) return;
+  $('btn-update-apply').disabled = true;
+  $('btn-update-cancel').disabled = true;
+  updateMessage(`Downloading and installing ${tag}…`);
+  let res;
+  try {
+    res = await jsonPost('/api/update/apply', { tag });
+  } catch (err) {
+    updateMessage(err.message, true);
+    finishUpdateDialog();
+    return;
+  }
+  $('btn-update-apply').hidden = true;
+  if (!res.restarting) {
+    updateMessage(`${tag} is installed. Close the Tertius window and start Tertius ` +
+      'again to use it.');
+    finishUpdateDialog();
+    return;
+  }
+  updateMessage(`${tag} is installed. Restarting - this page reloads itself when the ` +
+    'new version answers. If the update changed dependencies, that can take a few minutes.');
+  // The old server may answer once more before it exits, so wait for the new
+  // version number rather than for any answer at all.
+  const deadline = Date.now() + 10 * 60 * 1000;
+  const waitForNew = async () => {
+    try {
+      const now = await api('/api/version');
+      if (sameVersion(now.version, tag)) { location.reload(); return; }
+    } catch (_) { /* down while it restarts */ }
+    if (Date.now() < deadline) { setTimeout(waitForNew, 1000); return; }
+    updateMessage('The new version has not come up. The Tertius window says why; or ' +
+      'start Tertius again.', true);
+    finishUpdateDialog();
+  };
+  setTimeout(waitForNew, 1000);
+};
+
 paintSource();
 poll();
 // Tell the user up front if their default model suits this machine.

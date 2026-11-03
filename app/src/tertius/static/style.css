@@ -979,6 +979,67 @@ button, input, select { font: inherit; color: inherit; }
 
 .drop-veil.is-bad { border-color: var(--danger); }
 
+/* ── update dialog ────────────────────────────────────────────────────── */
+
+.rail-foot .linkish {
+  margin-left: 8px;
+  color: var(--text-3);
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.rail-foot .linkish:hover { color: var(--accent); }
+
+/* Depth from a rule and a dimmed page, like everything else - no shadow. */
+.dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  padding: 20px 24px;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.dialog::backdrop { background: rgba(0, 0, 0, .55); }
+
+.dialog-title {
+  margin: 0 0 4px;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.changelog {
+  margin-top: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.changelog-entry {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.changelog-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+}
+
+.changelog-head .data { color: var(--text-3); font-size: 11px; }
+
+/* Release notes are shown as written, Markdown and all, never as HTML. */
+.changelog-notes {
+  margin-top: 6px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ── responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 1180px) {

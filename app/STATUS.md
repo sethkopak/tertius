@@ -140,6 +140,62 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
 
+## 2026-11-03 — Check for updates
+
+**Updates**, beside the version at the foot of the rail, asks GitHub for
+published releases newer than `__version__` and opens a dialog with each one's
+notes, plus **Update** and **Cancel**. Update downloads the release's source
+zip, installs it over this copy and restarts; the page waits for the new
+version number on `/api/version` and reloads itself. `tertius/updates.py`.
+
+Decided with Seth: an update is a **GitHub Release**, not a commit on `main`,
+and it installs from the zip rather than `git pull`, so zip downloads work.
+
+- **No releases exist yet**, so today the dialog says none have been
+  published. To ship one: bump `__version__` in `app/src/tertius/__init__.py`
+  *and* `version` in `pyproject.toml` (a test holds them equal), push, then
+  publish a release tagged `vX.Y.Z` whose notes are written for users. A tag
+  that disagrees with the `__version__` inside it is refused; otherwise it
+  would install and offer itself again forever.
+- Only files in the release are written, and only those whose bytes differ.
+  `.git`, `.venv` and the staging folder are never written whatever a zip
+  holds; a path outside the install refuses the whole release. Everything is
+  unpacked and checked before anything moves, and a failure part-way puts
+  back every file already replaced.
+- **A git checkout is refused** (the dialog says use `git pull`). That
+  includes this machine, so the Update button cannot overwrite work here.
+- Restart: the server exits with 75, and the launcher runs the launcher *from
+  disk* again with `--no-browser`. The server only exits when it was started
+  by a launcher (`TERTIUS_LAUNCHER=1`); by hand, it installs and asks for a
+  restart.
+- The launcher now stamps `.venv/tertius-requirements.sha256` and reinstalls
+  `requirements.txt` when it changes, line endings ignored. Before this, an
+  update that added a dependency would have started on the old environment.
+- `/api/update/apply` refuses a foreign `Origin` and takes only JSON; the tag
+  is looked up in GitHub's list and the URL built in the source. SECURITY.md
+  now lists six network uses.
+
+**Verified:** 36 new tests. `check()` against the real GitHub API (no
+releases, git checkout detected). `apply()` with the real zipball of `main`
+into a scratch folder: 113 files written, `.venv` and `transcripts/`
+untouched, `Start Tertius.bat` still CRLF. The dialog, in Chrome against a
+preview server with two invented releases: renders, and a refused install
+shows its error and re-enables Close.
+
+**Not verified:**
+- **The restart has never run for real.** Exit 75 → launcher → new server
+  is tested with `subprocess.run` mocked; no real release has been installed
+  through the button. The first release after this one is that test, and
+  it needs a zip-downloaded copy, not this checkout.
+- **`Start Tertius.bat` is rewritten under cmd.exe while it runs**, if a
+  release changes it. cmd reads a batch file by byte offset as it goes, so
+  a changed .bat may misbehave once, after the launcher returns. Unchanged
+  bytes are skipped, so it only matters for a release that edits the .bat.
+- Optional extras (translate, speak) are not reinstalled when an update
+  changes their dependencies; only `requirements.txt` is.
+- macOS and Linux, as ever. The executable bit is restored from the zip's
+  mode bits; the test for that skips on Windows.
+
 ## 2026-11-01 — Why Whisper drops Hindi: 30-second windows (not in the app yet)
 
 The 30 Hindi takes (numbers spelled out, language set) were heard at 74% of

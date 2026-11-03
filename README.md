@@ -10,8 +10,10 @@ Runs entirely on your machine: no API calls, no cloud services, no telemetry. It
 only network access is fetching models the first time you use them — Whisper from
 Hugging Face (see [Models](#models)), and, if you translate, a translation model
 plus the libraries needed to convert it (see [Translating](#translating)); if you
-read aloud, a voice model, and for Hebrew a diacritization model as well. Once
-they are on disk you can run air-gapped. `SECURITY.md` lists every request.
+read aloud, a voice model, and for Hebrew a diacritization model as well. The one
+exception is **Updates**, which asks GitHub for new releases when you click it
+and at no other time (see [Updating](#updating)). Once the models are on disk
+you can run air-gapped. `SECURITY.md` lists every request.
 
 ## Launch
 
@@ -75,6 +77,31 @@ tertius --output-dir "D:/transcripts"
 ```
 
 Then open <http://127.0.0.1:5005>.
+
+### Updating
+
+Click **Updates**, beside the version number at the foot of the left column.
+Tertius asks GitHub whether a newer
+[release](https://github.com/sethkopak/tertius/releases) has been published
+and shows what changed in each one since yours. **Update** downloads the
+release, installs it over this copy and restarts; the page reloads itself
+when the new version answers. **Cancel** leaves everything as it was.
+
+- Only the program's own files are replaced. `app/.venv`, `transcripts/`, your
+  queues, settings and downloaded models are never touched.
+- If the new version needs different dependencies, the restart installs them
+  first, so it can take a few minutes. The console window shows the progress.
+- Not while a job is running: let the batch finish, then update.
+- **A git clone is not updated from here.** Overwriting files under git would
+  make every one look modified, and would destroy work in progress on a copy
+  someone is developing. Use `git pull`.
+- Started by hand with `python -m tertius` rather than a launcher, nothing is
+  waiting to start the new version, so Tertius installs it and asks you to
+  restart.
+- A file a later release deletes stays in your folder. Nothing uses it.
+
+Only published releases count as updates. Changes pushed to `main` between
+releases are not offered.
 
 ## Install
 

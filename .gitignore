@@ -25,3 +25,7 @@ app/design/*.zip
 /Tertius.lnk
 /desktop.ini
 /Tertius.desktop
+
+# Where an update is unpacked before it is moved into place. Removed when the
+# update finishes; only left behind by a process killed part-way.
+.update-staging/

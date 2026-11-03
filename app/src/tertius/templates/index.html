@@ -331,7 +331,10 @@
 
     <footer class="rail-foot">
       <span>faster-whisper</span>
-      <span>v{{ app_version }}</span>
+      <span>v{{ app_version }}
+        <button type="button" id="btn-check-updates" class="linkish"
+                title="Ask GitHub whether a newer Tertius has been released. Nothing is sent but the question.">Updates</button>
+      </span>
     </footer>
   </aside>
 
@@ -531,6 +534,18 @@
 </div>
 
 <div class="drop-veil" id="drop-veil" hidden aria-hidden="true"></div>
+
+<dialog class="dialog" id="update-dialog" aria-labelledby="update-title">
+  <h2 class="dialog-title" id="update-title">Check for updates</h2>
+  <p class="panel-body" id="update-message" role="status" aria-live="polite"></p>
+  <div class="changelog" id="update-changelog" hidden></div>
+  <div class="panel-actions">
+    <button type="button" id="btn-update-apply" class="btn" hidden
+            title="Download this release from GitHub, install it over this copy, and restart">Update</button>
+    <button type="button" id="btn-update-cancel" class="btn"
+            title="Leave this version as it is">Cancel</button>
+  </div>
+</dialog>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

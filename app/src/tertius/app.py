@@ -47,6 +47,9 @@ from .transcribe import is_model_cached
 
 log = logging.getLogger(__name__)
 
+# One install at a time, across every app this process makes.
+_update_lock = threading.Lock()
+
 
 def _error(message: str, code: int = 400):
     return jsonify({"error": message}), code
@@ -808,6 +811,70 @@ def create_app(output_dir: str | Path | None = None, manager: JobManager | None 
         except OSError as exc:
             return _error(f"could not open {target}: {exc}", 503)
         return jsonify({"opened": str(target)})
+
+    # ---------------------------------------------------------------- updates
+
+    @app.get("/api/version")
+    def api_version():
+        """What is running - polled by the page while the new version starts."""
+        return jsonify({"version": __version__})
+
+    @app.get("/api/update/check")
+    def api_update_check():
+        """Ask GitHub whether a newer release exists. Only ever on a click."""
+        from . import updates
+
+        try:
+            result = updates.check()
+        except updates.UpdateError as exc:
+            return _error(str(exc), 502)
+        result["job_running"] = manager.is_running()
+        return jsonify(result)
+
+    @app.post("/api/update/apply")
+    def api_update_apply():
+        """Install a release over this copy, then restart into it.
+
+        The one route that replaces code, so it is the one most worth aiming
+        at from a page the user merely visits. A browser always sends Origin
+        on a cross-site POST, and a JSON body cannot be sent cross-site at all
+        without a preflight this server never answers. The tag is checked
+        against GitHub's own list, so the worst a forged request could do is
+        install the newest real release.
+        """
+        from . import updates
+
+        origin = request.headers.get("Origin")
+        if origin is not None and origin.rstrip("/") != request.host_url.rstrip("/"):
+            return _error("updates can only be started from Tertius itself", 403)
+        body = request.get_json(silent=True)
+        tag = (body or {}).get("tag") if isinstance(body, dict) else None
+        if not isinstance(tag, str) or not tag.strip():
+            return _error("tag is required")
+        if manager.is_running():
+            return _error("a job is running - let it finish, then update", 409)
+        if not _update_lock.acquire(blocking=False):
+            return _error("an update is already being installed", 409)
+        try:
+            result = updates.apply(tag.strip())
+        except updates.UpdateError as exc:
+            return _error(str(exc), 502)
+        finally:
+            _update_lock.release()
+
+        # A job started while the download ran must not be killed by the
+        # restart. The new files are in place either way; the next start
+        # picks them up.
+        result["restarting"] = updates.can_restart() and not manager.is_running()
+        if result["restarting"]:
+            log.warning("restarting into %s", result["installed"])
+
+            def restart():
+                time.sleep(0.4)  # let this response reach the browser first
+                os._exit(updates.RESTART_EXIT_CODE)
+
+            threading.Thread(target=restart, daemon=True).start()
+        return jsonify(result)
 
     @app.get("/api/transcript")
     def api_transcript():

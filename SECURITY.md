@@ -32,7 +32,7 @@ code as your user can already do everything Tertius can do.
 - Code execution triggered by the *content* of a media or text file you
   transcribe.
 - Secrets or transcript content leaving the machine. Tertius makes network
-  requests on purpose in exactly five places, all of them fetches and none of
+  requests on purpose in exactly six places, all of them fetches and none of
   them carrying your content:
   1. downloading a Whisper model from Hugging Face the first time it is used;
   2. downloading a translation model from Hugging Face, if you translate;
@@ -42,12 +42,27 @@ code as your user can already do everything Tertius can do.
      `chatterbox-tts` and `torch` from PyPI and a PyTorch index, if you read
      text aloud;
   5. downloading the Hebrew diacritization model from Hugging Face, the first
-     time you read Hebrew aloud.
+     time you read Hebrew aloud;
+  6. asking `api.github.com` for this repository's releases, **only when you
+     click Updates** - never at startup or in the background - and, if you
+     then click Update, downloading that release's source zip from GitHub
+     (and, should its `requirements.txt` have changed, the launcher installing
+     it from PyPI on restart).
 
-  This list said "three" while listing four, for some weeks. It is five now
+  This list said "three" while listing four, for some weeks. It is six now
   and the count is worth checking against the list whenever either changes.
 
-  A sixth exists and is **not** run by the app: `app/tools/fetch_book_names.py`
+  **`/api/update/apply` replaces the program's own code**, which makes it the
+  endpoint most worth aiming at from a page you merely visit. What limits it:
+  it refuses a request whose `Origin` is not Tertius itself, it takes only a
+  JSON body (which a cross-site page cannot send without a preflight this
+  server never answers), the tag it is given is checked against GitHub's own
+  list of published releases, the download URL is built in the source rather
+  than taken from the request, and a release whose paths would land outside
+  the install, or whose code is not the version its tag claims, is refused
+  before any file is replaced. A way past any of that is in scope.
+
+  Another exists and is **not** run by the app: `app/tools/fetch_book_names.py`
   queries Wikidata to regenerate the bundled table of Bible book names. It is a
   build step, run deliberately by whoever is working on the code, and the table
   ships as a file. Transcribing, translating and reading aloud never contact
