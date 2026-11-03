@@ -1,3 +1,3 @@
 """Local, offline batch transcription with faster-whisper."""
 
-__version__ = "0.1.102"
+__version__ = "0.1.103"
