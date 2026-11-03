@@ -11,7 +11,8 @@ timestamping of supplied text, the designed UI, macOS/Linux support,
 translation, and reading text aloud.
 
 **997 tests: 995 pass, 2 skip** on Windows locally (2026-11-03; one skip is
-that Windows has no executable bit). The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
+that Windows has no executable bit). The 2026-11-03 (later) work
+(`6acf40f`..`b5779c8`) passed CI on all eight jobs. The 2026-10-28 fixes (`d65d5db`) passed CI on all eight jobs.
 The Hebrew work of 2026-10-26/27 (`0d8c778`..`604139a`) passed CI on all
 eight jobs.
 The 2026-10-24 same-sound spellings (`9b901fe`) passed CI on all eight jobs.
