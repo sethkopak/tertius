@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tertius"
-version = "0.1.103"
+version = "0.2.0"
 description = "Tertius - local, offline batch audio/video transcription with faster-whisper and a Flask queue UI"
 # No `readme`, and no `license = {file = ...}`: README.md and LICENSE both sit
 # at the top of the folder next to the launchers, where a user will actually
