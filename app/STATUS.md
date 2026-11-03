@@ -151,9 +151,9 @@ version number on `/api/version` and reloads itself. `tertius/updates.py`.
 Decided with Seth: an update is a **GitHub Release**, not a commit on `main`,
 and it installs from the zip rather than `git pull`, so zip downloads work.
 
-- **v0.1.1 is the only release.** `main` says 0.1.103, left over from the
-  test releases, so **the next real release must be newer than 0.1.103**
-  (0.2.0, say) or copies at 0.1.103 will never be offered it. To ship one: bump `__version__` in `app/src/tertius/__init__.py`
+- **Releases: v0.1.1, then v0.2.0** (`180f548`, git clones updating from
+  the button). 0.2.0 skipped past 0.1.103, the last test release, so copies
+  that updated during testing are offered it. To ship one: bump `__version__` in `app/src/tertius/__init__.py`
   *and* `version` in `pyproject.toml` (a test holds them equal), push, then
   publish a release tagged `vX.Y.Z` whose notes are written for users. A tag
   that disagrees with the `__version__` inside it is refused; otherwise it
