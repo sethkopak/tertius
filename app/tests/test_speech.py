@@ -222,7 +222,7 @@ def test_styles_are_deltas_from_each_model_s_own_baseline():
 
 
 def test_style_deltas_are_clamped_rather_than_going_negative():
-    # Turbo's baseline is 0.0, and `calm` is -0.15 from it.
+    # Turbo's baseline is 0.0, and `calm` is -0.25 from it.
     assert style_params(TURBO, "calm")["exaggeration"] == 0.0
     assert style_params(TURBO, "urgent")["cfg_weight"] == 0.0
 

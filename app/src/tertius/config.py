@@ -219,18 +219,20 @@ DEFAULT_SPEECH_MODEL = "chatterbox-multilingual"
 # aliases - people will write them - and saying so produces a warning rather
 # than silence.
 #
-# Values are deltas from the model's `baseline`, clamped at use. The numbers
-# are a considered starting point and nothing more: nobody has listened to any
-# of them yet. See STATUS.md.
+# Values are deltas from the model's `baseline`, clamped at use. The first set
+# moved `exaggeration` by 0.15 or less for six of the eight, and on a
+# side-by-side listen (2026-11-04) only `emphatic` (+0.2) and `urgent` (+0.3)
+# could be told from neutral. So every style now moves it by at least 0.15 and
+# most by 0.2 or more. Still tuned by one listener on one voice - see STATUS.md.
 SPEECH_STYLES = {
     "neutral": {"exaggeration": 0.0, "cfg_weight": 0.0, "temperature": 0.8},
-    "calm": {"exaggeration": -0.15, "cfg_weight": 0.0, "temperature": 0.6},
-    "gentle": {"exaggeration": -0.2, "cfg_weight": 0.05, "temperature": 0.65},
-    "solemn": {"exaggeration": -0.1, "cfg_weight": 0.1, "temperature": 0.6},
-    "warm": {"exaggeration": 0.0, "cfg_weight": -0.05, "temperature": 0.75},
-    "bright": {"exaggeration": 0.1, "cfg_weight": -0.05, "temperature": 0.85},
-    "emphatic": {"exaggeration": 0.2, "cfg_weight": -0.15, "temperature": 0.8},
-    "urgent": {"exaggeration": 0.3, "cfg_weight": -0.2, "temperature": 0.85},
+    "calm": {"exaggeration": -0.25, "cfg_weight": 0.0, "temperature": 0.6},
+    "gentle": {"exaggeration": -0.3, "cfg_weight": 0.05, "temperature": 0.65},
+    "solemn": {"exaggeration": -0.2, "cfg_weight": 0.1, "temperature": 0.6},
+    "warm": {"exaggeration": 0.15, "cfg_weight": -0.05, "temperature": 0.75},
+    "bright": {"exaggeration": 0.25, "cfg_weight": -0.05, "temperature": 0.85},
+    "emphatic": {"exaggeration": 0.4, "cfg_weight": -0.15, "temperature": 0.8},
+    "urgent": {"exaggeration": 0.6, "cfg_weight": -0.2, "temperature": 0.85},
 }
 
 SPEECH_STYLE_NAMES = tuple(SPEECH_STYLES)

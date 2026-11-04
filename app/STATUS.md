@@ -909,6 +909,25 @@ them apart except for emphatic and urgent." Those two are the largest
 exaggeration deltas (+0.2, +0.3); every other style moves exaggeration by
 0.15 or less. One take per style, so take-to-take variation is mixed in.
 
+**Deltas widened, same day**, at Seth's go-ahead. `exaggeration` deltas, old
+to new: calm -0.15 to -0.25, gentle -0.2 to -0.3, solemn -0.1 to -0.2, warm 0
+to +0.15, bright +0.1 to +0.25, emphatic +0.2 to +0.4, urgent +0.3 to +0.6.
+`cfg_weight` and `temperature` unchanged. On the multilingual model that puts
+exaggeration between 0.2 (gentle) and 1.1 (urgent), inside the 0-1.5 clamp.
+On Turbo and Nano (baseline 0.0) the three negative styles still clamp to
+0.0, as before. 997 passed, 2 skipped. Calm and gentle are only 0.05 apart;
+if they still sound alike, merge them rather than push further.
+
+`style-test-2.wav` and `.srt`, beside the first: the same sentence, **two
+takes per style**, the second introduced by `[neutral] Again.` so the
+chunker cannot pack both takes into one generation. 32 chunks, 132.2 s.
+The first run (136.4 s) was discarded: its "Again." before calm's second
+take was a 4.2 s chunk that ended in babble Whisper heard as "Zantkurud
+Emesh", the one take the app had flagged as still abrupt after 3 attempts.
+The re-run also flagged one chunk as still abrupt after 3 attempts, but
+Whisper heard all 32 lines back in order with nothing extra. Not yet heard by
+Seth.
+
 Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
 broken; a real CUDA error still does; Nano refuses without blaming the GPU;
 dropped text in Text mode is queued). **815 passed, 1 skipped** (Windows has
@@ -3979,8 +3998,9 @@ before it worked.
   call proves.
 - **Nobody has listened to anything.** The style numbers were chosen by reading
   the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
-  (2026-11-04: all eight now heard side by side - see "Style test" below. Only
-  `[emphatic]` and `[urgent]` are distinguishable from neutral.)
+  (2026-11-04: all eight heard side by side - see "Style test" below. Only
+  `[emphatic]` and `[urgent]` were distinguishable from neutral, so the
+  deltas were widened; the widened set is generated but not yet heard.)
 - The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
   reads as a breath rather than an edit.
 - Whether a voice model fits on a GPU beside Whisper is unknown. Same as
