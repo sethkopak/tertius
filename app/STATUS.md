@@ -899,6 +899,16 @@ chrome-extension:// URL of different extension", even in fresh tabs. The
 requests were the page's own: `/api/upload` with `kind=text`, then
 `/api/job/retry-failed` and `/api/job/start` with the page's options.
 
+**Style test, 2026-11-04.** One sentence ("Behold, I bring you good tidings
+of great joy, which shall be to all people.") read once in each of the eight
+styles, each announced first in `[neutral]`. chatterbox-multilingual on CUDA,
+the same 10 s `V1_00.mp3` clip, 16 chunks, 70.6 s: `style-test.wav` and
+`.srt` in Seth's "Transcript test files". Whisper heard all 16 lines back in
+order. **Heard by Seth:** "the differences are very subtle and I can't tell
+them apart except for emphatic and urgent." Those two are the largest
+exaggeration deltas (+0.2, +0.3); every other style moves exaggeration by
+0.15 or less. One take per style, so take-to-take variation is mixed in.
+
 Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
 broken; a real CUDA error still does; Nano refuses without blaming the GPU;
 dropped text in Text mode is queued). **815 passed, 1 skipped** (Windows has
@@ -3969,8 +3979,8 @@ before it worked.
   call proves.
 - **Nobody has listened to anything.** The style numbers were chosen by reading
   the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
-  (2026-11-04: Seth heard no brightness from `[bright]` in two test readings;
-  the other styles are still unheard.)
+  (2026-11-04: all eight now heard side by side - see "Style test" below. Only
+  `[emphatic]` and `[urgent]` are distinguishable from neutral.)
 - The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
   reads as a breath rather than an edit.
 - Whether a voice model fits on a GPU beside Whisper is unknown. Same as
