@@ -56,7 +56,9 @@ from .config import (
     SPEECH_MODELS,
     SPEECH_PARAGRAPH_GAP_SECONDS,
     SPEECH_STYLE_ALIASES,
+    SPEECH_STYLE_NAMES,
     SPEECH_STYLES,
+    SPEECH_STYLES_MERGED,
 )
 
 log = logging.getLogger(__name__)
@@ -219,6 +221,12 @@ def resolve_style(name: str | None) -> tuple[str, str | None]:
     if key in SPEECH_STYLES:
         return key, None
     alias = SPEECH_STYLE_ALIASES.get(key)
+    if key in SPEECH_STYLES_MERGED:
+        return alias, (
+            f"[{key}] was read as [{alias}]. Tertius has three styles - "
+            f"{', '.join(SPEECH_STYLE_NAMES)} - because the other five could "
+            f"not be heard apart from them."
+        )
     if alias is not None:
         return alias, (
             f"[{key}] was read as [{alias}]. Chatterbox has no emotion "

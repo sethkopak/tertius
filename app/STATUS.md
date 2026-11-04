@@ -1,6 +1,6 @@
 # Tertius — status
 
-Last updated: 2026-11-03
+Last updated: 2026-11-04
 
 ## Where it stands
 
@@ -107,7 +107,8 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   on the Hub. Writes a `.wav`, and an `.srt` whose timings are *measured*
   against the audio as it is generated rather than estimated — the one place
   here where a cue cannot have drifted from its recording. Style tags in the
-  text (`[solemn]`, `[emphatic]`, …) change delivery from where they appear.
+  text (`[calm]`, `[neutral]`, `[emphatic]`) change delivery from where they
+  appear - only subtly; see 2026-11-04.
   Run for real on the GPU at **0.51x realtime** — slower than realtime, and
   about forty times dearer per minute than transcribing. **A Russian speaker
   has listened to a Russian reading and says it sounds good**; Chinese has been
@@ -140,6 +141,44 @@ merged and pushed 2026-09-02 (`cb52c5e`, `4fb26e7`).
   that the words change - `תהילים 66:8,9` was read as a non-word followed by
   "sixty-eight". The model class is vendored from a CC-BY-4.0 source rather
   than loaded with `trust_remote_code`, and runs on the CPU.
+
+## 2026-11-04 — Speech styles cut from eight to three
+
+Seth's call, after two listening tests (written up under the 2026-10-29 run):
+the original eight were indistinguishable except `[emphatic]` and `[urgent]`,
+and with every delta widened all eight were "subtly different, but it's still
+hard to tell". The options put to him were to cut back to what can be heard,
+push the numbers further (likely more garbled takes, with no promise of a
+clear difference) or give each style its own voice clip. He chose the first.
+
+- **`SPEECH_STYLES` is now `neutral`, `calm`, `emphatic`.** `calm` takes the
+  widened `gentle`'s numbers with `calm`'s temperature (exaggeration -0.3, cfg
+  +0.05, temperature 0.6); `emphatic` takes the widened `urgent`'s (+0.6,
+  -0.2, 0.85). So the multilingual model runs from 0.2 to 1.1 exaggeration.
+  These two exact settings have not been heard on their own: what Seth heard
+  was `gentle` with temperature 0.65 and `urgent` with these numbers.
+- **The five retired names still work.** `SPEECH_STYLES_MERGED`: `gentle` and
+  `solemn` read as `calm`, `warm` as `neutral`, `bright` and `urgent` as
+  `emphatic`. Each warns "[x] was read as [y]. Tertius has three styles..." -
+  a separate message from the emotion-word one, because these were never
+  emotions. Accepted as `speech_style` too. The emotion aliases now point at
+  the three.
+- The Default style menu is built from `SPEECH_STYLE_NAMES`, so it shows the
+  three with no template change. Options are in memory for one process and
+  pass through `TranscriptionOptions`, so a stale `urgent` cannot reach the
+  menu.
+- README's style section rewritten to say three, list the merges, and say
+  that a clearly different reading needs a different voice clip.
+- Tests: the old names in `test_speech.py` and `test_pipeline.py` moved to
+  the three, plus a parametrized test that each retired name strips, resolves,
+  warns with the merge message rather than the emotion one, and resolves in
+  the options. 1002 passed, 2 skipped.
+- **Turbo and Nano:** their baseline exaggeration is 0.0, so `calm` clamps to
+  0.0 there and differs from `neutral` only in cfg (also clamped to 0.0) and
+  temperature. That was true of all three quieter styles before; not new, and
+  not heard.
+- Tertius Online's vendored `app/` is behind this and the delta change. Online
+  has no Read aloud, so nothing there uses it.
 
 ## 2026-11-03 (later) — Hindi book names complete; the update feature's open items
 
@@ -4001,8 +4040,8 @@ before it worked.
 - **Nobody has listened to anything.** The style numbers were chosen by reading
   the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
   (2026-11-04: all eight heard side by side - see "Style test" below. Only
-  `[emphatic]` and `[urgent]` were distinguishable from neutral, so the
-  deltas were widened; the widened set is still only subtly different.)
+  `[emphatic]` and `[urgent]` were distinguishable from neutral; widened,
+  still only subtly different; so cut to three - see 2026-11-04.)
 - The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
   reads as a breath rather than an edit.
 - Whether a voice model fits on a GPU beside Whisper is unknown. Same as

@@ -617,12 +617,12 @@ def test_an_out_of_memory_failure_says_what_to_do_about_it(api, tmp_path):
 def test_style_tags_survive_being_translated(tmp_path):
     """Parse first, then translate, or the tag goes to the model as a word.
 
-    Translating the file and parsing afterwards cannot work: `[solemn]` would
+    Translating the file and parsing afterwards cannot work: `[calm]` would
     have been rendered into the target language, or dropped.
     """
     source = tmp_path / "script.txt"
     source.write_text(
-        "[solemn] In the beginning.\n\n[bright] And there was light.",
+        "[calm] In the beginning.\n\n[emphatic] And there was light.",
         encoding="utf-8",
     )
     speaker = FakeSpeaker()
@@ -638,9 +638,9 @@ def test_style_tags_survive_being_translated(tmp_path):
     )
 
     styles = [style for _t, style, _l, _v in speaker.calls]
-    assert styles == ["solemn", "bright"]
+    assert styles == ["calm", "emphatic"]
     # The tag itself never reached the translator.
-    assert all("[solemn]" not in text for batch in translator.batches for text in batch)
+    assert all("[calm]" not in text for batch in translator.batches for text in batch)
     # And what was spoken is the translated text.
     assert all("[es]" in text for text, _s, _l, _v in speaker.calls)
 

@@ -219,38 +219,51 @@ DEFAULT_SPEECH_MODEL = "chatterbox-multilingual"
 # aliases - people will write them - and saying so produces a warning rather
 # than silence.
 #
-# Values are deltas from the model's `baseline`, clamped at use. The first set
-# moved `exaggeration` by 0.15 or less for six of the eight, and on a
-# side-by-side listen (2026-11-04) only `emphatic` (+0.2) and `urgent` (+0.3)
-# could be told from neutral. So every style now moves it by at least 0.15 and
-# most by 0.2 or more. Still tuned by one listener on one voice - see STATUS.md.
+# Values are deltas from the model's `baseline`, clamped at use.
+#
+# **Three, because three is what can be heard.** There were eight. On a
+# side-by-side listen (2026-11-04) only the two strongest could be told from
+# neutral; with every delta widened, all eight were still "subtly different,
+# but hard to tell". Eight names a listener cannot tell apart are eight
+# promises, so the vocabulary is the levels that come through: quieter, plain
+# and stronger. `calm` and `emphatic` carry the most extreme numbers the
+# widened set used (the old `gentle` and `urgent`). Pushing further is where
+# garbled takes start, and real expressive range comes from the clip instead.
+# Tuned by one listener on one voice - see STATUS.md.
 SPEECH_STYLES = {
     "neutral": {"exaggeration": 0.0, "cfg_weight": 0.0, "temperature": 0.8},
-    "calm": {"exaggeration": -0.25, "cfg_weight": 0.0, "temperature": 0.6},
-    "gentle": {"exaggeration": -0.3, "cfg_weight": 0.05, "temperature": 0.65},
-    "solemn": {"exaggeration": -0.2, "cfg_weight": 0.1, "temperature": 0.6},
-    "warm": {"exaggeration": 0.15, "cfg_weight": -0.05, "temperature": 0.75},
-    "bright": {"exaggeration": 0.25, "cfg_weight": -0.05, "temperature": 0.85},
-    "emphatic": {"exaggeration": 0.4, "cfg_weight": -0.15, "temperature": 0.8},
-    "urgent": {"exaggeration": 0.6, "cfg_weight": -0.2, "temperature": 0.85},
+    "calm": {"exaggeration": -0.3, "cfg_weight": 0.05, "temperature": 0.6},
+    "emphatic": {"exaggeration": 0.6, "cfg_weight": -0.2, "temperature": 0.85},
 }
 
 SPEECH_STYLE_NAMES = tuple(SPEECH_STYLES)
 DEFAULT_SPEECH_STYLE = "neutral"
 
+# The five retired style names, still accepted so that a script written for
+# them keeps working, and warned about so the writer knows two tags that look
+# different will now sound the same.
+SPEECH_STYLES_MERGED = {
+    "gentle": "calm",
+    "solemn": "calm",
+    "warm": "neutral",
+    "bright": "emphatic",
+    "urgent": "emphatic",
+}
+
 # Emotion words map to the nearest delivery. Accepted, because a person writing
 # a script reaches for these before they reach for "emphatic" - and warned
 # about, because the result will be that intensity and not that emotion.
 SPEECH_STYLE_ALIASES = {
-    "excited": "bright",
-    "happy": "bright",
-    "angry": "urgent",
-    "shouting": "urgent",
-    "sad": "solemn",
-    "serious": "solemn",
-    "quiet": "gentle",
-    "soft": "gentle",
-    "whisper": "gentle",
+    **SPEECH_STYLES_MERGED,
+    "excited": "emphatic",
+    "happy": "emphatic",
+    "angry": "emphatic",
+    "shouting": "emphatic",
+    "sad": "calm",
+    "serious": "calm",
+    "quiet": "calm",
+    "soft": "calm",
+    "whisper": "calm",
     "slow": "calm",
     "normal": "neutral",
     "plain": "neutral",

@@ -48,22 +48,22 @@ def script_for(text, model=MTL, style="neutral"):
 
 
 def test_a_style_tag_is_stripped_and_changes_what_follows():
-    script = script_for("[solemn] In the beginning was the Word.")
+    script = script_for("[calm] In the beginning was the Word.")
     assert len(script.chunks) == 1
     assert script.chunks[0].text == "In the beginning was the Word."
-    assert script.chunks[0].style == "solemn"
-    assert "[solemn]" not in script.chunks[0].text
+    assert script.chunks[0].style == "calm"
+    assert "[calm]" not in script.chunks[0].text
 
 
 def test_a_style_tag_holds_until_the_next_one():
     script = script_for(
-        "[solemn] First one. Second one.\n\n"
-        "Still solemn, in a new paragraph.\n\n"
-        "[bright] Now bright."
+        "[calm] First one. Second one.\n\n"
+        "Still calm, in a new paragraph.\n\n"
+        "[emphatic] Now emphatic."
     )
     styles = [chunk.style for chunk in script.chunks]
-    assert styles[:-1] == ["solemn"] * (len(styles) - 1)
-    assert styles[-1] == "bright"
+    assert styles[:-1] == ["calm"] * (len(styles) - 1)
+    assert styles[-1] == "emphatic"
 
 
 def test_the_default_style_applies_until_a_tag_says_otherwise():
@@ -89,14 +89,35 @@ def test_a_misspelt_style_tag_is_visible_rather_than_spoken_silently():
 
 def test_an_emotion_word_is_accepted_as_an_alias_and_warned_about():
     script = script_for("[angry] Get out.")
-    assert script.chunks[0].style == "urgent"
+    assert script.chunks[0].style == "emphatic"
     assert any("no emotion conditioning" in w for w in script.warnings)
 
 
 def test_resolve_style_reports_the_alias_it_used():
     style, warning = resolve_style("excited")
-    assert style == "bright"
-    assert warning and "[excited]" in warning and "[bright]" in warning
+    assert style == "emphatic"
+    assert warning and "[excited]" in warning and "[emphatic]" in warning
+
+
+@pytest.mark.parametrize(
+    "retired, now",
+    [
+        ("gentle", "calm"),
+        ("solemn", "calm"),
+        ("warm", "neutral"),
+        ("bright", "emphatic"),
+        ("urgent", "emphatic"),
+    ],
+)
+def test_a_retired_style_name_still_works_and_says_what_it_became(retired, now):
+    """Scripts written for the eight styles must not start reading tags aloud."""
+    script = script_for(f"[{retired}] A line.")
+    assert script.chunks[0].text == "A line."
+    assert script.chunks[0].style == now
+    # Not the emotion warning: these were never emotions.
+    assert any(f"[{retired}] was read as [{now}]" in w for w in script.warnings)
+    assert not any("no emotion conditioning" in w for w in script.warnings)
+    assert TranscriptionOptions(speech_style=retired).speech_style == now
 
     style, warning = resolve_style("calm")
     assert (style, warning) == ("calm", None)
@@ -139,7 +160,7 @@ def test_a_bracketed_phrase_with_spaces_is_never_a_tag():
 
 
 def test_a_blank_line_marks_a_paragraph_and_a_style_change_does_not():
-    script = script_for("First para.\n\nSecond para. [bright] Same para.")
+    script = script_for("First para.\n\nSecond para. [emphatic] Same para.")
     starts = [chunk.starts_paragraph for chunk in script.chunks]
     assert starts[0] is True
     assert starts[1] is True
@@ -224,14 +245,14 @@ def test_styles_are_deltas_from_each_model_s_own_baseline():
 def test_style_deltas_are_clamped_rather_than_going_negative():
     # Turbo's baseline is 0.0, and `calm` is -0.25 from it.
     assert style_params(TURBO, "calm")["exaggeration"] == 0.0
-    assert style_params(TURBO, "urgent")["cfg_weight"] == 0.0
+    assert style_params(TURBO, "emphatic")["cfg_weight"] == 0.0
 
 
 def test_pushing_a_style_raises_intensity_and_loosens_the_guidance():
     calm = style_params(MTL, "calm")
-    urgent = style_params(MTL, "urgent")
-    assert urgent["exaggeration"] > calm["exaggeration"]
-    assert urgent["cfg_weight"] < calm["cfg_weight"]
+    emphatic = style_params(MTL, "emphatic")
+    assert emphatic["exaggeration"] > calm["exaggeration"]
+    assert emphatic["cfg_weight"] < calm["cfg_weight"]
 
 
 def test_an_unknown_style_is_rejected():
@@ -361,7 +382,7 @@ def test_chunks_inside_a_paragraph_get_the_shorter_gap(tmp_path):
 
 def test_the_json_says_it_is_a_reading_not_a_transcript(tmp_path):
     source = tmp_path / "talk.txt"
-    source.write_text("[solemn] Words that nobody said.", encoding="utf-8")
+    source.write_text("[calm] Words that nobody said.", encoding="utf-8")
     out = tmp_path / "out"
 
     speak_text_file(source, out, FakeSpeaker(), "en", formats=("json",))
@@ -369,7 +390,7 @@ def test_the_json_says_it_is_a_reading_not_a_transcript(tmp_path):
 
     assert payload["kind"] == "speech"
     assert payload["speech"]["model"] == MTL
-    assert payload["speech"]["styles_used"] == ["solemn"]
+    assert payload["speech"]["styles_used"] == ["calm"]
     assert payload["speech"]["watermarked"] is True
 
 
@@ -387,16 +408,16 @@ def test_the_json_records_what_was_silently_changed(tmp_path):
 
 def test_the_style_reaches_the_model_as_numbers(tmp_path):
     source = tmp_path / "talk.txt"
-    source.write_text("[calm] Soft line.\n\n[urgent] Loud line.", encoding="utf-8")
+    source.write_text("[calm] Soft line.\n\n[emphatic] Loud line.", encoding="utf-8")
     speaker = FakeSpeaker()
 
     speak_text_file(source, tmp_path / "out", speaker, "en")
 
-    calm, urgent = speaker.params
-    assert urgent["exaggeration"] > calm["exaggeration"]
+    calm, emphatic = speaker.params
+    assert emphatic["exaggeration"] > calm["exaggeration"]
     assert [style for _text, style, _lang, _voice in speaker.calls] == [
         "calm",
-        "urgent",
+        "emphatic",
     ]
 
 
@@ -466,7 +487,7 @@ def test_progress_is_reported_per_chunk(tmp_path):
 
 def test_an_emotion_word_is_resolved_when_the_options_are_built():
     """Stored options must say what will actually happen, not what was typed."""
-    assert TranscriptionOptions(speech_style="excited").speech_style == "bright"
+    assert TranscriptionOptions(speech_style="excited").speech_style == "emphatic"
 
 
 def test_an_unknown_style_is_rejected_up_front():
@@ -762,26 +783,26 @@ def test_preparing_a_speech_model_reports_when_it_is_ready(api):
 def test_preview_shows_what_the_tags_did_without_generating_anything(api):
     response = api.client.post(
         "/api/speech/preview",
-        json={"text": "[solemn] One. [laugh] Two.", "model": MTL},
+        json={"text": "[calm] One. [laugh] Two.", "model": MTL},
     )
     body = response.get_json()
 
     assert response.status_code == 200
     assert body["count"] == 1
-    assert body["styles_used"] == ["solemn"]
+    assert body["styles_used"] == ["calm"]
     assert "[laugh]" not in body["chunks"][0]["text"]
     assert any("was removed" in w for w in body["warnings"])
 
 
 def test_preview_reads_a_file_when_given_a_path(api, tmp_path):
     source = tmp_path / "script.txt"
-    source.write_text("[urgent] Now.", encoding="utf-8")
+    source.write_text("[emphatic] Now.", encoding="utf-8")
 
     body = api.client.post(
         "/api/speech/preview", json={"path": str(source)}
     ).get_json()
 
-    assert body["chunks"][0]["style"] == "urgent"
+    assert body["chunks"][0]["style"] == "emphatic"
     assert body["chunks"][0]["params"]["exaggeration"] > 0.5
 
 
@@ -799,7 +820,7 @@ def test_the_language_menu_is_the_model_s_own_list(api):
     body = api.client.get(f"/api/speech/languages?model={MTL}").get_json()
     assert "en" in body["languages"] and "es" in body["languages"]
     assert "neutral" in body["styles"] and "emphatic" in body["styles"]
-    assert body["aliases"]["angry"] == "urgent"
+    assert body["aliases"]["angry"] == "emphatic"
     # The multilingual model does not act on them, so it is offered none.
     assert body["paralinguistic"] == []
 

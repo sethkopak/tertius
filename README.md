@@ -832,24 +832,29 @@ Write a tag on its own in square brackets and everything after it is delivered
 that way, until the next tag:
 
 ```
-[solemn]
+[calm]
 In the beginning was the Word, and the Word was with God.
 
-[warm] And the light shineth in darkness.
+[neutral] And the light shineth in darkness.
 
 [emphatic] And the darkness comprehended it not.
 ```
 
-The eight styles are `neutral`, `calm`, `gentle`, `solemn`, `warm`, `bright`,
-`emphatic`, `urgent`. A tag holds across paragraph breaks and is only ended by
+There are three styles: `calm` (quieter), `neutral` and `emphatic` (stronger).
+There used to be eight, but side by side only these levels could be heard
+apart, so the other five names still work and are read as the nearest one:
+`gentle` and `solemn` as `calm`, `warm` as `neutral`, `bright` and `urgent` as
+`emphatic`. Tertius tells you when it does that. Even these three differ less
+than the names suggest; for a clearly different reading, use a different
+voice clip. A tag holds across paragraph breaks and is only ended by
 another tag; the **Default style** menu sets what applies before the first one.
 
 **These are delivery, not emotion, and the distinction is not pedantry.**
 Chatterbox has no emotion conditioning — there is no input to it that means
 "sad". What it exposes is how hard a line is pushed and how loosely it holds to
 the reference clip. So the tags are named for what they actually do. Emotion
-words are accepted as aliases (`[angry]` → `urgent`, `[excited]` → `bright`,
-`[sad]` → `solemn`, and a few more) and Tertius tells you it did that, because
+words are accepted as aliases (`[angry]` and `[excited]` → `emphatic`,
+`[sad]` → `calm`, and a few more) and Tertius tells you it did that, because
 somebody who writes `[angry]` and gets firm-but-calm speech back would fairly
 conclude the feature was broken rather than that the tag was a lie. If you want
 anger, sample a clip of someone angry.
