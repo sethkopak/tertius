@@ -925,8 +925,10 @@ The first run (136.4 s) was discarded: its "Again." before calm's second
 take was a 4.2 s chunk that ended in babble Whisper heard as "Zantkurud
 Emesh", the one take the app had flagged as still abrupt after 3 attempts.
 The re-run also flagged one chunk as still abrupt after 3 attempts, but
-Whisper heard all 32 lines back in order with nothing extra. Not yet heard by
-Seth.
+Whisper heard all 32 lines back in order with nothing extra. **Heard by
+Seth:** "They are subtly different, but it's still hard to tell." So widening
+moved them, but not to where a listener can name them; urgent is already at
+1.1 exaggeration on the multilingual model.
 
 Tests: 5 new (Turbo loads with no `nano`; a TypeError does not mark CUDA
 broken; a real CUDA error still does; Nano refuses without blaming the GPU;
@@ -4000,7 +4002,7 @@ before it worked.
   the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
   (2026-11-04: all eight heard side by side - see "Style test" below. Only
   `[emphatic]` and `[urgent]` were distinguishable from neutral, so the
-  deltas were widened; the widened set is generated but not yet heard.)
+  deltas were widened; the widened set is still only subtly different.)
 - The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
   reads as a breath rather than an edit.
 - Whether a voice model fits on a GPU beside Whisper is unknown. Same as
