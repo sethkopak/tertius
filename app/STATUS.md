@@ -865,9 +865,9 @@ and a three-paragraph `.txt` with `[solemn]` and `[bright]` added through
 model loaded on CUDA. Done in 67 s: `read-aloud-test.en.spoken.wav`, 3
 chunks, 13.7 s. All three chunks ended on Chatterbox's own "forcing EOS"
 guard, so the WAV was put back through large-v3-turbo: all four sentences
-came back word for word, in order, nothing cut. **Not checked:** whether it
-sounds like the voice clip, or whether the two styles sound different -
-nobody has listened.
+came back word for word, in order, nothing cut. **Heard by Seth,
+2026-11-04:** it sounds like the reader of `V1_00.mp3`. He "didn't notice it
+being brighter in the last sentence": `[bright]` is not audible here.
 
 **Turbo, downloaded and run the same day - and broken with a voice clip.**
 Downloaded through Prepare: 10 files, 4.044 GB on disk, which is the
@@ -888,9 +888,10 @@ Re-run after the fix with the same clip, and `[solemn]`, `[bright]` and
 `[laugh]` in the script. Done in 52 s: `turbo-test.en.spoken.wav` (17.9 s)
 and `.srt`, 3 chunks. One chunk "ended abruptly" on all three attempts, and
 the least bad take was kept. Whisper heard every sentence back in order. The
-`.srt`'s three cues are the three paragraphs. **Not checked:** whether
-`[laugh]` produced a laugh. There is a 0.7 s gap where it sits, and Whisper
-does not write laughs down, so it needs a listen.
+`.srt`'s three cues are the three paragraphs. **Heard by Seth,
+2026-11-04:** "I heard the laugh. I also heard nothing during the gap." So
+Turbo does act on `[laugh]`, and the voice sounds like the reader of
+`V1_00.mp3`. Where the laugh falls against the 0.7 s gap was not stated.
 
 This run was driven through the app's own API, not the page. The browser
 extension started refusing script access to the page with "Cannot access a
@@ -3968,6 +3969,8 @@ before it worked.
   call proves.
 - **Nobody has listened to anything.** The style numbers were chosen by reading
   the publisher's guidance. Whether `[emphatic]` sounds emphatic is unknown.
+  (2026-11-04: Seth heard no brightness from `[bright]` in two test readings;
+  the other styles are still unheard.)
 - The gaps between chunks (0.28 s, 0.7 s at a paragraph) are a guess at what
   reads as a breath rather than an edit.
 - Whether a voice model fits on a GPU beside Whisper is unknown. Same as
